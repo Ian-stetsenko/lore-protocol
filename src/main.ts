@@ -90,12 +90,19 @@ async function main(): Promise<void> {
   const commitInputResolver = new CommitInputResolver(prompt);
 
   // 4. Formatter factory (reads --format/--json from program options at call time)
+  // Memoized: the formatter is created once on first call and reused thereafter.
+  let cachedFormatter: IOutputFormatter | null = null;
   const getFormatter = (): IOutputFormatter => {
+    if (cachedFormatter !== null) {
+      return cachedFormatter;
+    }
     const opts = program.opts();
     if (opts.json || opts.format === 'json') {
-      return new JsonFormatter();
+      cachedFormatter = new JsonFormatter();
+    } else {
+      cachedFormatter = new TextFormatter({ color: opts.color !== false && (process.stdout.isTTY ?? false) });
     }
-    return new TextFormatter({ color: opts.color !== false && (process.stdout.isTTY ?? false) });
+    return cachedFormatter;
   };
 
   // 5. Register all commands with their dependencies

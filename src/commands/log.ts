@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import type { AtomRepository } from '../services/atom-repository.js';
+import type { SupersessionResolver } from '../services/supersession-resolver.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
-import type { SupersessionStatus } from '../types/domain.js';
 import type { QueryResult, QueryMeta } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 
@@ -19,6 +19,7 @@ export function registerLogCommand(
   program: Command,
   deps: {
     atomRepository: AtomRepository;
+    supersessionResolver: SupersessionResolver;
     getFormatter: () => IOutputFormatter;
   },
 ): void {
@@ -28,12 +29,10 @@ export function registerLogCommand(
     .option('--limit <n>', 'Limit number of results', parseInt)
     .option('--since <ref>', 'Only consider commits since ref/date')
     .allowUnknownOption(true)
-    .action(async (options: LogCommandOptions, cmd) => {
-      const { atomRepository, getFormatter } = deps;
+    .action(async (options: LogCommandOptions) => {
+      const { atomRepository, supersessionResolver, getFormatter } = deps;
 
       // Capture any path args that appear after `--` in the parent program
-      // Commander stores them in program.args after the command name
-      const rawArgs = cmd.parent?.args ?? [];
       const dashDashIndex = process.argv.indexOf('--');
       const pathArgs: string[] = [];
       if (dashDashIndex !== -1) {
@@ -60,14 +59,8 @@ export function registerLogCommand(
         );
       }
 
-      // Build supersession map (no filtering for log -- show everything)
-      const supersessionMap = new Map<string, SupersessionStatus>();
-      for (const atom of atoms) {
-        supersessionMap.set(atom.loreId, {
-          superseded: false,
-          supersededBy: null,
-        });
-      }
+      // Build supersession map (show everything, including superseded atoms)
+      const supersessionMap = supersessionResolver.resolve(atoms);
 
       const meta: QueryMeta = {
         totalAtoms: atoms.length,

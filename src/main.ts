@@ -132,6 +132,7 @@ async function main(): Promise<void> {
 
   registerLogCommand(program, {
     atomRepository,
+    supersessionResolver,
     getFormatter,
   });
 

@@ -1,5 +1,12 @@
 # Lore CLI
 
+[![npm version](https://img.shields.io/npm/v/lore-cli?color=cb0000)](https://www.npmjs.com/package/lore-cli)
+[![license](https://img.shields.io/github/license/Ian-stetsenko/lore-protocol)](LICENSE)
+[![node](https://img.shields.io/node/v/lore-cli)](package.json)
+[![tests](https://img.shields.io/badge/tests-284%20passing-brightgreen)](#)
+[![arXiv](https://img.shields.io/badge/arXiv-2603.15566-b31b1b)](https://arxiv.org/abs/2603.15566)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+
 **Structured decision context in git commits -- queryable by humans and AI agents.**
 
 Implements the [Lore protocol](https://arxiv.org/abs/2603.15566) from the paper *"Lore: Repurposing Git Commit Messages as a Structured Knowledge Protocol for AI Coding Agents"* by Ivan Stetsenko.

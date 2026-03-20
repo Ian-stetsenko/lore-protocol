@@ -80,8 +80,11 @@ export function registerCommitCommand(
         input = await readInputFromFile(options.file);
       } else if (options.intent) {
         input = buildInputFromFlags(options);
+      } else if (process.stdin.isTTY) {
+        // TTY with no flags: default to interactive mode instead of hanging on stdin
+        input = await collectInteractiveInput(prompt);
       } else {
-        // Default: read JSON from stdin
+        // Piped input: read JSON from stdin
         input = await readInputFromStdin();
       }
 

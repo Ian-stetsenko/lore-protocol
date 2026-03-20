@@ -21,7 +21,8 @@ export function registerTraceCommand(
   program
     .command('trace <lore-id>')
     .description('Follow decision chain from a starting atom')
-    .action(async (loreId: string) => {
+    .option('--max-depth <n>', 'Maximum BFS traversal depth', parseInt, 10)
+    .action(async (loreId: string, options: { maxDepth: number }) => {
       const { atomRepository, getFormatter } = deps;
 
       if (!LORE_ID_PATTERN.test(loreId)) {
@@ -48,6 +49,8 @@ export function registerTraceCommand(
         { atom: rootAtom, depth: 0 },
       ];
 
+      const maxDepth = options.maxDepth;
+
       while (queue.length > 0) {
         const entry = queue.shift()!;
         const currentAtom = entry.atom;
@@ -71,7 +74,8 @@ export function registerTraceCommand(
             });
 
             // Continue BFS if this is a new atom we haven't visited
-            if (!visited.has(refId) && targetAtom) {
+            // and we haven't exceeded the depth limit
+            if (!visited.has(refId) && targetAtom && entry.depth + 1 <= maxDepth) {
               visited.add(refId);
               queue.push({ atom: targetAtom, depth: entry.depth + 1 });
             }

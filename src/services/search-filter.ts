@@ -65,8 +65,8 @@ export class SearchFilter {
 
     // Array trailers: check length > 0
     if ((ARRAY_TRAILER_KEYS as readonly string[]).includes(trailerKey)) {
-      const values = atom.trailers[trailerKey as keyof typeof atom.trailers];
-      return Array.isArray(values) ? values.length > 0 : (values as readonly string[]).length > 0;
+      const values = atom.trailers[trailerKey as (typeof ARRAY_TRAILER_KEYS)[number]];
+      return values.length > 0;
     }
 
     // Enum trailers: check not null

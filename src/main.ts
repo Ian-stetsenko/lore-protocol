@@ -17,6 +17,7 @@ import { SquashMerger } from './services/squash-merger.js';
 import { Validator } from './services/validator.js';
 import { TerminalPrompt } from './services/terminal-prompt.js';
 import { CommitInputResolver } from './services/commit-input-resolver.js';
+import { SearchFilter } from './services/search-filter.js';
 
 import { TextFormatter } from './formatters/text-formatter.js';
 import { JsonFormatter } from './formatters/json-formatter.js';
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
   const commitBuilder = new CommitBuilder(trailerParser, loreIdGenerator, config);
   const squashMerger = new SquashMerger(loreIdGenerator);
   const validator = new Validator(trailerParser, atomRepository, config);
+  const searchFilter = new SearchFilter();
   const prompt = new TerminalPrompt();
   const commitInputResolver = new CommitInputResolver(prompt);
 
@@ -127,6 +129,7 @@ async function main(): Promise<void> {
   registerSearchCommand(program, {
     atomRepository,
     supersessionResolver,
+    searchFilter,
     getFormatter,
   });
 

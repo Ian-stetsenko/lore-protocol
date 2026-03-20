@@ -180,7 +180,8 @@ export class AtomRepository {
    * Parse an array of RawCommit into LoreAtom[], filtering out non-Lore commits.
    */
   private async parseRawCommits(rawCommits: readonly RawCommit[]): Promise<LoreAtom[]> {
-    const atoms: LoreAtom[] = [];
+    // First pass: filter to Lore commits and parse trailers (synchronous work)
+    const loreCommits: Array<{ raw: RawCommit; trailers: LoreTrailers }> = [];
 
     for (const raw of rawCommits) {
       if (!this.trailerParser.containsLoreTrailers(raw.trailers)) {
@@ -192,21 +193,25 @@ export class AtomRepository {
         continue;
       }
 
-      const filesChanged = await this.gitClient.getFilesChanged(raw.hash);
-
-      const atom: LoreAtom = {
-        loreId: trailers['Lore-id'],
-        commitHash: raw.hash,
-        date: new Date(raw.date),
-        author: raw.author,
-        intent: raw.subject,
-        body: this.stripTrailersFromBody(raw.body, raw.trailers),
-        trailers,
-        filesChanged,
-      };
-
-      atoms.push(atom);
+      loreCommits.push({ raw, trailers });
     }
+
+    // Second pass: batch all getFilesChanged calls in parallel
+    const filesChangedResults = await Promise.all(
+      loreCommits.map(({ raw }) => this.gitClient.getFilesChanged(raw.hash)),
+    );
+
+    // Build atoms from paired data
+    const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) => ({
+      loreId: trailers['Lore-id'],
+      commitHash: raw.hash,
+      date: new Date(raw.date),
+      author: raw.author,
+      intent: raw.subject,
+      body: this.stripTrailersFromBody(raw.body, raw.trailers),
+      trailers,
+      filesChanged: filesChangedResults[index],
+    }));
 
     return atoms;
   }

@@ -35,33 +35,26 @@
 
 The codebase follows a strict layered architecture with dependencies flowing top-down:
 
-```
-                        +-----------+
-                        |  main.ts  |  <-- Composition Root
-                        +-----------+
-                             |
-                    (creates and wires)
-                             |
-              +--------------+--------------+
-              |                             |
-       +------v------+             +-------v--------+
-       |   Commands   |             |   Formatters   |
-       |  (commands/) |             | (formatters/)  |
-       +--------------+             +----------------+
-              |                             |
-              |   (depends on)              |   (implements)
-              |                             |
-       +------v------+             +-------v--------+
-       |   Services   |             |   Interfaces   |
-       |  (services/) |             | (interfaces/)  |
-       +--------------+             +----------------+
-              |                             |
-              |   (depends on)              |   (depends on)
-              |                             |
-       +------v------+             +-------v--------+
-       |    Types     |             |   Utilities    |
-       |   (types/)   |             |    (util/)     |
-       +--------------+             +----------------+
+```mermaid
+graph TD
+    MAIN["main.ts<br/><i>Composition Root</i>"]
+    MAIN -->|creates and wires| CMD["Commands<br/><code>commands/</code>"]
+    MAIN -->|creates and wires| FMT["Formatters<br/><code>formatters/</code>"]
+    CMD -->|depends on| SVC["Services<br/><code>services/</code>"]
+    FMT -->|implements| INT["Interfaces<br/><code>interfaces/</code>"]
+    CMD -->|depends on| INT
+    SVC -->|depends on| INT
+    SVC -->|depends on| TYP["Types<br/><code>types/</code>"]
+    INT -->|depends on| TYP
+    SVC -->|depends on| UTL["Utilities<br/><code>util/</code>"]
+
+    style MAIN fill:#4a9eff,color:#fff,stroke:#2d7ad6
+    style CMD fill:#6c5ce7,color:#fff,stroke:#5a4bd1
+    style FMT fill:#6c5ce7,color:#fff,stroke:#5a4bd1
+    style SVC fill:#00b894,color:#fff,stroke:#00a381
+    style INT fill:#fdcb6e,color:#333,stroke:#e0b05e
+    style TYP fill:#636e72,color:#fff,stroke:#4a5458
+    style UTL fill:#636e72,color:#fff,stroke:#4a5458
 ```
 
 **Layer responsibilities:**
@@ -536,40 +529,111 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 
 ## 5. Service Dependency Graph
 
+```mermaid
+graph LR
+    subgraph Composition Root
+        MAIN[main.ts]
+    end
+
+    subgraph Leaf Services
+        GC[GitClient]
+        TP[TrailerParser]
+        PR[PathResolver]
+        LIG[LoreIdGenerator]
+        CL[ConfigLoader]
+        TMP[TerminalPrompt]
+    end
+
+    subgraph Composed Services
+        AR[AtomRepository]
+        SR[SupersessionResolver]
+        SD[StalenessDetector]
+        CB[CommitBuilder]
+        SM[SquashMerger]
+        VL[Validator]
+    end
+
+    MAIN --> GC
+    MAIN --> TP
+    MAIN --> PR
+    MAIN --> LIG
+    MAIN --> CL
+    MAIN --> TMP
+
+    MAIN --> AR
+    MAIN --> SR
+    MAIN --> SD
+    MAIN --> CB
+    MAIN --> SM
+    MAIN --> VL
+
+    AR -.->|IGitClient| GC
+    AR -.-> TP
+    SD -.->|IGitClient| GC
+    CB -.-> TP
+    CB -.-> LIG
+    SM -.-> LIG
+    VL -.-> TP
+    VL -.-> AR
+
+    style MAIN fill:#4a9eff,color:#fff
+    style GC fill:#00b894,color:#fff
+    style TP fill:#00b894,color:#fff
+    style PR fill:#00b894,color:#fff
+    style LIG fill:#00b894,color:#fff
+    style CL fill:#00b894,color:#fff
+    style TMP fill:#00b894,color:#fff
+    style AR fill:#6c5ce7,color:#fff
+    style SR fill:#6c5ce7,color:#fff
+    style SD fill:#6c5ce7,color:#fff
+    style CB fill:#6c5ce7,color:#fff
+    style SM fill:#6c5ce7,color:#fff
+    style VL fill:#6c5ce7,color:#fff
 ```
-main.ts (Composition Root)
-  |
-  |-- creates -> GitClient : IGitClient
-  |-- creates -> TrailerParser
-  |-- creates -> PathResolver
-  |-- creates -> LoreIdGenerator
-  |-- creates -> ConfigLoader : IConfigLoader
-  |-- creates -> TerminalPrompt : IPrompt
-  |
-  |-- creates -> AtomRepository(IGitClient, TrailerParser, customTrailerKeys: string[])
-  |-- creates -> SupersessionResolver()
-  |-- creates -> StalenessDetector(IGitClient, LoreConfig)
-  |-- creates -> CommitBuilder(TrailerParser, LoreIdGenerator, LoreConfig)
-  |-- creates -> SquashMerger(LoreIdGenerator)
-  |-- creates -> Validator(TrailerParser, AtomRepository, LoreConfig)
-  |
-  |-- registers commands with dependency bags:
-  |
-  |   init         <- { getFormatter }
-  |   context      <- { AtomRepository, SupersessionResolver, PathResolver, getFormatter, LoreConfig }
-  |   constraints  <- (same as context)
-  |   rejected     <- (same as context)
-  |   directives   <- (same as context)
-  |   tested       <- (same as context)
-  |   why          <- { TrailerParser, IGitClient, PathResolver, getFormatter, customTrailerKeys }
-  |   search       <- { AtomRepository, SupersessionResolver, getFormatter }
-  |   log          <- { AtomRepository, getFormatter }
-  |   stale        <- { AtomRepository, SupersessionResolver, StalenessDetector, PathResolver, getFormatter }
-  |   trace        <- { AtomRepository, getFormatter }
-  |   commit       <- { CommitBuilder, IGitClient, getFormatter, IPrompt }
-  |   validate     <- { Validator, IGitClient, getFormatter }
-  |   squash       <- { AtomRepository, SquashMerger, getFormatter }
-  |   doctor       <- { AtomRepository, IConfigLoader, getFormatter }
+
+#### Command Dependency Map
+
+```mermaid
+graph LR
+    subgraph Path-Scoped Queries
+        CTX[context]
+        CON[constraints]
+        REJ[rejected]
+        DIR[directives]
+        TST[tested]
+    end
+
+    subgraph Other Commands
+        WHY[why]
+        SRCH[search]
+        LOG[log]
+        STL[stale]
+        TRC[trace]
+        CMT[commit]
+        VAL[validate]
+        SQH[squash]
+        DOC[doctor]
+        INIT[init]
+    end
+
+    CTX & CON & REJ & DIR & TST -->|shared pipeline| PQ[path-query.ts]
+    PQ --> AR[AtomRepository]
+    PQ --> SR[SupersessionResolver]
+    PQ --> PR[PathResolver]
+
+    WHY --> GC[IGitClient]
+    WHY --> TP[TrailerParser]
+    SRCH --> AR
+    SRCH --> SR
+    LOG --> AR
+    STL --> AR & SR & SD[StalenessDetector]
+    TRC --> AR
+    CMT --> CB[CommitBuilder] & GC
+    VAL --> VL[Validator] & GC
+    SQH --> AR & SM[SquashMerger]
+    DOC --> AR & CL[IConfigLoader]
+
+    style PQ fill:#fdcb6e,color:#333
 ```
 
 ### Constructor Injection Signatures
@@ -620,106 +684,85 @@ JsonFormatter()                  // no dependencies
 
 ### Query Flow: `lore constraints src/auth.ts`
 
-```
-User runs: lore constraints src/auth.ts
+```mermaid
+sequenceDiagram
+    actor User
+    participant CLI as Commander (main.ts)
+    participant CMD as constraints.ts
+    participant PQ as path-query.ts
+    participant PR as PathResolver
+    participant AR as AtomRepository
+    participant GC as GitClient
+    participant TP as TrailerParser
+    participant SR as SupersessionResolver
+    participant FMT as Formatter
 
-1. main.ts parses CLI -> Commander routes to constraints command
+    User->>CLI: lore constraints src/auth.ts
+    CLI->>CMD: route to constraints action
+    CMD->>PQ: executePathQuery("src/auth.ts", opts, deps, "constraints", ["Constraint"])
 
-2. constraints.ts action calls:
-   executePathQuery("src/auth.ts", options, deps, "constraints", ["Constraint"])
+    PQ->>PR: parseTarget("src/auth.ts")
+    PR-->>PQ: QueryTarget { type: "file" }
+    PQ->>PR: toGitLogArgs(target)
+    PR-->>PQ: ["--", "src/auth.ts"]
 
-3. path-query.ts: PathResolver.parseTarget("src/auth.ts")
-   -> QueryTarget { type: "file", filePath: "src/auth.ts", ... }
+    PQ->>AR: findByTarget(gitLogArgs, options)
+    AR->>GC: log(["--", "src/auth.ts"])
+    GC-->>AR: RawCommit[]
+    loop Each RawCommit
+        AR->>TP: containsLoreTrailers(trailers)
+        AR->>TP: parse(trailers, customKeys)
+        AR->>GC: getFilesChanged(hash)
+    end
+    AR-->>PQ: LoreAtom[]
 
-4. path-query.ts: PathResolver.toGitLogArgs(target)
-   -> ["--", "src/auth.ts"]
+    PQ->>SR: resolve(atoms)
+    SR-->>PQ: Map‹loreId, SupersessionStatus›
+    PQ->>SR: filterActive(atoms, map)
+    SR-->>PQ: active LoreAtom[]
 
-5. path-query.ts: AtomRepository.findByTarget(["--", "src/auth.ts"], queryOptions)
-   a. AtomRepository.buildLogArgs(options)
-      -> [] (no filters in this case)
-   b. GitClient.log(["--", "src/auth.ts"])
-      -> execFile("git", ["log", "--format=<custom>", "--", "src/auth.ts"])
-      -> parses stdout into RawCommit[]
-   c. AtomRepository.parseRawCommits(rawCommits)
-      For each RawCommit:
-        - TrailerParser.containsLoreTrailers(raw.trailers) -> filter non-Lore commits
-        - TrailerParser.parse(raw.trailers, customKeys) -> LoreTrailers
-        - GitClient.getFilesChanged(raw.hash) -> string[]
-        - Construct LoreAtom
-   d. AtomRepository.applyFilters(atoms, options)
-      -> apply author, since, limit filters
-   -> LoreAtom[]
-
-6. path-query.ts: SupersessionResolver.resolve(atoms)
-   -> Iterates atoms, builds supersession map from Supersedes trailers
-   -> Resolves transitive chains via BFS
-   -> Map<string, SupersessionStatus>
-
-7. path-query.ts: SupersessionResolver.filterActive(atoms, supersessionMap)
-   -> Removes superseded atoms from display list
-
-8. path-query.ts: Constructs QueryResult and FormattableQueryResult
-   -> Sets visibleTrailers: ["Constraint"]
-
-9. path-query.ts: getFormatter() -> TextFormatter or JsonFormatter
-
-10. TextFormatter.formatQueryResult(data):
-    For each atom:
-      - Format header (lore-id, date, author)
-      - Format body (if present)
-      - formatTrailers() filters to only show "Constraint" trailer lines
-    Appends summary line
-
-11. console.log(output) -> terminal
+    PQ->>FMT: formatQueryResult({ visibleTrailers: ["Constraint"] })
+    FMT-->>PQ: formatted string
+    PQ->>User: console.log(output)
 ```
 
 ### Commit Flow: Agent pipes JSON to `lore commit`
 
-```
-Agent runs: echo '{"intent":"fix(auth): ...","trailers":{...}}' | lore commit
+```mermaid
+sequenceDiagram
+    actor Agent
+    participant CLI as Commander (main.ts)
+    participant CMD as commit.ts
+    participant GC as GitClient
+    participant CB as CommitBuilder
+    participant LIG as LoreIdGenerator
+    participant TP as TrailerParser
+    participant FMT as Formatter
 
-1. main.ts parses CLI -> Commander routes to commit command
+    Agent->>CLI: echo '{"intent":"..."}' | lore commit
+    CLI->>CMD: route to commit action
 
-2. commit.ts action:
-   a. GitClient.hasStagedChanges()
-      -> execFile("git", ["diff", "--cached", "--name-only"])
-      -> true (has staged changes) or throws NoStagedChangesError
+    CMD->>GC: hasStagedChanges()
+    GC-->>CMD: true
 
-   b. No --interactive, no --file, no --intent flag
-      -> readInputFromStdin()
-      -> process.stdin collects chunks until EOF
-      -> Buffer.concat(chunks).toString("utf-8")
-      -> parseJsonInput(content):
-         - JSON.parse(content)
-         - Extract intent (string)
-         - Extract body (string | undefined)
-         - Extract trailers (parse each field with type guards)
-      -> CommitInput
+    Note over CMD: Read JSON from stdin
+    CMD->>CMD: parseJsonInput(stdin) → CommitInput
 
-   c. CommitBuilder.validate(input):
-      - Check intent length (max 72)
-      - Check intent not empty
-      - Validate enum values (Confidence, Scope-risk, Reversibility)
-      - Validate Lore-id format in reference trailers (Supersedes, Depends-on, Related)
-      - Check required trailers from config
-      - Check total line count
-      -> ValidationIssue[]
-      If errors: throw ValidationError
+    CMD->>CB: validate(input)
+    CB-->>CMD: ValidationIssue[] (empty = ok)
 
-   d. CommitBuilder.build(input):
-      - LoreIdGenerator.generate() -> "a7f3b2c1" (8-char random hex)
-      - buildTrailers(loreId, input) -> LoreTrailers object
-      - TrailerParser.serialize(trailers) -> "Lore-id: a7f3b2c1\nConstraint: ..."
-      - Assemble: intent + blank + body + blank + serialized trailers
-      -> complete commit message string
+    CMD->>CB: build(input)
+    CB->>LIG: generate()
+    LIG-->>CB: "a7f3b2c1"
+    CB->>TP: serialize(trailers)
+    TP-->>CB: trailer block string
+    CB-->>CMD: complete commit message
 
-   e. GitClient.commit(message):
-      -> execFile("git", ["commit", "-m", message])
-      -> Parse output for commit hash
-      -> CommitResult { hash, success: true }
+    CMD->>GC: commit(message)
+    GC-->>CMD: CommitResult { hash, success }
 
-   f. getFormatter().formatSuccess("Commit created: abc1234", { hash: "abc1234" })
-      -> console.log(output)
+    CMD->>FMT: formatSuccess("Commit created: a7f3b2c1")
+    FMT-->>Agent: output to console
 ```
 
 ---
@@ -741,9 +784,21 @@ CONFIG_FILENAME = 'config.toml'  (src/util/constants.ts, line 48)
 
 Multiple config files are merged with **child overrides parent**. The files are ordered nearest-to-farthest, reversed, and merged parent-first so the nearest config wins.
 
-```
-/repo/.lore/config.toml         <- parent (applied first)
-/repo/packages/api/.lore/config.toml  <- child (overrides parent)
+```mermaid
+graph BT
+    DEF["DEFAULT_CONFIG<br/><i>(hardcoded defaults)</i>"]
+    ROOT["/repo/.lore/config.toml<br/><i>parent</i>"]
+    CHILD["/repo/packages/api/.lore/config.toml<br/><i>child</i>"]
+    FINAL["Final LoreConfig"]
+
+    DEF -->|"base"| ROOT
+    ROOT -->|"overridden by"| CHILD
+    CHILD -->|"produces"| FINAL
+
+    style DEF fill:#636e72,color:#fff
+    style ROOT fill:#fdcb6e,color:#333
+    style CHILD fill:#00b894,color:#fff
+    style FINAL fill:#4a9eff,color:#fff
 ```
 
 Merge strategy: **shallow merge at the section level**. If the child defines `[validation]`, the entire `[validation]` section replaces the parent's.
@@ -802,23 +857,30 @@ This dual-key support is implemented in `ConfigLoader.toPartialConfig()` (lines 
 
 ### Error Type Hierarchy
 
-```
-Error (built-in)
-  |
-  +-- LoreError
-        message: string
-        exitCode: number
-        |
-        +-- ValidationError
-        |     exitCode: 1
-        |     issues: readonly ValidationIssue[]
-        |
-        +-- GitError
-        |     exitCode: 2
-        |
-        +-- NoStagedChangesError
-              exitCode: 3
-              message: "No staged changes. Stage files with `git add` before running `lore commit`."
+```mermaid
+classDiagram
+    class Error {
+        +string message
+    }
+    class LoreError {
+        +string message
+        +number exitCode
+    }
+    class ValidationError {
+        +exitCode = 1
+        +ValidationIssue[] issues
+    }
+    class GitError {
+        +exitCode = 2
+    }
+    class NoStagedChangesError {
+        +exitCode = 3
+    }
+
+    Error <|-- LoreError
+    LoreError <|-- ValidationError
+    LoreError <|-- GitError
+    LoreError <|-- NoStagedChangesError
 ```
 
 ### Exit Codes

@@ -49,6 +49,17 @@ export class AtomRepository {
   }
 
   /**
+   * Find a single atom by its git commit hash.
+   * Fetches the commit via `git log -1 <hash>` and parses it.
+   * Returns null if the commit has no valid Lore trailers.
+   */
+  async findByCommitHash(hash: string): Promise<LoreAtom | null> {
+    const rawCommits = await this.gitClient.log(['-1', hash]);
+    const atoms = await this.parseRawCommits(rawCommits);
+    return atoms.length > 0 ? atoms[0] : null;
+  }
+
+  /**
    * Find atoms within a git revision range (e.g., "main..HEAD").
    * Passes the range directly to git log.
    */

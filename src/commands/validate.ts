@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import type { Validator } from '../services/validator.js';
 import type { IGitClient } from '../interfaces/git-client.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
-import type { FormattableValidationResult } from '../types/output.js';
+import type { CommitValidationResult, FormattableValidationResult, ValidationIssue } from '../types/output.js';
 
 interface ValidateCommandOptions {
   readonly since?: string;
@@ -52,9 +52,28 @@ export function registerValidateCommand(
       const rawCommits = await gitClient.log(logArgs);
 
       // Validate all commits
-      const results = await validator.validate(rawCommits);
+      let results: readonly CommitValidationResult[] = await validator.validate(rawCommits);
 
-      // Compute summary
+      // In strict mode, upgrade each warning issue to an error
+      if (options.strict) {
+        results = results.map((result): CommitValidationResult => {
+          const upgradedIssues: readonly ValidationIssue[] = result.issues.map(
+            (issue): ValidationIssue =>
+              issue.severity === 'warning'
+                ? { severity: 'error', rule: issue.rule, message: issue.message }
+                : issue,
+          );
+          const hasErrors = upgradedIssues.some((i) => i.severity === 'error');
+          return {
+            commit: result.commit,
+            loreId: result.loreId,
+            valid: !hasErrors,
+            issues: upgradedIssues,
+          };
+        });
+      }
+
+      // Compute summary from (possibly upgraded) results
       let totalErrors = 0;
       let totalWarnings = 0;
 
@@ -66,12 +85,6 @@ export function registerValidateCommand(
             totalWarnings++;
           }
         }
-      }
-
-      // In strict mode, warnings count as errors
-      if (options.strict) {
-        totalErrors += totalWarnings;
-        totalWarnings = 0;
       }
 
       const allValid = totalErrors === 0;

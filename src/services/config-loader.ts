@@ -1,4 +1,4 @@
-import { readFile, access } from 'node:fs/promises';
+import { readFile, access, stat } from 'node:fs/promises';
 import { join, dirname, resolve, parse as parsePath } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import type { IConfigLoader } from '../interfaces/config-loader.js';
@@ -62,15 +62,22 @@ export class ConfigLoader implements IConfigLoader {
     const resolvedPath = resolve(startPath);
     let currentDir = resolvedPath;
 
-    // Check if startPath is a file or directory
+    // Determine if startPath is a file or directory using stat,
+    // falling back to extension heuristic for non-existent paths
     try {
-      const parsed = parsePath(resolvedPath);
-      if (parsed.ext) {
-        // Looks like a file path; start from its directory
+      const stats = await stat(resolvedPath);
+      if (stats.isFile()) {
         currentDir = dirname(resolvedPath);
       }
-    } catch {
-      // If parsing fails, just use as-is
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        // Path doesn't exist; fall back to extension heuristic
+        const parsed = parsePath(resolvedPath);
+        if (parsed.ext) {
+          currentDir = dirname(resolvedPath);
+        }
+      }
+      // For other errors, use resolvedPath as-is
     }
 
     const root = parsePath(currentDir).root;
@@ -99,14 +106,21 @@ export class ConfigLoader implements IConfigLoader {
     const paths: string[] = [];
     let currentDir = startPath;
 
-    // Check if startPath is a file or directory
+    // Determine if startPath is a file or directory using stat,
+    // falling back to extension heuristic for non-existent paths
     try {
-      const parsed = parsePath(startPath);
-      if (parsed.ext) {
+      const stats = await stat(startPath);
+      if (stats.isFile()) {
         currentDir = dirname(startPath);
       }
-    } catch {
-      // Use as-is
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const parsed = parsePath(startPath);
+        if (parsed.ext) {
+          currentDir = dirname(startPath);
+        }
+      }
+      // For other errors, use startPath as-is
     }
 
     const root = parsePath(currentDir).root;

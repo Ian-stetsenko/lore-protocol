@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { InteractiveInputReader } from './readers/interactive-input-reader.js';
 import { JsonInputReader } from './readers/json-input-reader.js';
 import { FlagsInputReader } from './readers/flags-input-reader.js';
+import { createTrailerCollectors } from './readers/collectors/trailer-collector-registry.js';
 
 /**
  * The modes of commit input resolution, ordered by priority.
@@ -95,7 +96,7 @@ export class CommitInputResolver {
   ): Promise<ICommitInputReader> {
     switch (mode) {
       case InputMode.Interactive:
-        return new InteractiveInputReader(this.prompt);
+        return new InteractiveInputReader(this.prompt, createTrailerCollectors());
       case InputMode.File: {
         const content = await this.readFileContent(options.file!);
         return new JsonInputReader(content);

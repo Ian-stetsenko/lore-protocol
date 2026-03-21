@@ -16,6 +16,7 @@ import { CommitBuilder } from './services/commit-builder.js';
 import { SquashMerger } from './services/squash-merger.js';
 import { Validator } from './services/validator.js';
 import { TerminalPrompt } from './services/terminal-prompt.js';
+import { CommitInputResolver } from './services/commit-input-resolver.js';
 
 import { TextFormatter } from './formatters/text-formatter.js';
 import { JsonFormatter } from './formatters/json-formatter.js';
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
   const squashMerger = new SquashMerger(loreIdGenerator);
   const validator = new Validator(trailerParser, atomRepository, config);
   const prompt = new TerminalPrompt();
+  const commitInputResolver = new CommitInputResolver(prompt);
 
   // 4. Formatter factory (reads --format/--json from program options at call time)
   const getFormatter = (): IOutputFormatter => {
@@ -150,7 +152,7 @@ async function main(): Promise<void> {
     commitBuilder,
     gitClient,
     getFormatter,
-    prompt,
+    commitInputResolver,
   });
 
   registerValidateCommand(program, {

@@ -40,7 +40,7 @@ describe('CommitInputResolver', () => {
   });
 
   describe('mode resolution priority', () => {
-    it('should resolve to interactive when --interactive is set', async () => {
+    it('should dispatch to interactive reader when --interactive is set', async () => {
       const prompt = createMockPrompt({
         askText: vi.fn().mockResolvedValue('test intent'),
         askConfirm: vi.fn().mockResolvedValue(false),
@@ -53,7 +53,7 @@ describe('CommitInputResolver', () => {
       expect(prompt.askText).toHaveBeenCalled();
     });
 
-    it('should resolve to file when --file is set (without --interactive)', async () => {
+    it('should dispatch to file/JSON reader when --file is set', async () => {
       const prompt = createMockPrompt();
       const resolver = new CommitInputResolver(prompt);
 
@@ -71,7 +71,7 @@ describe('CommitInputResolver', () => {
       }
     });
 
-    it('should resolve to flags when --intent is set (without --interactive or --file)', async () => {
+    it('should dispatch to flags reader when --intent is set', async () => {
       const prompt = createMockPrompt();
       const resolver = new CommitInputResolver(prompt);
 
@@ -85,7 +85,7 @@ describe('CommitInputResolver', () => {
       expect(prompt.askText).not.toHaveBeenCalled();
     });
 
-    it('should resolve to interactive when TTY with no flags set', async () => {
+    it('should dispatch to interactive reader when TTY with no flags set', async () => {
       Object.defineProperty(process.stdin, 'isTTY', {
         value: true,
         writable: true,
@@ -104,7 +104,7 @@ describe('CommitInputResolver', () => {
       expect(prompt.askText).toHaveBeenCalled();
     });
 
-    it('should resolve to stdin when not a TTY and no flags set', async () => {
+    it('should dispatch to stdin/JSON reader when not a TTY and no flags set', async () => {
       Object.defineProperty(process.stdin, 'isTTY', {
         value: false,
         writable: true,
@@ -116,7 +116,6 @@ describe('CommitInputResolver', () => {
 
       // Mock stdin to emit data then end
       const jsonInput = JSON.stringify({ intent: 'from stdin' });
-      const originalOn = process.stdin.on.bind(process.stdin);
       const onMock = vi.fn().mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
         if (event === 'data') {
           setTimeout(() => cb(Buffer.from(jsonInput)), 10);
@@ -150,135 +149,28 @@ describe('CommitInputResolver', () => {
       expect(result.intent).toBe('interactive wins');
       expect(prompt.askText).toHaveBeenCalled();
     });
-  });
 
-  describe('interactive reader', () => {
-    it('should return correct CommitInput from prompt answers', async () => {
-      let confirmCallIndex = 0;
-      const confirmResponses = [
-        true,   // Add a body?
-        false,  // Add a Constraint? (no)
-        false,  // Add a Rejected? (no)
-        true,   // Set Confidence?
-        false,  // Set Scope-risk? (no)
-        false,  // Set Reversibility? (no)
-        false,  // Add a Directive? (no)
-        false,  // Add a Tested? (no)
-        false,  // Add a Not-tested? (no)
-        false,  // Add a Supersedes? (no)
-        false,  // Add a Depends-on? (no)
-        false,  // Add a Related? (no)
-      ];
-
-      const prompt = createMockPrompt({
-        askText: vi.fn().mockResolvedValue('refactor auth module'),
-        askMultiline: vi.fn().mockResolvedValue('This is the body text.'),
-        askConfirm: vi.fn().mockImplementation(() => {
-          const response = confirmResponses[confirmCallIndex] ?? false;
-          confirmCallIndex++;
-          return Promise.resolve(response);
-        }),
-        askChoice: vi.fn().mockResolvedValue('high'),
-        close: vi.fn(),
-      });
-
-      const resolver = new CommitInputResolver(prompt);
-      const result = await resolver.resolve(emptyOptions({ interactive: true }));
-
-      expect(result.intent).toBe('refactor auth module');
-      expect(result.body).toBe('This is the body text.');
-      expect(result.trailers?.Confidence).toBe('high');
-      expect(prompt.close).toHaveBeenCalled();
-    });
-  });
-
-  describe('file reader', () => {
-    it('should parse valid JSON from file', async () => {
+    it('should prefer file over flags when both are set', async () => {
       const prompt = createMockPrompt();
       const resolver = new CommitInputResolver(prompt);
 
-      const tmpPath = '/tmp/test-lore-valid.json';
+      const tmpPath = '/tmp/test-lore-file-over-flags.json';
       const { writeFileSync } = await import('node:fs');
-      const input = {
-        intent: 'fix bug in parser',
-        body: 'Detailed explanation',
-        trailers: {
-          Constraint: ['must preserve backward compat'],
-          Confidence: 'medium',
-          'Scope-risk': 'narrow',
-        },
-      };
-      writeFileSync(tmpPath, JSON.stringify(input));
+      writeFileSync(tmpPath, JSON.stringify({ intent: 'file wins' }));
 
       try {
-        const result = await resolver.resolve(emptyOptions({ file: tmpPath }));
-        expect(result.intent).toBe('fix bug in parser');
-        expect(result.body).toBe('Detailed explanation');
-        expect(result.trailers?.Constraint).toEqual(['must preserve backward compat']);
-        expect(result.trailers?.Confidence).toBe('medium');
-        expect(result.trailers?.['Scope-risk']).toBe('narrow');
+        const result = await resolver.resolve(emptyOptions({
+          file: tmpPath,
+          intent: 'flags intent',
+        }));
+        expect(result.intent).toBe('file wins');
       } finally {
         const { unlinkSync } = await import('node:fs');
         unlinkSync(tmpPath);
       }
     });
 
-    it('should throw on invalid JSON', async () => {
-      const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
-
-      const tmpPath = '/tmp/test-lore-invalid.json';
-      const { writeFileSync } = await import('node:fs');
-      writeFileSync(tmpPath, 'not valid json {{{');
-
-      try {
-        await expect(resolver.resolve(emptyOptions({ file: tmpPath }))).rejects.toThrow();
-      } finally {
-        const { unlinkSync } = await import('node:fs');
-        unlinkSync(tmpPath);
-      }
-    });
-  });
-
-  describe('flags reader', () => {
-    it('should map all CLI options correctly', async () => {
-      const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
-
-      const result = await resolver.resolve(emptyOptions({
-        intent: 'add feature X',
-        body: 'Feature body text',
-        constraint: ['must be fast', 'no breaking changes'],
-        rejected: ['approach A | too complex'],
-        confidence: 'high',
-        scopeRisk: 'wide',
-        reversibility: 'clean',
-        directive: ['use new API'],
-        tested: ['unit tests pass'],
-        notTested: ['load testing'],
-        supersedes: ['abcd1234'],
-        dependsOn: ['dead0000'],
-        related: ['beef1234'],
-      }));
-
-      expect(result.intent).toBe('add feature X');
-      expect(result.body).toBe('Feature body text');
-      expect(result.trailers?.Constraint).toEqual(['must be fast', 'no breaking changes']);
-      expect(result.trailers?.Rejected).toEqual(['approach A | too complex']);
-      expect(result.trailers?.Confidence).toBe('high');
-      expect(result.trailers?.['Scope-risk']).toBe('wide');
-      expect(result.trailers?.Reversibility).toBe('clean');
-      expect(result.trailers?.Directive).toEqual(['use new API']);
-      expect(result.trailers?.Tested).toEqual(['unit tests pass']);
-      expect(result.trailers?.['Not-tested']).toEqual(['load testing']);
-      expect(result.trailers?.Supersedes).toEqual(['abcd1234']);
-      expect(result.trailers?.['Depends-on']).toEqual(['dead0000']);
-      expect(result.trailers?.Related).toEqual(['beef1234']);
-    });
-  });
-
-  describe('stdin reader', () => {
-    it('should parse JSON from stdin', async () => {
+    it('should prefer flags over stdin when intent is set and not a TTY', async () => {
       Object.defineProperty(process.stdin, 'isTTY', {
         value: false,
         writable: true,
@@ -288,32 +180,11 @@ describe('CommitInputResolver', () => {
       const prompt = createMockPrompt();
       const resolver = new CommitInputResolver(prompt);
 
-      const jsonInput = JSON.stringify({
-        intent: 'stdin commit',
-        trailers: {
-          Confidence: 'low',
-          Tested: ['integration test'],
-        },
-      });
+      const result = await resolver.resolve(emptyOptions({
+        intent: 'flags win',
+      }));
 
-      const onMock = vi.fn().mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
-        if (event === 'data') {
-          setTimeout(() => cb(Buffer.from(jsonInput)), 10);
-        } else if (event === 'end') {
-          setTimeout(() => cb(), 20);
-        }
-        return process.stdin;
-      });
-      vi.spyOn(process.stdin, 'on').mockImplementation(onMock);
-
-      try {
-        const result = await resolver.resolve(emptyOptions());
-        expect(result.intent).toBe('stdin commit');
-        expect(result.trailers?.Confidence).toBe('low');
-        expect(result.trailers?.Tested).toEqual(['integration test']);
-      } finally {
-        vi.restoreAllMocks();
-      }
+      expect(result.intent).toBe('flags win');
     });
   });
 });

@@ -117,11 +117,10 @@ async function main(): Promise<void> {
   registerTestedCommand(program, pathQueryDeps);
 
   registerWhyCommand(program, {
-    trailerParser,
+    atomRepository,
     gitClient,
     pathResolver,
     getFormatter,
-    customTrailerKeys: config.trailers.custom,
   });
 
   registerSearchCommand(program, {

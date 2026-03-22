@@ -1,12 +1,11 @@
 import type { Command } from 'commander';
-import type { TrailerParser } from '../services/trailer-parser.js';
+import type { AtomRepository } from '../services/atom-repository.js';
 import type { PathResolver } from '../services/path-resolver.js';
 import type { IGitClient } from '../interfaces/git-client.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
-import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../types/domain.js';
+import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { QueryResult, QueryMeta } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
-import { LORE_ID_PATTERN } from '../util/constants.js';
 import { LoreError } from '../util/errors.js';
 
 /**
@@ -20,18 +19,17 @@ import { LoreError } from '../util/errors.js';
 export function registerWhyCommand(
   program: Command,
   deps: {
-    trailerParser: TrailerParser;
+    atomRepository: AtomRepository;
     gitClient: IGitClient;
     pathResolver: PathResolver;
     getFormatter: () => IOutputFormatter;
-    customTrailerKeys: readonly string[];
   },
 ): void {
   program
     .command('why <target>')
     .description('Decision context for a specific line or line range')
     .action(async (target: string) => {
-      const { trailerParser, gitClient, pathResolver, getFormatter, customTrailerKeys } = deps;
+      const { atomRepository, gitClient, pathResolver, getFormatter } = deps;
 
       const parsedTarget = pathResolver.parseTarget(target);
 
@@ -59,43 +57,19 @@ export function registerWhyCommand(
         commitHashes.add(line.commitHash);
       }
 
-      // For each unique commit hash, query just that single commit
-      // and check for Lore trailers directly -- avoids loading all history.
+      // For each unique commit hash, use atomRepository to look up the atom
       const atoms: LoreAtom[] = [];
       const seenLoreIds = new Set<string>();
 
       for (const hash of commitHashes) {
-        const rawCommits = await gitClient.log(['-1', hash]);
-        if (rawCommits.length === 0) {
+        const atom = await atomRepository.findByCommitHash(hash);
+        if (atom === null) {
           continue;
         }
 
-        const raw = rawCommits[0];
-        if (!trailerParser.containsLoreTrailers(raw.trailers)) {
+        if (seenLoreIds.has(atom.loreId)) {
           continue;
         }
-
-        const trailers: LoreTrailers = trailerParser.parse(raw.trailers, customTrailerKeys);
-        if (!LORE_ID_PATTERN.test(trailers['Lore-id'])) {
-          continue;
-        }
-
-        if (seenLoreIds.has(trailers['Lore-id'])) {
-          continue;
-        }
-
-        const filesChanged = await gitClient.getFilesChanged(raw.hash);
-
-        const atom: LoreAtom = {
-          loreId: trailers['Lore-id'],
-          commitHash: raw.hash,
-          date: new Date(raw.date),
-          author: raw.author,
-          intent: raw.subject,
-          body: raw.body,
-          trailers,
-          filesChanged,
-        };
 
         atoms.push(atom);
         seenLoreIds.add(atom.loreId);

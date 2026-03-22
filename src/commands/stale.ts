@@ -7,6 +7,7 @@ import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { PathQueryOptions } from '../types/query.js';
 import type { FormattableStalenessResult, StaleAtomReport } from '../types/output.js';
+import { STALE_SIGNAL } from '../util/constants.js';
 
 interface StaleCommandOptions {
   readonly olderThan?: string;
@@ -70,9 +71,9 @@ export function registerStaleCommand(
 
       // Apply additional CLI-level filters: keep reports that match ANY active signal
       const activeSignals: string[] = [];
-      if (options.olderThan) activeSignals.push('age');
-      if (options.drift !== undefined) activeSignals.push('drift');
-      if (options.lowConfidence) activeSignals.push('low-confidence');
+      if (options.olderThan) activeSignals.push(STALE_SIGNAL.AGE);
+      if (options.drift !== undefined) activeSignals.push(STALE_SIGNAL.DRIFT);
+      if (options.lowConfidence) activeSignals.push(STALE_SIGNAL.LOW_CONFIDENCE);
       if (activeSignals.length > 0) {
         reports = reports.filter(r => r.reasons.some(reason => activeSignals.includes(reason.signal)));
       }

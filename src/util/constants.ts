@@ -48,6 +48,16 @@ export const DEFAULT_STALE_DRIFT_THRESHOLD = 20;
 export const CONFIG_FILENAME = 'config.toml';
 export const CONFIG_DIR = '.lore';
 
+export const STALE_SIGNAL = {
+  AGE: 'age',
+  DRIFT: 'drift',
+  LOW_CONFIDENCE: 'low-confidence',
+  EXPIRED_HINT: 'expired-hint',
+  ORPHANED_DEP: 'orphaned-dep',
+} as const;
+
+export type StaleSignal = typeof STALE_SIGNAL[keyof typeof STALE_SIGNAL];
+
 export const EXIT_CODE_SUCCESS = 0;
 export const EXIT_CODE_VALIDATION_ERROR = 1;
 export const EXIT_CODE_GIT_ERROR = 2;

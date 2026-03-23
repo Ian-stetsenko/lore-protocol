@@ -1,7 +1,7 @@
 # Lore CLI -- Project Architecture
 
 > Authoritative reference for contributors (human or AI) to the lore-cli codebase.
-> Generated 2026-03-20. Reflects the codebase at that point in time.
+> Last updated 2026-03-22. Reflects the codebase after PR #1-15 merge cycle.
 
 ---
 
@@ -148,6 +148,18 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependencies**: None.
 - **Dependents**: `TerminalPrompt` (implements), `commit.ts`, `main.ts`.
 
+#### `src/interfaces/commit-input-reader.ts`
+- **Contains**: `ICommitInputReader` interface.
+- **Single Responsibility**: Strategy contract for reading commit input from any source.
+- **Dependencies**: `CommitInput`.
+- **Dependents**: `JsonInputReader`, `FlagsInputReader`, `InteractiveInputReader`, `CommitInputResolver`.
+
+#### `src/interfaces/trailer-collector.ts`
+- **Contains**: `ITrailerCollector` interface, `TrailerCollectorResult` type.
+- **Single Responsibility**: Strategy contract for collecting a single trailer type interactively.
+- **Dependencies**: `IPrompt`, `CommitInput`.
+- **Dependents**: `MultiValueTrailerCollector`, `EnumChoiceTrailerCollector`, `InteractiveInputReader`.
+
 ### Utilities Layer
 
 #### `src/util/errors.ts`
@@ -247,6 +259,49 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependencies**: `IPrompt`, Node.js `readline/promises`.
 - **Dependents**: `main.ts` (instantiation only; command depends on `IPrompt`).
 - **Key methods**: `askText()`, `askMultiline()`, `askChoice()`, `askConfirm()`, `close()`.
+
+#### `src/services/commit-input-resolver.ts`
+- **Contains**: `InputMode` enum, `CommitCommandOptions` interface, `CommitInputResolver` class.
+- **Single Responsibility**: Pure dispatcher — resolves which input mode applies (interactive, file, flags, stdin) and delegates to the correct `ICommitInputReader` implementation. Owns I/O helpers for reading file content and stdin.
+- **Dependencies**: `IPrompt`, `ICommitInputReader` implementations, `CommitInput`.
+- **Dependents**: `commit.ts`, `main.ts`.
+- **Key methods**: `resolve()`.
+- **Pattern**: Record dispatch map over `InputMode` enum (OCP-compliant).
+
+#### `src/services/readers/json-input-reader.ts`
+- **Contains**: `JsonInputReader` class implementing `ICommitInputReader`.
+- **Single Responsibility**: Parses a JSON string into `CommitInput`. Coerces single strings to arrays for array trailers.
+- **Dependencies**: `ICommitInputReader`, `CommitInput`.
+
+#### `src/services/readers/flags-input-reader.ts`
+- **Contains**: `FlagsInputReader` class implementing `ICommitInputReader`.
+- **Single Responsibility**: Maps CLI flag values to `CommitInput`. Pure data mapping, no I/O.
+- **Dependencies**: `ICommitInputReader`, `CommitInput`, `CommitCommandOptions`.
+
+#### `src/services/readers/interactive-input-reader.ts`
+- **Contains**: `InteractiveInputReader` class implementing `ICommitInputReader`.
+- **Single Responsibility**: Collects `CommitInput` via terminal prompts using Template Method pattern.
+- **Dependencies**: `ICommitInputReader`, `IPrompt`, `ITrailerCollector[]`, `PROMPT_STRINGS`.
+- **Pattern**: Template Method — `read()` calls `collectIntent()`, `collectBody()`, `collectTrailers()`.
+
+#### `src/services/readers/collectors/multi-value-trailer-collector.ts`
+- **Contains**: `MultiValueTrailerCollector` class implementing `ITrailerCollector`.
+- **Single Responsibility**: Collects zero or more string values for array-type trailers via confirm-then-loop.
+
+#### `src/services/readers/collectors/enum-choice-trailer-collector.ts`
+- **Contains**: `EnumChoiceTrailerCollector` class implementing `ITrailerCollector`.
+- **Single Responsibility**: Collects a single enum choice via confirm-then-choose.
+
+#### `src/services/readers/collectors/trailer-collector-registry.ts`
+- **Contains**: `createTrailerCollectors()` factory function.
+- **Single Responsibility**: Configuration site — creates all 11 trailer collectors with their prompt strings and enum values.
+- **Pattern**: GRASP Creator — owns the initializing data.
+
+#### `src/services/search-filter.ts`
+- **Contains**: `SearchFilter` class.
+- **Single Responsibility**: Filtering and text matching logic for the `lore search` command. Extracted from `search.ts` per GRASP Controller (commands coordinate, not compute).
+- **Dependencies**: `LoreAtom`, `SearchOptions`, `ARRAY_TRAILER_KEYS`, `ENUM_TRAILER_KEYS`.
+- **Dependents**: `search.ts`, `main.ts`.
 
 ### Formatters Layer
 
@@ -951,7 +1006,7 @@ tests/
 
 ### What Is Tested
 
-**Unit-tested services** (10 files):
+**Unit-tested services** (10 service files + 6 reader/collector files):
 - `TrailerParser` -- parse, serialize, roundtrip, containsLoreTrailers, extractTrailerBlock.
 - `PathResolver` -- target parsing (file, line-range, directory, glob), toGitLogArgs, toGitBlameArgs.
 - `LoreIdGenerator` -- generates valid 8-char hex, randomness.
@@ -1052,6 +1107,22 @@ Search filtering logic (`applyFilters`, `atomHasTrailer`, `atomMatchesText`) has
 ### `log.ts` Supersession (Resolved)
 
 The `log` command now uses `SupersessionResolver.resolve()` to properly compute supersession status, consistent with other query commands.
+
+---
+
+### `parseRawCommits` Performance (Resolved)
+
+`AtomRepository.parseRawCommits()` now uses a two-pass approach: first filters and parses trailers synchronously, then batches `getFilesChanged()` calls via `Promise.all` in chunks of `GIT_FILES_CHANGED_BATCH_SIZE` (20). A `buildAtom()` factory method centralizes `RawCommit → LoreAtom` construction.
+
+---
+
+### Commit Input Resolution (Resolved)
+
+The commit command's input resolution is refactored into a Strategy pattern:
+- `ICommitInputReader` interface with three implementations: `JsonInputReader`, `FlagsInputReader`, `InteractiveInputReader`
+- `CommitInputResolver` as pure dispatcher using `InputMode` enum
+- `InteractiveInputReader` uses Template Method with `ITrailerCollector` Strategy for each trailer type
+- All prompt strings centralized in `PROMPT_STRINGS` constant
 
 ---
 
@@ -1166,6 +1237,18 @@ If you need a new cross-reference trailer (beyond `Supersedes`, `Depends-on`, `R
 6. Add to `TraceEdge.relationship` union type in `output.ts`.
 7. Update `SupersessionResolver` if the new reference type implies supersession.
 8. Add formatter rendering.
+
+---
+
+### Agent Skills Directory
+
+The `skills/` directory ships with the npm package and contains:
+
+- `lore-agent-instructions.md` -- Universal reference (192 lines): protocol overview, query workflow, trailer semantics, JSON commit schema, end-to-end example
+- `adapters/` -- Platform-specific drop-in files for Claude Code, Cursor, GitHub Copilot, Windsurf, Aider, and generic system prompts
+- `README.md` -- Setup guide with copy commands per platform
+
+Each adapter is self-contained (no external references). They teach three behavioral rules: Constraint = obey, Rejected = don't re-explore, Directive = follow.
 
 ---
 

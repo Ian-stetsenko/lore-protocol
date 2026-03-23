@@ -108,11 +108,27 @@ describe('JsonInputReader', () => {
       expect(result.trailers?.Constraint).toEqual(['valid', 'also valid']);
     });
 
-    it('should return undefined for non-array trailer values', async () => {
+    it('should coerce a single string trailer value to an array', async () => {
       const input = {
         intent: 'test',
         trailers: {
-          Constraint: 'not an array',
+          Constraint: 'single constraint',
+          Directive: '[until:2026-06] Remove before release',
+        },
+      };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+      const result = await reader.read();
+
+      expect(result.trailers?.Constraint).toEqual(['single constraint']);
+      expect(result.trailers?.Directive).toEqual(['[until:2026-06] Remove before release']);
+    });
+
+    it('should return undefined for non-string non-array trailer values', async () => {
+      const input = {
+        intent: 'test',
+        trailers: {
+          Constraint: 42,
         },
       };
 

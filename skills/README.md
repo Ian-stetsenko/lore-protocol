@@ -24,12 +24,6 @@ Every adapter tells the agent:
 3. **Commit with Lore** -- pipe JSON to `lore commit` with the right trailers
 4. **The JSON schema** -- exact format for `lore commit` stdin input
 
-## Maintainer Skills
-
-| Skill | Source File | Purpose |
-|-------|-------------|---------|
-| **Docs Maintainer** | `adapters/docs-maintainer.md` | Teaches Claude how to sync the lore-protocol.com website with CLI implementation changes. Covers page-to-source mapping, sync workflow, writing style, versioning. |
-
 ## Universal Reference
 
 `lore-agent-instructions.md` is the comprehensive reference document. It covers everything an agent needs to know about Lore in detail. Use it if:

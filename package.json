@@ -1,5 +1,5 @@
 {
-  "name": "lore-cli",
+  "name": "lore-protocol",
   "version": "0.1.0",
   "description": "CLI tool for the Lore protocol — structured decision context in git commits",
   "type": "module",

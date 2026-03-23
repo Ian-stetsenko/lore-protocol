@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/lore-cli?color=cb0000)](https://www.npmjs.com/package/lore-cli)
 [![license](https://img.shields.io/github/license/Ian-stetsenko/lore-protocol)](LICENSE)
 [![node](https://img.shields.io/node/v/lore-cli)](package.json)
-[![tests](https://img.shields.io/badge/tests-284%20passing-brightgreen)](#)
+[![tests](https://img.shields.io/badge/tests-332%20passing-brightgreen)](#)
 [![arXiv](https://img.shields.io/badge/arXiv-2603.15566-b31b1b)](https://arxiv.org/abs/2603.15566)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
@@ -113,6 +113,7 @@ lore search --text "session" --confidence high
 | `lore rejected <target>` | Previously rejected alternatives for a code region |
 | `lore directives <target>` | Active forward-looking warnings for a code region |
 | `lore tested <target>` | Test coverage: what was and was not verified |
+| `lore coverage <target>` | Alias for `tested` (matches paper Figure 2) |
 | `lore why <target>` | Line-level blame with Lore context (`file:line` or `file:line-line`) |
 | `lore search` | Search across all lore with filters |
 | `lore log` | Lore-enriched git log |
@@ -226,6 +227,21 @@ echo '{
   }
 }' | lore commit
 ```
+
+## Agent Skills (Drop-In Setup)
+
+Pre-built instruction files ship with the package in `skills/`. Copy one file into your project and your AI agent automatically speaks Lore:
+
+| Agent | Command |
+|-------|---------|
+| **Claude Code** | `cat node_modules/lore-cli/skills/adapters/claude-code.md >> CLAUDE.md` |
+| **Cursor** | `cp node_modules/lore-cli/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
+| **GitHub Copilot** | `cat node_modules/lore-cli/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
+| **Windsurf** | `cat node_modules/lore-cli/skills/adapters/windsurf.md >> .windsurfrules` |
+| **Aider** | See `skills/adapters/aider.md` |
+| **Other** | Paste `skills/adapters/generic.md` into your agent's system prompt |
+
+Each adapter teaches the agent to: query `lore constraints`/`rejected`/`directives` before modifying code, respect what it finds, and write Lore-enriched commits via JSON stdin. See `skills/README.md` for details.
 
 ## Paper
 

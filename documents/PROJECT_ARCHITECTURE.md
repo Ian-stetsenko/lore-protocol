@@ -81,14 +81,14 @@ This is enforced by import structure: no file in `services/` imports from `comma
 
 ### Composition Root Pattern
 
-`src/main.ts` (lines 48-176) is the composition root. It:
+`src/main.ts` is the composition root. It:
 
-1. Instantiates all concrete implementations (lines 65-69).
-2. Loads configuration (lines 72-79).
-3. Creates services that depend on others, injecting dependencies via constructors (lines 82-88).
-4. Creates a **formatter factory** (`getFormatter`) that defers formatter selection to call time based on `--json`/`--format` flags (lines 91-97).
-5. Registers all commands, passing dependency bags (lines 101-172).
-6. Parses CLI arguments and runs the selected command (line 175).
+1. Instantiates all concrete implementations.
+2. Loads configuration.
+3. Creates services that depend on others, injecting dependencies via constructors.
+4. Creates a **formatter factory** (`getFormatter`) that defers formatter selection to call time based on `--json`/`--format` flags.
+5. Registers all commands, passing dependency bags.
+6. Parses CLI arguments and runs the selected command.
 
 No command or service instantiates its own dependencies. All wiring is centralized here.
 
@@ -128,7 +128,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Contains**: `RawCommit` interface, `BlameLine` interface, `CommitResult` interface, `IGitClient` interface.
 - **Single Responsibility**: Defines the contract for all git operations the application needs.
 - **Dependencies**: None.
-- **Dependents**: `GitClient` (implements), `AtomRepository`, `StalenessDetector`, `Validator`, `commit.ts`, `validate.ts`, `why.ts`.
+- **Dependents**: `GitClient` (implements), `AtomRepository`, `StalenessDetector`, `commit.ts`, `validate.ts`, `why.ts`.
 
 #### `src/interfaces/config-loader.ts`
 - **Contains**: `IConfigLoader` interface.
@@ -399,7 +399,7 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 
 ### Composition Root (DI Pattern)
 
-**Where**: `main()` in `src/main.ts` (lines 48-176)
+**Where**: `main()` in `src/main.ts`
 
 **Why**: To honor DIP (no service instantiates its own dependencies) and centralize all concrete-to-interface wiring in one place.
 
@@ -445,7 +445,7 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 
 ### Factory Method (GoF -- Creational -- Lightweight)
 
-**Where**: `getFormatter()` closure in `main.ts` (lines 91-97)
+**Where**: `getFormatter()` closure in `main.ts`
 
 **Why**: Formatter creation depends on runtime CLI flags (`--json`, `--format`) which aren't known until command execution. The factory defers creation and selection to call time.
 
@@ -478,9 +478,9 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 - The `path-query.ts` helper eliminates duplication across five commands by extracting the shared pipeline.
 
 **Gaps / Risks:**
-- `AtomRepository` (line count: 294) has the most methods of any service (6 public: `findByTarget`, `findByLoreId`, `findByRange`, `findAll`, `findByScope`, `resolveFollowLinks`). While all relate to "retrieving atoms from git," the `resolveFollowLinks` BFS traversal is a distinct concern that could be extracted into a `FollowLinkResolver` service.
-- `Validator` (line count: 315) has 10 validation rules implemented as private methods within a single class. If the rule set grows, a rule-based dispatch pattern (array of validation rule objects) would improve OCP compliance.
-- `search.ts` contains module-level helper functions (`applySearchFilters`, `atomHasTrailer`, `atomMatchesText`) that could belong on an `AtomFilter` or similar service class.
+- `AtomRepository` has the most methods of any service (7 public: `findByTarget`, `findByLoreId`, `findByCommitHash`, `findByRange`, `findAll`, `findByScope`, `resolveFollowLinks`). While all relate to "retrieving atoms from git," the `resolveFollowLinks` BFS traversal is a distinct concern that could be extracted into a `FollowLinkResolver` service.
+- `Validator` has 10 validation rules implemented as private methods within a single class. If the rule set grows, a rule-based dispatch pattern (array of validation rule objects) would improve OCP compliance.
+- Search filtering is extracted into the `SearchFilter` service class with `applyFilters()`, `atomHasTrailer()`, and `atomMatchesText()` methods.
 
 ### O -- Open/Closed Principle
 
@@ -489,9 +489,9 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 - Adding a new path-scoped query command (e.g., `lore risks`) requires only a new file calling `executePathQuery()` with a different `visibleTrailers` list.
 
 **Gaps / Risks:**
-- `atomHasTrailer()` in `search.ts` (lines 155-184) uses a `switch` statement on all `TrailerKey` values. Adding a new trailer type requires modifying this function. A lookup map or method on `LoreTrailers` would be more OCP-compliant.
-- `TextFormatter.formatTrailers()` (lines 230-294) has an `if` block for each trailer key. Same issue -- adding a new trailer type requires modifying this method. A data-driven approach (iterating over `LORE_TRAILER_KEYS` with a config for display) would eliminate this.
-- `Validator.trailerHasValue()` (lines 187-219) has a `switch` over all trailer keys. Same structural issue.
+- `atomHasTrailer()` in `SearchFilter` uses a data-driven lookup via `ARRAY_TRAILER_KEYS` and `ENUM_TRAILER_KEYS`, which is OCP-compliant for standard trailer types.
+- `TextFormatter.formatTrailers()` has an `if` block for each trailer key. Adding a new trailer type requires modifying this method. A data-driven approach (iterating over `LORE_TRAILER_KEYS` with a config for display) would eliminate this.
+- `Validator.trailerHasValue()` has a `switch` over all trailer keys. Same structural issue.
 - The staleness signals in `StalenessDetector.analyze()` are hardcoded as five sequential method calls. A signal-registry approach would make it open for extension.
 
 ### L -- Liskov Substitution Principle
@@ -805,7 +805,7 @@ Merge strategy: **shallow merge at the section level**. If the child defines `[v
 
 ### Defaults
 
-Every field has a default value defined in `DEFAULT_CONFIG` (`src/types/config.ts`, lines 26-33). If no config file is found, the entire default is used. If a config file is found, `mergeWithDefaults()` fills in any missing sections.
+Every field has a default value defined in `DEFAULT_CONFIG` (`src/types/config.ts`). If no config file is found, the entire default is used. If a config file is found, `mergeWithDefaults()` fills in any missing sections.
 
 ### Full Config Schema
 
@@ -849,7 +849,7 @@ The config loader accepts **both** snake_case (TOML convention) and camelCase fo
 | `default_format` | `defaultFormat` | `output.defaultFormat` |
 | `max_depth` | `maxDepth` | `follow.maxDepth` |
 
-This dual-key support is implemented in `ConfigLoader.toPartialConfig()` (lines 143-213) using fallback ternaries.
+This dual-key support is implemented in `ConfigLoader.toPartialConfig()` using fallback ternaries.
 
 ---
 
@@ -904,7 +904,7 @@ classDiagram
    - `doctor.ts` sets `process.exitCode = 1` on errors.
    - Most commands let errors propagate.
 
-3. **Top-level handler** (`main.ts`, lines 179-208):
+3. **Top-level handler** (`main.ts`):
    - Catches all errors from `main().catch(...)`.
    - Detects `--json` in `process.argv` to select the appropriate formatter for error output (since Commander parsing may have failed).
    - `LoreError` instances: formats with the error's exit code and message, sets `process.exitCode`.
@@ -1005,7 +1005,7 @@ Several services use **concrete class types** as constructor parameters instead 
 
 **Impact**: Tests must rely on duck-typing or use the real class. If these services gained complex logic, testing would become harder. **Recommendation**: Extract interfaces for `TrailerParser`, `AtomRepository`, and `LoreIdGenerator`.
 
-**Files**: `src/services/atom-repository.ts` (line 16), `src/services/commit-builder.ts` (lines 1-2), `src/services/validator.ts` (lines 1-2), `src/services/squash-merger.ts` (line 1).
+**Files**: `src/services/atom-repository.ts`, `src/services/commit-builder.ts`, `src/services/validator.ts`, `src/services/squash-merger.ts`.
 
 ---
 
@@ -1028,44 +1028,36 @@ Multiple files contain hard-coded `switch`/`if` blocks that enumerate all traile
 
 | File | Location | Pattern |
 |------|----------|---------|
-| `search.ts` | `atomHasTrailer()`, lines 155-184 | `switch(trailerKey)` over all keys |
-| `text-formatter.ts` | `formatTrailers()`, lines 230-294 | `if(shouldShow(key))` for each key |
-| `json-formatter.ts` | `serializeTrailers()`, lines 180-235 | `if(shouldShow(key))` for each key |
-| `validator.ts` | `trailerHasValue()`, lines 187-219 | `switch(key)` over all keys |
+| `search-filter.ts` | `atomHasTrailer()` | Data-driven via `ARRAY_TRAILER_KEYS`/`ENUM_TRAILER_KEYS` (resolved) |
+| `text-formatter.ts` | `formatTrailers()` | `if(shouldShow(key))` for each key |
+| `json-formatter.ts` | `serializeTrailers()` | `if(shouldShow(key))` for each key |
+| `validator.ts` | `trailerHasValue()` | `switch(key)` over all keys |
 
 Adding a new trailer type requires modifying all four locations. **Recommendation**: Create a data-driven trailer registry (e.g., `TRAILER_DEFINITIONS` array with key, kind, display color, etc.) and derive these switch/if blocks from the registry.
 
 ---
 
-### `why` Command Duplicates Atom Construction
+### `why` Command Atom Construction (Resolved)
 
-`why.ts` (lines 63-101) constructs `LoreAtom` objects directly from `RawCommit` data rather than going through `AtomRepository.parseRawCommits()`. This duplicates the parsing logic (trailer parsing, filesChanged lookup, body stripping) that `AtomRepository` already encapsulates.
-
-**Root cause**: `why` uses `git blame` to find specific commits, then queries each commit individually with `git log -1 <hash>`. `AtomRepository` doesn't expose a `findByCommitHash()` method.
-
-**Recommendation**: Add `AtomRepository.findByCommitHash(hash: string)` and use it in `why.ts` to eliminate the duplication.
+`why.ts` now uses `AtomRepository.findByCommitHash()` to look up atoms from blame commit hashes, eliminating the previously duplicated atom construction logic.
 
 ---
 
-### `search.ts` Contains Business Logic in Command File
+### `search.ts` Search Logic Extraction (Resolved)
 
-`search.ts` defines four helper functions (`applySearchFilters`, `atomHasTrailer`, `atomMatchesText`, `buildSearchTargetDescription`) at module scope. The first three contain filtering/matching logic that should arguably live in a service (e.g., `AtomFilter`) per GRASP Controller pattern (commands should coordinate, not compute).
-
-**Recommendation**: Extract a `SearchService` or `AtomFilter` service.
+Search filtering logic (`applyFilters`, `atomHasTrailer`, `atomMatchesText`) has been extracted into the `SearchFilter` service class (`src/services/search-filter.ts`). The command file now delegates to this service.
 
 ---
 
-### `log.ts` Doesn't Compute Supersession
+### `log.ts` Supersession (Resolved)
 
-The `log` command (line 63-69) explicitly creates a map marking all atoms as `superseded: false`. This means the log output cannot indicate which entries have been superseded. All other query commands compute supersession properly.
-
-**Impact**: Users viewing `lore log` output cannot tell which decisions are still active. **Recommendation**: Use `SupersessionResolver.resolve()` like other commands do.
+The `log` command now uses `SupersessionResolver.resolve()` to properly compute supersession status, consistent with other query commands.
 
 ---
 
 ### Staleness Drift Check Serializes Per-File
 
-`StalenessDetector.checkDrift()` (lines 87-107) runs `gitClient.countCommitsSince()` for **every file** in `atom.filesChanged`. For atoms touching many files, this generates many git subprocess calls.
+`StalenessDetector.checkDrift()` runs `gitClient.countCommitsSince()` for **every file** in `atom.filesChanged`. For atoms touching many files, this generates many git subprocess calls.
 
 **Impact**: Performance bottleneck for atoms with large changesets. **Recommendation**: Consider batch git operations or a threshold to stop after the first drifted file.
 
@@ -1077,15 +1069,15 @@ The `log` command (line 63-69) explicitly creates a map marking all atoms as `su
 
 ---
 
-### Config Loader Directory Detection Heuristic
+### Config Loader Directory Detection (Resolved)
 
-`ConfigLoader.findConfigPath()` and `findAllConfigPaths()` determine whether the start path is a file or directory by checking `parsePath(startPath).ext` (lines 68, 104). This heuristic is fragile: a directory named `data.v2` would be misidentified as a file. A `stat()` call would be more reliable.
+`ConfigLoader.findConfigPath()` and `findAllConfigPaths()` now use `stat()` to determine whether the start path is a file or directory. The extension heuristic is used as a fallback only for non-existent paths (ENOENT).
 
 ---
 
 ### No Graceful Handling of Large Repos
 
-`AtomRepository.findAll()` has no built-in pagination. `doctor.ts` passes `limit: 10000` (line 39), but other callers (e.g., `stale` without a target) call `findAll()` with no limit, potentially loading all Lore atoms in a large monorepo into memory.
+`AtomRepository.findAll()` has no built-in pagination. `doctor.ts` passes `limit: 10000`, but other callers (e.g., `stale` without a target) call `findAll()` with no limit, potentially loading all Lore atoms in a large monorepo into memory.
 
 ---
 

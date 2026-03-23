@@ -1,0 +1,78 @@
+---
+description: Lore protocol integration -- query decision context before modifying files, write enriched commits
+globs:
+alwaysApply: true
+---
+
+# Lore Protocol
+
+This project uses the **Lore protocol** (v1.0) to embed structured decision context into git commits. Constraints, rejected alternatives, and directives are stored as git trailers and queryable via the `lore` CLI.
+
+## Before Modifying Any File
+
+Run these commands for every file or directory you are about to change:
+
+```sh
+lore constraints <path> --json
+lore rejected <path> --json
+lore directives <path> --json
+```
+
+**Rules:**
+- **Constraint** = hard requirement. Do not write code that violates it.
+- **Rejected** = approach already tried and abandoned (`alternative | reason`). Do not re-explore it.
+- **Directive** = standing instruction. Follow it.
+
+## When Committing
+
+Stage changes with `git add`, then pipe JSON to `lore commit`:
+
+```sh
+echo '{
+  "intent": "fix: handle null user in auth middleware",
+  "body": "Previously threw 500 on null user. Now returns 401.",
+  "trailers": {
+    "Constraint": ["must not throw -- return 401 instead"],
+    "Rejected": ["silent redirect to login | breaks API clients"],
+    "Confidence": "high",
+    "Scope-risk": "narrow",
+    "Tested": ["null user returns 401", "valid user still works"],
+    "Not-tested": ["concurrent request race condition"]
+  }
+}' | lore commit
+```
+
+### JSON Schema
+
+- `intent` (string, REQUIRED): why the change was made, max 72 chars
+- `body` (string, optional): narrative context
+- `trailers` (object, optional):
+  - `Constraint`: string array -- hard requirements
+  - `Rejected`: string array -- format `alternative | reason`
+  - `Confidence`: `low` | `medium` | `high`
+  - `Scope-risk`: `narrow` | `moderate` | `wide`
+  - `Reversibility`: `clean` | `migration-needed` | `irreversible`
+  - `Directive`: string array -- future instructions
+  - `Tested`: string array -- verified scenarios
+  - `Not-tested`: string array -- known gaps
+  - `Supersedes`: string array -- 8-char hex Lore-ids replaced
+  - `Depends-on`: string array -- 8-char hex Lore-ids required
+  - `Related`: string array -- 8-char hex Lore-ids for reference
+
+Only include relevant trailers. `Lore-id` is auto-generated.
+
+### When to Add Trailers
+
+- Chose approach A over B: `Rejected: ["B | reason"]`
+- Rule must hold: `Constraint: ["the rule"]`
+- Instruction for future: `Directive: ["the instruction"]`
+- Unsure: `Confidence: "low"`
+- Hard to undo: `Reversibility: "migration-needed"`
+- Left untested: `Not-tested: ["the gap"]`
+
+## Other Commands
+
+- `lore context <path> --json` -- full context
+- `lore why <file>:<line> --json` -- line-level blame
+- `lore search --text "query" --json` -- search all lore
+- `lore stale <path> --json` -- outdated decisions

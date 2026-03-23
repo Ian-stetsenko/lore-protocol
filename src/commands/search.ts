@@ -1,11 +1,11 @@
 import type { Command } from 'commander';
 import type { AtomRepository } from '../services/atom-repository.js';
 import type { SupersessionResolver } from '../services/supersession-resolver.js';
+import type { SearchFilter } from '../services/search-filter.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
-import type { LoreAtom, TrailerKey, SupersessionStatus } from '../types/domain.js';
+import type { TrailerKey, SupersessionStatus } from '../types/domain.js';
 import type { SearchOptions, QueryResult, QueryMeta } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
-import { LORE_TRAILER_KEYS } from '../util/constants.js';
 
 interface SearchCommandOptions {
   readonly confidence?: string;
@@ -29,6 +29,7 @@ export function registerSearchCommand(
   deps: {
     atomRepository: AtomRepository;
     supersessionResolver: SupersessionResolver;
+    searchFilter: SearchFilter;
     getFormatter: () => IOutputFormatter;
   },
 ): void {
@@ -46,7 +47,7 @@ export function registerSearchCommand(
     .option('--until <ref>', 'Upper time/revision bound')
     .option('--limit <n>', 'Max results', parseInt)
     .action(async (options: SearchCommandOptions) => {
-      const { atomRepository, supersessionResolver, getFormatter } = deps;
+      const { atomRepository, supersessionResolver, searchFilter, getFormatter } = deps;
 
       const searchOptions: SearchOptions = {
         confidence: (options.confidence as SearchOptions['confidence']) ?? null,
@@ -68,8 +69,8 @@ export function registerSearchCommand(
         limit: searchOptions.limit ?? undefined,
       });
 
-      // Apply filters
-      atoms = applySearchFilters(atoms, searchOptions);
+      // Apply filters via SearchFilter service
+      atoms = searchFilter.applyFilters(atoms, searchOptions);
 
       const totalAtoms = atoms.length;
 
@@ -109,99 +110,6 @@ export function registerSearchCommand(
       const formatter = getFormatter();
       console.log(formatter.formatQueryResult(formattable));
     });
-}
-
-function applySearchFilters(atoms: LoreAtom[], options: SearchOptions): LoreAtom[] {
-  let result = atoms;
-
-  if (options.confidence !== null) {
-    result = result.filter((a) => a.trailers.Confidence === options.confidence);
-  }
-
-  if (options.scopeRisk !== null) {
-    result = result.filter((a) => a.trailers['Scope-risk'] === options.scopeRisk);
-  }
-
-  if (options.reversibility !== null) {
-    result = result.filter((a) => a.trailers.Reversibility === options.reversibility);
-  }
-
-  if (options.has !== null) {
-    const trailerKey = options.has;
-    result = result.filter((a) => atomHasTrailer(a, trailerKey));
-  }
-
-  if (options.author !== null) {
-    const authorLower = options.author.toLowerCase();
-    result = result.filter((a) => a.author.toLowerCase().includes(authorLower));
-  }
-
-  if (options.scope !== null) {
-    const scope = options.scope.toLowerCase();
-    result = result.filter((a) => {
-      const match = a.intent.match(/^[a-zA-Z]+\(([^)]+)\)/);
-      return match !== null && match[1].toLowerCase() === scope;
-    });
-  }
-
-  if (options.text !== null) {
-    const textLower = options.text.toLowerCase();
-    result = result.filter((a) => atomMatchesText(a, textLower));
-  }
-
-  return result;
-}
-
-function atomHasTrailer(atom: LoreAtom, trailerKey: TrailerKey): boolean {
-  switch (trailerKey) {
-    case 'Lore-id':
-      return !!atom.trailers['Lore-id'];
-    case 'Constraint':
-      return atom.trailers.Constraint.length > 0;
-    case 'Rejected':
-      return atom.trailers.Rejected.length > 0;
-    case 'Confidence':
-      return atom.trailers.Confidence !== null;
-    case 'Scope-risk':
-      return atom.trailers['Scope-risk'] !== null;
-    case 'Reversibility':
-      return atom.trailers.Reversibility !== null;
-    case 'Directive':
-      return atom.trailers.Directive.length > 0;
-    case 'Tested':
-      return atom.trailers.Tested.length > 0;
-    case 'Not-tested':
-      return atom.trailers['Not-tested'].length > 0;
-    case 'Supersedes':
-      return atom.trailers.Supersedes.length > 0;
-    case 'Depends-on':
-      return atom.trailers['Depends-on'].length > 0;
-    case 'Related':
-      return atom.trailers.Related.length > 0;
-    default:
-      return false;
-  }
-}
-
-function atomMatchesText(atom: LoreAtom, textLower: string): boolean {
-  if (atom.intent.toLowerCase().includes(textLower)) return true;
-  if (atom.body.toLowerCase().includes(textLower)) return true;
-
-  const trailers = atom.trailers;
-  const arrayKeys = [
-    'Constraint', 'Rejected', 'Directive', 'Tested', 'Not-tested',
-  ] as const;
-  for (const key of arrayKeys) {
-    for (const value of trailers[key]) {
-      if (value.toLowerCase().includes(textLower)) return true;
-    }
-  }
-
-  if (trailers.Confidence?.toLowerCase().includes(textLower)) return true;
-  if (trailers['Scope-risk']?.toLowerCase().includes(textLower)) return true;
-  if (trailers.Reversibility?.toLowerCase().includes(textLower)) return true;
-
-  return false;
 }
 
 function buildSearchTargetDescription(options: SearchOptions): string {

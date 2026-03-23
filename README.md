@@ -1,8 +1,8 @@
 # Lore CLI
 
-[![npm version](https://img.shields.io/npm/v/lore-cli?color=cb0000)](https://www.npmjs.com/package/lore-cli)
+[![npm version](https://img.shields.io/npm/v/lore-protocol?color=cb0000)](https://www.npmjs.com/package/lore-protocol)
 [![license](https://img.shields.io/github/license/Ian-stetsenko/lore-protocol)](LICENSE)
-[![node](https://img.shields.io/node/v/lore-cli)](package.json)
+[![node](https://img.shields.io/node/v/lore-protocol)](package.json)
 [![tests](https://img.shields.io/badge/tests-332%20passing-brightgreen)](#)
 [![arXiv](https://img.shields.io/badge/arXiv-2603.15566-b31b1b)](https://arxiv.org/abs/2603.15566)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
@@ -46,7 +46,7 @@ This commit is now a queryable knowledge atom. Any developer or AI agent can ask
 ## Install
 
 ```sh
-npm install -g lore-cli
+npm install -g lore-protocol
 ```
 
 Requires Node.js >= 18.
@@ -234,10 +234,10 @@ Pre-built instruction files ship with the package in `skills/`. Copy one file in
 
 | Agent | Command |
 |-------|---------|
-| **Claude Code** | `cat node_modules/lore-cli/skills/adapters/claude-code.md >> CLAUDE.md` |
-| **Cursor** | `cp node_modules/lore-cli/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
-| **GitHub Copilot** | `cat node_modules/lore-cli/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
-| **Windsurf** | `cat node_modules/lore-cli/skills/adapters/windsurf.md >> .windsurfrules` |
+| **Claude Code** | `cat node_modules/lore-protocol/skills/adapters/claude-code.md >> CLAUDE.md` |
+| **Cursor** | `cp node_modules/lore-protocol/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
+| **GitHub Copilot** | `cat node_modules/lore-protocol/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
+| **Windsurf** | `cat node_modules/lore-protocol/skills/adapters/windsurf.md >> .windsurfrules` |
 | **Aider** | See `skills/adapters/aider.md` |
 | **Other** | Paste `skills/adapters/generic.md` into your agent's system prompt |
 

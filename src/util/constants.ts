@@ -44,6 +44,7 @@ export const REFERENCE_TRAILER_KEYS = ['Supersedes', 'Depends-on', 'Related'] as
 export const DEFAULT_QUERY_LIMIT = 100;
 export const DEFAULT_STALE_OLDER_THAN = '6m';
 export const DEFAULT_STALE_DRIFT_THRESHOLD = 20;
+export const GIT_FILES_CHANGED_BATCH_SIZE = 20;
 
 export const CONFIG_FILENAME = 'config.toml';
 export const CONFIG_DIR = '.lore';

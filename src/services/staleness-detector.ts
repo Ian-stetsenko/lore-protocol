@@ -2,7 +2,7 @@ import type { IGitClient } from '../interfaces/git-client.js';
 import type { LoreConfig } from '../types/config.js';
 import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { StaleAtomReport, StaleReason } from '../types/output.js';
-import { LORE_ID_PATTERN } from '../util/constants.js';
+import { LORE_ID_PATTERN, STALE_SIGNAL } from '../util/constants.js';
 
 /**
  * Multi-signal staleness detection for Lore atoms.
@@ -74,7 +74,7 @@ export class StalenessDetector {
     if (ageMs > maxAgeMs) {
       const ageDescription = this.formatAge(ageMs);
       reasons.push({
-        signal: 'age',
+        signal: STALE_SIGNAL.AGE,
         description: `Atom is ${ageDescription} old (threshold: ${this.config.stale.olderThan})`,
       });
     }
@@ -96,7 +96,7 @@ export class StalenessDetector {
         );
         if (commitsSince > this.config.stale.driftThreshold) {
           reasons.push({
-            signal: 'drift',
+            signal: STALE_SIGNAL.DRIFT,
             description: `${filePath} has ${commitsSince} commits since this atom (threshold: ${this.config.stale.driftThreshold})`,
           });
         }
@@ -112,7 +112,7 @@ export class StalenessDetector {
   private checkLowConfidence(atom: LoreAtom, reasons: StaleReason[]): void {
     if (atom.trailers.Confidence === 'low') {
       reasons.push({
-        signal: 'low-confidence',
+        signal: STALE_SIGNAL.LOW_CONFIDENCE,
         description: 'Atom is marked as Confidence: low',
       });
     }
@@ -140,7 +140,7 @@ export class StalenessDetector {
 
         if (expiryDate !== null && now > expiryDate) {
           reasons.push({
-            signal: 'expired-hint',
+            signal: STALE_SIGNAL.EXPIRED_HINT,
             description: `Directive "${directive}" has expired [until:${dateStr}]`,
           });
         }
@@ -164,7 +164,7 @@ export class StalenessDetector {
       const depStatus = supersessionMap.get(depId);
       if (depStatus && depStatus.superseded) {
         reasons.push({
-          signal: 'orphaned-dep',
+          signal: STALE_SIGNAL.ORPHANED_DEP,
           description: `Depends on ${depId} which is superseded by ${depStatus.supersededBy}`,
         });
       }

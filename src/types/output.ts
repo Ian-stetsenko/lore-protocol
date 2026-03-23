@@ -30,8 +30,10 @@ export interface FormattableStalenessResult {
   readonly atoms: readonly StaleAtomReport[];
 }
 
+import type { StaleSignal } from '../util/constants.js';
+
 export interface StaleReason {
-  readonly signal: 'age' | 'drift' | 'low-confidence' | 'expired-hint' | 'orphaned-dep';
+  readonly signal: StaleSignal;
   readonly description: string;
 }
 

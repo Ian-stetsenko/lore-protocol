@@ -1,1 +1,1 @@
-// example module
+// updated example

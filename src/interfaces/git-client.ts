@@ -28,4 +28,6 @@ export interface IGitClient {
   getFilesChanged(commitHash: string): Promise<readonly string[]>;
   countCommitsSince(path: string, sinceCommitHash: string): Promise<number>;
   resolveRef(ref: string): Promise<string>;
+  countAllCommits(since?: string): Promise<number>;
+  listTrackedFiles(): Promise<readonly string[]>;
 }

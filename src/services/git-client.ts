@@ -137,6 +137,18 @@ export class GitClient implements IGitClient {
     return stdout.trim();
   }
 
+  async countAllCommits(since?: string): Promise<number> {
+    const args = ['rev-list', '--count', 'HEAD'];
+    if (since) args.push(`--since=${since}`);
+    const stdout = await this.exec(args);
+    return parseInt(stdout.trim(), 10) || 0;
+  }
+
+  async listTrackedFiles(): Promise<readonly string[]> {
+    const stdout = await this.exec(['ls-files']);
+    return stdout.trim().split('\n').filter(line => line.length > 0);
+  }
+
   /**
    * Parse the standard git log output with our custom format.
    * Records are separated by double null bytes; fields within a record

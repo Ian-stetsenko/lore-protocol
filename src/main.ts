@@ -37,6 +37,7 @@ import { registerCommitCommand } from './commands/commit.js';
 import { registerValidateCommand } from './commands/validate.js';
 import { registerSquashCommand } from './commands/squash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
+import { registerMetricsCommand } from './commands/metrics.js';
 
 import { LoreError } from './util/errors.js';
 
@@ -180,6 +181,15 @@ async function main(): Promise<void> {
   registerDoctorCommand(program, {
     atomRepository,
     configLoader,
+    getFormatter,
+  });
+
+  registerMetricsCommand(program, {
+    atomRepository,
+    supersessionResolver,
+    stalenessDetector,
+    gitClient,
+    config,
     getFormatter,
   });
 

@@ -5,6 +5,7 @@ import type {
   FormattableStalenessResult,
   FormattableTraceResult,
   FormattableDoctorResult,
+  FormattableMetricsResult,
 } from '../types/output.js';
 import type { LoreAtom, LoreTrailers } from '../types/domain.js';
 
@@ -141,6 +142,66 @@ export class JsonFormatter implements IOutputFormatter {
           warnings: data.summary.warnings,
           info: data.summary.info,
         },
+      },
+      null,
+      2,
+    );
+  }
+
+  formatMetricsResult(data: FormattableMetricsResult): string {
+    return JSON.stringify(
+      {
+        lore_version: '1.0',
+        period: {
+          since: data.period.since,
+          analyzed_at: data.period.analyzedAt,
+        },
+        adoption: {
+          total_commits: data.adoption.totalCommits,
+          lore_commits: data.adoption.loreCommits,
+          adoption_rate: data.adoption.adoptionRate,
+        },
+        decision_density: {
+          unique_files_touched: data.decisionDensity.uniqueFilesTouched,
+          files_with_atoms: data.decisionDensity.filesWithAtoms,
+          atoms_per_file: data.decisionDensity.atomsPerFile,
+          blind_spot_files: [...data.decisionDensity.blindSpotFiles],
+          blind_spot_count: data.decisionDensity.blindSpotCount,
+        },
+        trailer_coverage: {
+          total_atoms: data.trailerCoverage.totalAtoms,
+          trailers: data.trailerCoverage.trailers.map((t) => ({
+            trailer: t.trailer,
+            count: t.count,
+            percentage: t.percentage,
+          })),
+        },
+        staleness: {
+          total_active: data.staleness.totalActive,
+          stale_count: data.staleness.staleCount,
+          staleness_rate: data.staleness.stalenessRate,
+        },
+        supersession_depth: {
+          total_chains: data.supersessionDepth.totalChains,
+          average_depth: data.supersessionDepth.averageDepth,
+          max_depth: data.supersessionDepth.maxDepth,
+        },
+        constraint_coverage: {
+          total_repo_files: data.constraintCoverage.totalRepoFiles,
+          files_with_constraint: data.constraintCoverage.filesWithConstraint,
+          coverage_rate: data.constraintCoverage.coverageRate,
+        },
+        rejection_library: {
+          unique_rejections: data.rejectionLibrary.uniqueRejections,
+          total_rejection_entries: data.rejectionLibrary.totalRejectionEntries,
+        },
+        author_breakdown: {
+          agent_commits: data.authorBreakdown.agentCommits,
+          human_commits: data.authorBreakdown.humanCommits,
+          agent_adoption_rate: data.authorBreakdown.agentAdoptionRate,
+          human_adoption_rate: data.authorBreakdown.humanAdoptionRate,
+        },
+        benchmarking_guide: 'Automatic metrics: adoption rate, trailer coverage, staleness rate, constraint spread. Manual metrics to track: re-proposed rejections, review cycles, time-to-correct, onboarding time. Export for tracking: lore metrics --json > metrics-$(date +%Y-%m-%d).json',
       },
       null,
       2,

@@ -7,6 +7,7 @@ import type {
   FormattableStalenessResult,
   FormattableTraceResult,
   FormattableDoctorResult,
+  FormattableMetricsResult,
 } from '../types/output.js';
 import type { LoreAtom, TrailerKey } from '../types/domain.js';
 
@@ -192,6 +193,110 @@ export class TextFormatter implements IOutputFormatter {
     return lines.join('\n');
   }
 
+  formatMetricsResult(data: FormattableMetricsResult): string {
+    const lines: string[] = [];
+    const BAR_WIDTH = 30;
+
+    // Header
+    const period = data.period.since ? `since ${data.period.since}` : 'all time';
+    lines.push(this.c.bold('LORE METRICS DASHBOARD'));
+    lines.push(this.c.dim(`Period: ${period}  |  Analyzed: ${data.period.analyzedAt.slice(0, 10)}`));
+    lines.push('');
+
+    // 1. Adoption
+    lines.push(this.c.bold.underline('Adoption'));
+    lines.push(`  Lore commits:    ${this.alignRight(data.adoption.loreCommits, 6)} / ${data.adoption.totalCommits}`);
+    lines.push(`  Adoption rate:   ${this.progressBar(data.adoption.adoptionRate, BAR_WIDTH)} ${this.formatPercent(data.adoption.adoptionRate)}`);
+    lines.push('');
+
+    // 2. Decision Density
+    lines.push(this.c.bold.underline('Decision Density'));
+    lines.push(`  Files touched:   ${this.alignRight(data.decisionDensity.uniqueFilesTouched, 6)}`);
+    lines.push(`  Files with atoms:${this.alignRight(data.decisionDensity.filesWithAtoms, 6)}`);
+    lines.push(`  Atoms per file:  ${this.alignRight(data.decisionDensity.atomsPerFile, 6)}`);
+    lines.push(`  Blind spots:     ${this.alignRight(data.decisionDensity.blindSpotCount, 6)}`);
+    if (data.decisionDensity.blindSpotFiles.length > 0) {
+      for (const file of data.decisionDensity.blindSpotFiles) {
+        lines.push(`    ${this.c.dim(file)}`);
+      }
+      if (data.decisionDensity.blindSpotCount > data.decisionDensity.blindSpotFiles.length) {
+        lines.push(`    ${this.c.dim(`... and ${data.decisionDensity.blindSpotCount - data.decisionDensity.blindSpotFiles.length} more`)}`);
+      }
+    }
+    lines.push('');
+
+    // 3. Trailer Coverage
+    lines.push(this.c.bold.underline('Trailer Coverage'));
+    lines.push(`  Total atoms:     ${this.alignRight(data.trailerCoverage.totalAtoms, 6)}`);
+    for (const t of data.trailerCoverage.trailers) {
+      if (t.count > 0) {
+        const label = `  ${t.trailer}:`;
+        const padded = label.padEnd(20);
+        lines.push(`${padded}${this.alignRight(t.count, 5)}  ${this.progressBar(t.percentage / 100, BAR_WIDTH)} ${this.formatPercent(t.percentage / 100)}`);
+      }
+    }
+    lines.push('');
+
+    // 4. Staleness
+    lines.push(this.c.bold.underline('Staleness'));
+    lines.push(`  Active atoms:    ${this.alignRight(data.staleness.totalActive, 6)}`);
+    lines.push(`  Stale:           ${this.alignRight(data.staleness.staleCount, 6)}`);
+    lines.push(`  Staleness rate:  ${this.progressBar(data.staleness.stalenessRate, BAR_WIDTH)} ${this.formatPercent(data.staleness.stalenessRate)}`);
+    lines.push('');
+
+    // 5. Supersession Depth
+    lines.push(this.c.bold.underline('Supersession Depth'));
+    lines.push(`  Chains:          ${this.alignRight(data.supersessionDepth.totalChains, 6)}`);
+    lines.push(`  Average depth:   ${this.alignRight(data.supersessionDepth.averageDepth, 6)}`);
+    lines.push(`  Max depth:       ${this.alignRight(data.supersessionDepth.maxDepth, 6)}`);
+    lines.push('');
+
+    // 6. Constraint Coverage
+    lines.push(this.c.bold.underline('Constraint Coverage'));
+    lines.push(`  Repo files:      ${this.alignRight(data.constraintCoverage.totalRepoFiles, 6)}`);
+    lines.push(`  With constraints:${this.alignRight(data.constraintCoverage.filesWithConstraint, 6)}`);
+    lines.push(`  Coverage rate:   ${this.progressBar(data.constraintCoverage.coverageRate, BAR_WIDTH)} ${this.formatPercent(data.constraintCoverage.coverageRate)}`);
+    lines.push('');
+
+    // 7. Rejection Library
+    lines.push(this.c.bold.underline('Rejection Library'));
+    lines.push(`  Unique rejections:${this.alignRight(data.rejectionLibrary.uniqueRejections, 5)}`);
+    lines.push(`  Total entries:   ${this.alignRight(data.rejectionLibrary.totalRejectionEntries, 6)}`);
+    lines.push('');
+
+    // 8. Author Breakdown
+    lines.push(this.c.bold.underline('Author Breakdown'));
+    lines.push(`  Agent commits:   ${this.alignRight(data.authorBreakdown.agentCommits, 6)}  adoption: ${this.formatPercent(data.authorBreakdown.agentAdoptionRate)}`);
+    lines.push(`  Human commits:   ${this.alignRight(data.authorBreakdown.humanCommits, 6)}  adoption: ${this.formatPercent(data.authorBreakdown.humanAdoptionRate)}`);
+    lines.push('');
+
+    // Benchmarking Guide
+    lines.push(this.c.bold('\u2500'.repeat(60)));
+    lines.push(this.c.bold('BENCHMARKING GUIDE'));
+    lines.push('');
+    lines.push(this.c.bold('Automatic metrics (above):'));
+    lines.push('  Adoption rate     How many commits carry Lore context.');
+    lines.push('  Trailer coverage  Which trailers teams actually use.');
+    lines.push('  Staleness rate    How much recorded knowledge has drifted.');
+    lines.push('  Constraint spread How much of the codebase has explicit constraints.');
+    lines.push('');
+    lines.push(this.c.bold('Manual metrics to track alongside:'));
+    lines.push('  Re-proposed rejections  How often rejected alternatives resurface.');
+    lines.push('  Review cycles           PR round-trips before merge (check your git host).');
+    lines.push('  Time-to-correct         Days between introducing a bug and fixing it.');
+    lines.push('  Onboarding time         Time for new contributors to make first meaningful PR.');
+    lines.push('');
+    lines.push(this.c.bold('Before / after comparison:'));
+    lines.push('  1. Run `lore metrics --since <start>` to capture a baseline.');
+    lines.push('  2. After adopting Lore for a sprint/month, run again.');
+    lines.push('  3. Compare adoption rate, staleness, and constraint coverage.');
+    lines.push('');
+    lines.push(this.c.bold('Export for tracking:'));
+    lines.push('  lore metrics --json > metrics-$(date +%Y-%m-%d).json');
+
+    return lines.join('\n');
+  }
+
   formatSuccess(message: string, _data?: Record<string, unknown>): string {
     return this.c.green(message);
   }
@@ -296,5 +401,20 @@ export class TextFormatter implements IOutputFormatter {
 
   private formatDate(date: Date): string {
     return date.toISOString().slice(0, 10);
+  }
+
+  private progressBar(ratio: number, width: number): string {
+    const clamped = Math.max(0, Math.min(1, ratio));
+    const filled = Math.round(clamped * width);
+    const empty = width - filled;
+    return this.c.green('\u2588'.repeat(filled)) + this.c.dim('\u2591'.repeat(empty));
+  }
+
+  private formatPercent(ratio: number): string {
+    return `${(ratio * 100).toFixed(1)}%`;
+  }
+
+  private alignRight(value: number | string, width: number): string {
+    return String(value).padStart(width);
   }
 }

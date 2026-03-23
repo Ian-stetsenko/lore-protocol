@@ -59,6 +59,78 @@ export interface FormattableDoctorResult {
   readonly summary: { errors: number; warnings: number; info: number };
 }
 
+export interface FormattableMetricsResult {
+  readonly period: MetricsPeriod;
+  readonly adoption: AdoptionMetrics;
+  readonly decisionDensity: DecisionDensityMetrics;
+  readonly trailerCoverage: TrailerCoverageMetrics;
+  readonly staleness: StalenessMetrics;
+  readonly supersessionDepth: SupersessionDepthMetrics;
+  readonly constraintCoverage: ConstraintCoverageMetrics;
+  readonly rejectionLibrary: RejectionLibraryMetrics;
+  readonly authorBreakdown: AuthorBreakdownMetrics;
+}
+
+export interface MetricsPeriod {
+  readonly since: string | null;
+  readonly analyzedAt: string;
+}
+
+export interface AdoptionMetrics {
+  readonly totalCommits: number;
+  readonly loreCommits: number;
+  readonly adoptionRate: number;
+}
+
+export interface DecisionDensityMetrics {
+  readonly uniqueFilesTouched: number;
+  readonly filesWithAtoms: number;
+  readonly atomsPerFile: number;
+  readonly blindSpotFiles: readonly string[];
+  readonly blindSpotCount: number;
+}
+
+export interface TrailerCoverageMetrics {
+  readonly totalAtoms: number;
+  readonly trailers: readonly TrailerUsage[];
+}
+
+export interface TrailerUsage {
+  readonly trailer: string;
+  readonly count: number;
+  readonly percentage: number;
+}
+
+export interface StalenessMetrics {
+  readonly totalActive: number;
+  readonly staleCount: number;
+  readonly stalenessRate: number;
+}
+
+export interface SupersessionDepthMetrics {
+  readonly totalChains: number;
+  readonly averageDepth: number;
+  readonly maxDepth: number;
+}
+
+export interface ConstraintCoverageMetrics {
+  readonly totalRepoFiles: number;
+  readonly filesWithConstraint: number;
+  readonly coverageRate: number;
+}
+
+export interface RejectionLibraryMetrics {
+  readonly uniqueRejections: number;
+  readonly totalRejectionEntries: number;
+}
+
+export interface AuthorBreakdownMetrics {
+  readonly agentCommits: number;
+  readonly humanCommits: number;
+  readonly agentAdoptionRate: number;
+  readonly humanAdoptionRate: number;
+}
+
 export interface DoctorCheck {
   readonly name: string;
   readonly status: 'ok' | 'error' | 'warning' | 'info';

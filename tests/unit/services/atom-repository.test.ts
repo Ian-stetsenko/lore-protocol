@@ -601,4 +601,48 @@ describe('AtomRepository', () => {
       expect(logArgs).toContain('src/auth.ts');
     });
   });
+
+  describe('batching behavior', () => {
+    it('should call getFilesChanged only for Lore commits, not non-Lore commits', async () => {
+      const loreCommit = makeLoreCommit({ loreId: 'aaaa1111' });
+      const nonLoreCommit: RawCommit = {
+        hash: 'non-lore',
+        date: '2025-01-16T10:00:00Z',
+        author: 'dev@example.com',
+        subject: 'chore: deps',
+        body: '',
+        trailers: '',
+      };
+      vi.mocked(gitClient.log).mockResolvedValue([loreCommit, nonLoreCommit]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+
+      await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
+
+      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(1);
+      expect(gitClient.getFilesChanged).toHaveBeenCalledWith('abc12345');
+    });
+
+    it('should handle more commits than batch size', async () => {
+      const commits = Array.from({ length: 25 }, (_, i) =>
+        makeLoreCommit({ hash: `hash${i}`, loreId: `${String(i).padStart(8, '0')}` }),
+      );
+      vi.mocked(gitClient.log).mockResolvedValue(commits);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['file.ts']);
+
+      const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
+
+      expect(result).toHaveLength(25);
+      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(25);
+    });
+
+    it('should propagate getFilesChanged errors', async () => {
+      const commit = makeLoreCommit({ loreId: 'deadbeef' });
+      vi.mocked(gitClient.log).mockResolvedValue([commit]);
+      vi.mocked(gitClient.getFilesChanged).mockRejectedValue(new Error('git failed'));
+
+      await expect(
+        repo.findByTarget(makeGitLogArgs(), makeQueryOptions()),
+      ).rejects.toThrow('git failed');
+    });
+  });
 });

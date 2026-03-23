@@ -2,7 +2,7 @@ import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
 import type { PathQueryOptions } from '../types/query.js';
 import type { LoreAtom, LoreId, LoreTrailers } from '../types/domain.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
-import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
+import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS, GIT_FILES_CHANGED_BATCH_SIZE } from '../util/constants.js';
 
 /**
  * Retrieves LoreAtoms from git history.
@@ -196,18 +196,18 @@ export class AtomRepository {
       loreCommits.push({ raw, trailers });
     }
 
-    // Second pass: batch getFilesChanged calls with concurrency limit
-    const BATCH_SIZE = 20;
-    const filesChangedResults: (readonly string[])[] = [];
-    for (let i = 0; i < loreCommits.length; i += BATCH_SIZE) {
-      const batch = loreCommits.slice(i, i + BATCH_SIZE);
+    // Second pass: batch getFilesChanged calls with concurrency limit.
+    // Results accumulate in insertion order, maintaining 1:1 alignment with loreCommits.
+    const filesPerCommit: (readonly string[])[] = [];
+    for (let i = 0; i < loreCommits.length; i += GIT_FILES_CHANGED_BATCH_SIZE) {
+      const batch = loreCommits.slice(i, i + GIT_FILES_CHANGED_BATCH_SIZE);
       const batchResults = await Promise.all(
         batch.map(({ raw }) => this.gitClient.getFilesChanged(raw.hash)),
       );
-      filesChangedResults.push(...batchResults);
+      filesPerCommit.push(...batchResults);
     }
 
-    // Build atoms from paired data
+    // Build atoms by pairing parsed trailers with their file lists
     const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) => ({
       loreId: trailers['Lore-id'],
       commitHash: raw.hash,
@@ -216,7 +216,7 @@ export class AtomRepository {
       intent: raw.subject,
       body: this.stripTrailersFromBody(raw.body, raw.trailers),
       trailers,
-      filesChanged: filesChangedResults[index],
+      filesChanged: filesPerCommit[index],
     }));
 
     return atoms;

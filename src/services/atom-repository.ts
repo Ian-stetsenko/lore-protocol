@@ -208,7 +208,20 @@ export class AtomRepository {
     }
 
     // Build atoms by pairing parsed trailers with their file lists
-    const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) => ({
+    const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) =>
+      this.buildAtom(raw, trailers, filesPerCommit[index]),
+    );
+
+    return atoms;
+  }
+
+  /**
+   * Construct a LoreAtom from its constituent parts.
+   * Single source of truth for RawCommit -> LoreAtom mapping.
+   * GRASP: Creator -- AtomRepository owns the data needed to create atoms.
+   */
+  private buildAtom(raw: RawCommit, trailers: LoreTrailers, filesChanged: readonly string[]): LoreAtom {
+    return {
       loreId: trailers['Lore-id'],
       commitHash: raw.hash,
       date: new Date(raw.date),
@@ -216,10 +229,8 @@ export class AtomRepository {
       intent: raw.subject,
       body: this.stripTrailersFromBody(raw.body, raw.trailers),
       trailers,
-      filesChanged: filesPerCommit[index],
-    }));
-
-    return atoms;
+      filesChanged,
+    };
   }
 
   /**

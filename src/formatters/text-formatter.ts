@@ -12,6 +12,8 @@ import type {
 import type { LoreAtom, TrailerKey } from '../types/domain.js';
 
 export class TextFormatter implements IOutputFormatter {
+  private static readonly BAR_WIDTH = 30;
+
   private readonly c: ChalkInstance;
 
   constructor(options: { color: boolean }) {
@@ -195,21 +197,36 @@ export class TextFormatter implements IOutputFormatter {
 
   formatMetricsResult(data: FormattableMetricsResult): string {
     const lines: string[] = [];
-    const BAR_WIDTH = 30;
 
-    // Header
+    this.renderMetricsHeader(data, lines);
+    this.renderAdoptionSection(data, lines);
+    this.renderDecisionDensitySection(data, lines);
+    this.renderTrailerCoverageSection(data, lines);
+    this.renderStalenessSection(data, lines);
+    this.renderSupersessionSection(data, lines);
+    this.renderConstraintCoverageSection(data, lines);
+    this.renderRejectionLibrarySection(data, lines);
+    this.renderAuthorBreakdownSection(data, lines);
+    this.renderBenchmarkingGuide(lines);
+
+    return lines.join('\n');
+  }
+
+  private renderMetricsHeader(data: FormattableMetricsResult, lines: string[]): void {
     const period = data.period.since ? `since ${data.period.since}` : 'all time';
     lines.push(this.c.bold('LORE METRICS DASHBOARD'));
     lines.push(this.c.dim(`Period: ${period}  |  Analyzed: ${data.period.analyzedAt.slice(0, 10)}`));
     lines.push('');
+  }
 
-    // 1. Adoption
+  private renderAdoptionSection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Adoption'));
     lines.push(`  Lore commits:    ${this.alignRight(data.adoption.loreCommits, 6)} / ${data.adoption.totalCommits}`);
-    lines.push(`  Adoption rate:   ${this.progressBar(data.adoption.adoptionRate, BAR_WIDTH)} ${this.formatPercent(data.adoption.adoptionRate)}`);
+    lines.push(`  Adoption rate:   ${this.renderProgressBar(data.adoption.adoptionRate, TextFormatter.BAR_WIDTH)} ${this.formatPercent(data.adoption.adoptionRate)}`);
     lines.push('');
+  }
 
-    // 2. Decision Density
+  private renderDecisionDensitySection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Decision Density'));
     lines.push(`  Files touched:   ${this.alignRight(data.decisionDensity.uniqueFilesTouched, 6)}`);
     lines.push(`  Files with atoms:${this.alignRight(data.decisionDensity.filesWithAtoms, 6)}`);
@@ -224,53 +241,60 @@ export class TextFormatter implements IOutputFormatter {
       }
     }
     lines.push('');
+  }
 
-    // 3. Trailer Coverage
+  private renderTrailerCoverageSection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Trailer Coverage'));
     lines.push(`  Total atoms:     ${this.alignRight(data.trailerCoverage.totalAtoms, 6)}`);
     for (const t of data.trailerCoverage.trailers) {
       if (t.count > 0) {
         const label = `  ${t.trailer}:`;
         const padded = label.padEnd(20);
-        lines.push(`${padded}${this.alignRight(t.count, 5)}  ${this.progressBar(t.percentage / 100, BAR_WIDTH)} ${this.formatPercent(t.percentage / 100)}`);
+        lines.push(`${padded}${this.alignRight(t.count, 5)}  ${this.renderProgressBar(t.percentage / 100, TextFormatter.BAR_WIDTH)} ${this.formatPercent(t.percentage / 100)}`);
       }
     }
     lines.push('');
+  }
 
-    // 4. Staleness
+  private renderStalenessSection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Staleness'));
     lines.push(`  Active atoms:    ${this.alignRight(data.staleness.totalActive, 6)}`);
     lines.push(`  Stale:           ${this.alignRight(data.staleness.staleCount, 6)}`);
-    lines.push(`  Staleness rate:  ${this.progressBar(data.staleness.stalenessRate, BAR_WIDTH)} ${this.formatPercent(data.staleness.stalenessRate)}`);
+    lines.push(`  Staleness rate:  ${this.renderProgressBar(data.staleness.stalenessRate, TextFormatter.BAR_WIDTH)} ${this.formatPercent(data.staleness.stalenessRate)}`);
     lines.push('');
+  }
 
-    // 5. Supersession Depth
+  private renderSupersessionSection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Supersession Depth'));
     lines.push(`  Chains:          ${this.alignRight(data.supersessionDepth.totalChains, 6)}`);
     lines.push(`  Average depth:   ${this.alignRight(data.supersessionDepth.averageDepth, 6)}`);
     lines.push(`  Max depth:       ${this.alignRight(data.supersessionDepth.maxDepth, 6)}`);
     lines.push('');
+  }
 
-    // 6. Constraint Coverage
+  private renderConstraintCoverageSection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Constraint Coverage'));
     lines.push(`  Repo files:      ${this.alignRight(data.constraintCoverage.totalRepoFiles, 6)}`);
     lines.push(`  With constraints:${this.alignRight(data.constraintCoverage.filesWithConstraint, 6)}`);
-    lines.push(`  Coverage rate:   ${this.progressBar(data.constraintCoverage.coverageRate, BAR_WIDTH)} ${this.formatPercent(data.constraintCoverage.coverageRate)}`);
+    lines.push(`  Coverage rate:   ${this.renderProgressBar(data.constraintCoverage.coverageRate, TextFormatter.BAR_WIDTH)} ${this.formatPercent(data.constraintCoverage.coverageRate)}`);
     lines.push('');
+  }
 
-    // 7. Rejection Library
+  private renderRejectionLibrarySection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Rejection Library'));
     lines.push(`  Unique rejections:${this.alignRight(data.rejectionLibrary.uniqueRejections, 5)}`);
     lines.push(`  Total entries:   ${this.alignRight(data.rejectionLibrary.totalRejectionEntries, 6)}`);
     lines.push('');
+  }
 
-    // 8. Author Breakdown
+  private renderAuthorBreakdownSection(data: FormattableMetricsResult, lines: string[]): void {
     lines.push(this.c.bold.underline('Author Breakdown'));
-    lines.push(`  Agent commits:   ${this.alignRight(data.authorBreakdown.agentCommits, 6)}  adoption: ${this.formatPercent(data.authorBreakdown.agentAdoptionRate)}`);
-    lines.push(`  Human commits:   ${this.alignRight(data.authorBreakdown.humanCommits, 6)}  adoption: ${this.formatPercent(data.authorBreakdown.humanAdoptionRate)}`);
+    lines.push(`  Agent commits:   ${this.alignRight(data.authorBreakdown.agentLoreCommits, 6)}  adoption: ${this.formatPercent(data.authorBreakdown.agentAdoptionRate)}`);
+    lines.push(`  Human commits:   ${this.alignRight(data.authorBreakdown.humanLoreCommits, 6)}  adoption: ${this.formatPercent(data.authorBreakdown.humanAdoptionRate)}`);
     lines.push('');
+  }
 
-    // Benchmarking Guide
+  private renderBenchmarkingGuide(lines: string[]): void {
     lines.push(this.c.bold('\u2500'.repeat(60)));
     lines.push(this.c.bold('BENCHMARKING GUIDE'));
     lines.push('');
@@ -293,8 +317,6 @@ export class TextFormatter implements IOutputFormatter {
     lines.push('');
     lines.push(this.c.bold('Export for tracking:'));
     lines.push('  lore metrics --json > metrics-$(date +%Y-%m-%d).json');
-
-    return lines.join('\n');
   }
 
   formatSuccess(message: string, _data?: Record<string, unknown>): string {
@@ -403,7 +425,7 @@ export class TextFormatter implements IOutputFormatter {
     return date.toISOString().slice(0, 10);
   }
 
-  private progressBar(ratio: number, width: number): string {
+  private renderProgressBar(ratio: number, width: number): string {
     const clamped = Math.max(0, Math.min(1, ratio));
     const filled = Math.round(clamped * width);
     const empty = width - filled;

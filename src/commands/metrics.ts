@@ -4,8 +4,7 @@ import type { SupersessionResolver } from '../services/supersession-resolver.js'
 import type { StalenessDetector } from '../services/staleness-detector.js';
 import type { IGitClient } from '../interfaces/git-client.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
-import type { LoreConfig } from '../types/config.js';
-import { MetricsCollector } from '../services/metrics-collector.js';
+import type { MetricsCollector } from '../services/metrics-collector.js';
 
 /**
  * Register the `lore metrics` command.
@@ -18,7 +17,7 @@ export function registerMetricsCommand(
     supersessionResolver: SupersessionResolver;
     stalenessDetector: StalenessDetector;
     gitClient: IGitClient;
-    config: LoreConfig;
+    metricsCollector: MetricsCollector;
     getFormatter: () => IOutputFormatter;
   },
 ): void {
@@ -32,6 +31,7 @@ export function registerMetricsCommand(
         supersessionResolver,
         stalenessDetector,
         gitClient,
+        metricsCollector,
         getFormatter,
       } = deps;
 
@@ -57,7 +57,6 @@ export function registerMetricsCommand(
       const staleAtomIds = new Set(staleReports.map(r => r.atom.loreId));
 
       // 6. Collect all metrics
-      const metricsCollector = new MetricsCollector();
       const result = metricsCollector.collectAll({
         atoms,
         supersessionMap,

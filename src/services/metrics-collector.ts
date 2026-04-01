@@ -11,6 +11,7 @@ import type {
   RejectionLibraryMetrics,
   AuthorBreakdownMetrics,
 } from '../types/output.js';
+import { MAX_BLIND_SPOT_DISPLAY } from '../util/constants.js';
 
 /**
  * Patterns used to identify agent/bot commit authors.
@@ -90,7 +91,7 @@ export class MetricsCollector {
     const filesWithAtomsSet = new Set(fileAtomCounts.keys());
     const allBlindSpots = input.allRepoFiles.filter(f => !filesWithAtomsSet.has(f));
     const blindSpotCount = allBlindSpots.length;
-    const blindSpotFiles = allBlindSpots.slice(0, 10);
+    const blindSpotFiles = allBlindSpots.slice(0, MAX_BLIND_SPOT_DISPLAY);
 
     return {
       uniqueFilesTouched,
@@ -239,7 +240,7 @@ export class MetricsCollector {
     for (const atom of input.atoms) {
       for (const rejection of atom.trailers.Rejected) {
         totalRejectionEntries++;
-        // Normalize: lowercase, trim, strip trailing pipe and reason for dedup
+        // Normalize: lowercase and trim for dedup
         const normalized = rejection.trim().toLowerCase();
         uniqueRejections.add(normalized);
       }
@@ -285,8 +286,8 @@ export class MetricsCollector {
     const humanAdoptionRate = humanTotalEstimate > 0 ? humanLoreCommits / humanTotalEstimate : 0;
 
     return {
-      agentCommits: agentLoreCommits,
-      humanCommits: humanLoreCommits,
+      agentLoreCommits,
+      humanLoreCommits,
       agentAdoptionRate,
       humanAdoptionRate,
     };

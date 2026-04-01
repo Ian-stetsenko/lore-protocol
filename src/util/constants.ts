@@ -46,6 +46,8 @@ export const DEFAULT_STALE_OLDER_THAN = '6m';
 export const DEFAULT_STALE_DRIFT_THRESHOLD = 20;
 export const GIT_FILES_CHANGED_BATCH_SIZE = 20;
 
+export const MAX_BLIND_SPOT_DISPLAY = 10;
+
 export const CONFIG_FILENAME = 'config.toml';
 export const CONFIG_DIR = '.lore';
 

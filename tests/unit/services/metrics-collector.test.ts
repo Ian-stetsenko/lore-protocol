@@ -91,8 +91,8 @@ describe('MetricsCollector', () => {
       expect(result.constraintCoverage.coverageRate).toBe(0);
       expect(result.rejectionLibrary.uniqueRejections).toBe(0);
       expect(result.rejectionLibrary.totalRejectionEntries).toBe(0);
-      expect(result.authorBreakdown.agentCommits).toBe(0);
-      expect(result.authorBreakdown.humanCommits).toBe(0);
+      expect(result.authorBreakdown.agentLoreCommits).toBe(0);
+      expect(result.authorBreakdown.humanLoreCommits).toBe(0);
     });
   });
 
@@ -150,8 +150,8 @@ describe('MetricsCollector', () => {
 
       const result = collector.collectAll(input);
 
-      expect(result.authorBreakdown.agentCommits).toBe(2);
-      expect(result.authorBreakdown.humanCommits).toBe(2);
+      expect(result.authorBreakdown.agentLoreCommits).toBe(2);
+      expect(result.authorBreakdown.humanLoreCommits).toBe(2);
       expect(result.adoption.adoptionRate).toBe(0.4);
     });
 
@@ -177,8 +177,8 @@ describe('MetricsCollector', () => {
 
       const result = collector.collectAll(input);
 
-      expect(result.authorBreakdown.agentCommits).toBe(5);
-      expect(result.authorBreakdown.humanCommits).toBe(0);
+      expect(result.authorBreakdown.agentLoreCommits).toBe(5);
+      expect(result.authorBreakdown.humanLoreCommits).toBe(0);
     });
   });
 
@@ -526,6 +526,112 @@ describe('MetricsCollector', () => {
       const result = collector.collectAll(input);
 
       expect(result.period.since).toBe('2025-01-01');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle circular supersession (A supersedes B, B supersedes A) without infinite loop', () => {
+      const atoms = [
+        makeAtom({ loreId: 'aaaa1111', supersedes: ['bbbb2222'] }),
+        makeAtom({ loreId: 'bbbb2222', supersedes: ['aaaa1111'] }),
+      ];
+
+      const input: MetricsInput = {
+        atoms,
+        supersessionMap: makeSupersessionMap([
+          ['aaaa1111', true, 'bbbb2222'],
+          ['bbbb2222', true, 'aaaa1111'],
+        ]),
+        staleAtomIds: new Set(),
+        totalCommitCount: 2,
+        allRepoFiles: [],
+        since: null,
+      };
+
+      // Should complete without hanging or throwing
+      const result = collector.collectAll(input);
+
+      expect(result.supersessionDepth.totalChains).toBeGreaterThanOrEqual(0);
+      expect(result.supersessionDepth.maxDepth).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should handle adoption rate when atoms exceed totalCommitCount', () => {
+      const atoms = [
+        makeAtom({ loreId: 'aaaa1111' }),
+        makeAtom({ loreId: 'bbbb2222' }),
+        makeAtom({ loreId: 'cccc3333' }),
+      ];
+
+      const input: MetricsInput = {
+        atoms,
+        supersessionMap: makeSupersessionMap([
+          ['aaaa1111', false, null],
+          ['bbbb2222', false, null],
+          ['cccc3333', false, null],
+        ]),
+        staleAtomIds: new Set(),
+        totalCommitCount: 1,
+        allRepoFiles: [],
+        since: null,
+      };
+
+      const result = collector.collectAll(input);
+
+      // Adoption rate exceeds 1.0 when atoms > totalCommitCount
+      expect(result.adoption.adoptionRate).toBe(3);
+      expect(result.adoption.loreCommits).toBe(3);
+      expect(result.adoption.totalCommits).toBe(1);
+    });
+
+    it('should report agentLoreCommits = 0 when all authors are human', () => {
+      const atoms = [
+        makeAtom({ loreId: 'aaaa1111', author: 'alice@company.com' }),
+        makeAtom({ loreId: 'bbbb2222', author: 'bob@company.com' }),
+        makeAtom({ loreId: 'cccc3333', author: 'carol@company.com' }),
+      ];
+
+      const input: MetricsInput = {
+        atoms,
+        supersessionMap: makeSupersessionMap([
+          ['aaaa1111', false, null],
+          ['bbbb2222', false, null],
+          ['cccc3333', false, null],
+        ]),
+        staleAtomIds: new Set(),
+        totalCommitCount: 5,
+        allRepoFiles: [],
+        since: null,
+      };
+
+      const result = collector.collectAll(input);
+
+      expect(result.authorBreakdown.agentLoreCommits).toBe(0);
+      expect(result.authorBreakdown.humanLoreCommits).toBe(3);
+      expect(result.authorBreakdown.agentAdoptionRate).toBe(0);
+      expect(result.authorBreakdown.humanAdoptionRate).toBeGreaterThan(0);
+    });
+
+    it('should handle zero atoms with positive commits without division by zero', () => {
+      const input: MetricsInput = {
+        atoms: [],
+        supersessionMap: new Map(),
+        staleAtomIds: new Set(),
+        totalCommitCount: 100,
+        allRepoFiles: ['src/main.ts', 'src/util.ts'],
+        since: null,
+      };
+
+      const result = collector.collectAll(input);
+
+      expect(result.adoption.adoptionRate).toBe(0);
+      expect(result.adoption.loreCommits).toBe(0);
+      expect(result.adoption.totalCommits).toBe(100);
+      expect(result.decisionDensity.atomsPerFile).toBe(0);
+      expect(result.decisionDensity.blindSpotCount).toBe(2);
+      expect(result.trailerCoverage.totalAtoms).toBe(0);
+      expect(result.authorBreakdown.agentLoreCommits).toBe(0);
+      expect(result.authorBreakdown.humanLoreCommits).toBe(0);
+      expect(result.authorBreakdown.humanAdoptionRate).toBe(0);
     });
   });
 });

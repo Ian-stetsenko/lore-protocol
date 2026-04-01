@@ -196,8 +196,8 @@ export class JsonFormatter implements IOutputFormatter {
           total_rejection_entries: data.rejectionLibrary.totalRejectionEntries,
         },
         author_breakdown: {
-          agent_commits: data.authorBreakdown.agentCommits,
-          human_commits: data.authorBreakdown.humanCommits,
+          agent_lore_commits: data.authorBreakdown.agentLoreCommits,
+          human_lore_commits: data.authorBreakdown.humanLoreCommits,
           agent_adoption_rate: data.authorBreakdown.agentAdoptionRate,
           human_adoption_rate: data.authorBreakdown.humanAdoptionRate,
         },

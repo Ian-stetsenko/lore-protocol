@@ -125,8 +125,8 @@ export interface RejectionLibraryMetrics {
 }
 
 export interface AuthorBreakdownMetrics {
-  readonly agentCommits: number;
-  readonly humanCommits: number;
+  readonly agentLoreCommits: number;
+  readonly humanLoreCommits: number;
   readonly agentAdoptionRate: number;
   readonly humanAdoptionRate: number;
 }

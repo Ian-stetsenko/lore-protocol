@@ -18,6 +18,7 @@ import { Validator } from './services/validator.js';
 import { TerminalPrompt } from './services/terminal-prompt.js';
 import { CommitInputResolver } from './services/commit-input-resolver.js';
 import { SearchFilter } from './services/search-filter.js';
+import { MetricsCollector } from './services/metrics-collector.js';
 
 import { TextFormatter } from './formatters/text-formatter.js';
 import { JsonFormatter } from './formatters/json-formatter.js';
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
   const searchFilter = new SearchFilter();
   const prompt = new TerminalPrompt();
   const commitInputResolver = new CommitInputResolver(prompt);
+  const metricsCollector = new MetricsCollector();
 
   // 4. Formatter factory (reads --format/--json from program options at call time)
   // Memoized: the formatter is created once on first call and reused thereafter.
@@ -189,7 +191,7 @@ async function main(): Promise<void> {
     supersessionResolver,
     stalenessDetector,
     gitClient,
-    config,
+    metricsCollector,
     getFormatter,
   });
 

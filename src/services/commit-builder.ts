@@ -25,6 +25,7 @@ export interface CommitInput {
     readonly Supersedes?: readonly string[];
     readonly 'Depends-on'?: readonly string[];
     readonly Related?: readonly string[];
+    readonly custom?: Readonly<Record<string, readonly string[]>>;
   };
 }
 
@@ -181,7 +182,7 @@ export class CommitBuilder {
       Supersedes: input.trailers?.Supersedes ? [...input.trailers.Supersedes] : [],
       'Depends-on': input.trailers?.['Depends-on'] ? [...input.trailers['Depends-on']] : [],
       Related: input.trailers?.Related ? [...input.trailers.Related] : [],
-      custom: new Map(),
+      custom: this.buildCustomMap(input.trailers?.custom),
     };
   }
 
@@ -195,6 +196,19 @@ export class CommitBuilder {
     if (Array.isArray(value)) return value.length > 0;
     if (typeof value === 'string') return value.length > 0;
     return true;
+  }
+
+  private buildCustomMap(
+    custom: Readonly<Record<string, readonly string[]>> | undefined,
+  ): ReadonlyMap<string, readonly string[]> {
+    if (!custom) return new Map();
+    const map = new Map<string, readonly string[]>();
+    for (const [key, values] of Object.entries(custom)) {
+      if (Array.isArray(values) && values.length > 0) {
+        map.set(key, [...values]);
+      }
+    }
+    return map;
   }
 
   private estimateLineCount(input: CommitInput): number {
@@ -227,6 +241,11 @@ export class CommitBuilder {
       for (const key of enumKeys) {
         if (input.trailers[key] !== undefined) {
           count += 1;
+        }
+      }
+      if (input.trailers.custom) {
+        for (const values of Object.values(input.trailers.custom)) {
+          count += values.length;
         }
       }
     }

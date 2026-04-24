@@ -136,6 +136,37 @@ describe('CommitBuilder', () => {
       expect(passedTrailers.Confidence).toBe('medium');
       expect(passedTrailers.Constraint).toEqual([]);
     });
+
+    it('should pass custom trailers through to LoreTrailers.custom map', () => {
+      const input: CommitInput = {
+        intent: 'feat: with custom trailers',
+        trailers: {
+          Confidence: 'high' as const,
+          custom: {
+            'Assisted-by': ['Gemini:CLI'],
+            'Ticket': ['PROJ-123'],
+          },
+        },
+      };
+
+      builder.build(input);
+
+      const passedTrailers = vi.mocked(mockParser.serialize).mock.calls[0][0] as LoreTrailers;
+      expect(passedTrailers.custom.get('Assisted-by')).toEqual(['Gemini:CLI']);
+      expect(passedTrailers.custom.get('Ticket')).toEqual(['PROJ-123']);
+    });
+
+    it('should produce empty custom map when no custom trailers provided', () => {
+      const input: CommitInput = {
+        intent: 'feat: no custom',
+        trailers: { Confidence: 'high' as const },
+      };
+
+      builder.build(input);
+
+      const passedTrailers = vi.mocked(mockParser.serialize).mock.calls[0][0] as LoreTrailers;
+      expect(passedTrailers.custom.size).toBe(0);
+    });
   });
 
   describe('validate', () => {

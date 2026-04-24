@@ -139,6 +139,72 @@ describe('JsonInputReader', () => {
     });
   });
 
+  describe('custom trailers', () => {
+    it('should collect unknown trailer keys as custom trailers', async () => {
+      const input = {
+        intent: 'test',
+        trailers: {
+          'Assisted-by': 'Gemini:CLI',
+          Confidence: 'high',
+        },
+      };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+      const result = await reader.read();
+
+      expect(result.trailers?.custom).toEqual({ 'Assisted-by': ['Gemini:CLI'] });
+      expect(result.trailers?.Confidence).toBe('high');
+    });
+
+    it('should collect multiple custom trailers', async () => {
+      const input = {
+        intent: 'test',
+        trailers: {
+          'Assisted-by': 'Gemini:CLI',
+          'Ticket': ['PROJ-123', 'PROJ-456'],
+          Constraint: ['some constraint'],
+        },
+      };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+      const result = await reader.read();
+
+      expect(result.trailers?.custom?.['Assisted-by']).toEqual(['Gemini:CLI']);
+      expect(result.trailers?.custom?.['Ticket']).toEqual(['PROJ-123', 'PROJ-456']);
+      expect(result.trailers?.Constraint).toEqual(['some constraint']);
+    });
+
+    it('should not include custom field when no unknown trailers exist', async () => {
+      const input = {
+        intent: 'test',
+        trailers: {
+          Confidence: 'high',
+        },
+      };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+      const result = await reader.read();
+
+      expect(result.trailers?.custom).toBeUndefined();
+    });
+
+    it('should skip custom trailers with non-string values', async () => {
+      const input = {
+        intent: 'test',
+        trailers: {
+          'Valid-custom': 'value',
+          'Invalid-custom': 42,
+        },
+      };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+      const result = await reader.read();
+
+      expect(result.trailers?.custom?.['Valid-custom']).toEqual(['value']);
+      expect(result.trailers?.custom?.['Invalid-custom']).toBeUndefined();
+    });
+  });
+
   describe('enum parsing', () => {
     it('should return string values for enum trailers', async () => {
       const input = {

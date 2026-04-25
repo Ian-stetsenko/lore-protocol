@@ -1,4 +1,8 @@
 import { Command } from 'commander';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json') as { version: string };
 
 import type { IGitClient } from './interfaces/git-client.js';
 import type { IConfigLoader } from './interfaces/config-loader.js';
@@ -53,7 +57,7 @@ async function main(): Promise<void> {
   program
     .name('lore')
     .description('CLI tool for the Lore protocol -- structured decision context in git commits')
-    .version('0.1.0');
+    .version(version);
 
   // Global options
   program

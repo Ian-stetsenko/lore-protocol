@@ -38,7 +38,7 @@ import { registerValidateCommand } from './commands/validate.js';
 import { registerSquashCommand } from './commands/squash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 
-import { LoreError } from './util/errors.js';
+import { LoreError, ValidationError } from './util/errors.js';
 
 /**
  * Composition root: constructs all dependencies and wires them together.
@@ -196,6 +196,17 @@ main().catch((error: unknown) => {
   const formatter: IOutputFormatter = useJson
     ? new JsonFormatter()
     : new TextFormatter({ color: process.stderr.isTTY ?? false });
+
+  if (error instanceof ValidationError) {
+    const messages = error.issues.map((issue) => ({
+      severity: issue.severity,
+      message: issue.message,
+    }));
+    const output = formatter.formatError(error.exitCode, messages);
+    console.error(output);
+    process.exitCode = error.exitCode;
+    return;
+  }
 
   if (error instanceof LoreError) {
     const output = formatter.formatError(error.exitCode, [

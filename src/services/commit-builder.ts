@@ -190,20 +190,11 @@ export class CommitBuilder {
   private hasTrailer(input: CommitInput, key: string): boolean {
     if (!input.trailers) return false;
 
-    // Check core trailers first
-    const trailerMap = input.trailers as Record<string, unknown>;
-    const value = trailerMap[key];
+    const value = (input.trailers as Record<string, unknown>)[key];
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'string') return value.length > 0;
 
-    if (value !== undefined && value !== null) {
-      if (Array.isArray(value)) return value.length > 0;
-      if (typeof value === 'string') return value.length > 0;
-      return true;
-    }
-
-    // Check custom trailers
-    if (input.trailers.custom?.has(key)) return true;
-
-    return false;
+    return input.trailers.custom?.has(key) ?? false;
   }
 
   private estimateLineCount(input: CommitInput): number {

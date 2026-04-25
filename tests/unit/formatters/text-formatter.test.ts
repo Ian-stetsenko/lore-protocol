@@ -377,6 +377,18 @@ describe('TextFormatter', () => {
       expect(output).toContain('exit code 1');
     });
 
+    it('should show each validation issue individually', () => {
+      const output = formatter.formatError(1, [
+        { severity: 'error', message: 'Required trailer "Assisted-by" is missing' },
+        { severity: 'error', message: 'Required trailer "Ticket" is missing' },
+        { severity: 'warning', message: 'Intent exceeds 72 characters' },
+      ]);
+
+      expect(output).toContain('Required trailer "Assisted-by" is missing');
+      expect(output).toContain('Required trailer "Ticket" is missing');
+      expect(output).toContain('Intent exceeds 72 characters');
+    });
+
     it('should not show exit code when code is 0', () => {
       const output = formatter.formatError(0, [
         { severity: 'warning', message: 'Minor issue' },

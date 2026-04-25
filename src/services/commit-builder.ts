@@ -189,13 +189,23 @@ export class CommitBuilder {
   private hasTrailer(input: CommitInput, key: string): boolean {
     if (!input.trailers) return false;
 
+    // Check core trailers first
     const trailerMap = input.trailers as Record<string, unknown>;
     const value = trailerMap[key];
 
-    if (value === undefined || value === null) return false;
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === 'string') return value.length > 0;
-    return true;
+    if (value !== undefined && value !== null) {
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === 'string') return value.length > 0;
+      return true;
+    }
+
+    // Check custom trailers
+    if (input.trailers.custom) {
+      const customValue = input.trailers.custom[key];
+      if (customValue && customValue.length > 0) return true;
+    }
+
+    return false;
   }
 
   private buildCustomMap(

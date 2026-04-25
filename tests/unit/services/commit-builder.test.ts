@@ -349,5 +349,46 @@ describe('CommitBuilder', () => {
       const requiredIssues = issues.filter((i) => i.rule === 'required-trailer');
       expect(requiredIssues).toHaveLength(0);
     });
+
+    it('should report missing required custom trailer', () => {
+      const strictConfig: LoreConfig = {
+        ...DEFAULT_CONFIG,
+        trailers: { ...DEFAULT_CONFIG.trailers, required: ['Assisted-by'] },
+        validation: { ...DEFAULT_CONFIG.validation, strict: true },
+      };
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+
+      const input: CommitInput = {
+        intent: 'test',
+        trailers: { Confidence: 'high' as const },
+      };
+
+      const issues = strictBuilder.validate(input);
+      const requiredIssues = issues.filter((i) => i.rule === 'required-trailer');
+      expect(requiredIssues).toHaveLength(1);
+      expect(requiredIssues[0].message).toContain('Assisted-by');
+      expect(requiredIssues[0].severity).toBe('error');
+    });
+
+    it('should not report missing required trailer when custom trailer is present', () => {
+      const strictConfig: LoreConfig = {
+        ...DEFAULT_CONFIG,
+        trailers: { ...DEFAULT_CONFIG.trailers, required: ['Assisted-by'] },
+        validation: { ...DEFAULT_CONFIG.validation, strict: true },
+      };
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+
+      const input: CommitInput = {
+        intent: 'test',
+        trailers: {
+          Confidence: 'high' as const,
+          custom: { 'Assisted-by': ['Gemini:CLI'] },
+        },
+      };
+
+      const issues = strictBuilder.validate(input);
+      const requiredIssues = issues.filter((i) => i.rule === 'required-trailer');
+      expect(requiredIssues).toHaveLength(0);
+    });
   });
 });

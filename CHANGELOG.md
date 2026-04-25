@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-25
+
+### Fixed
+
+- **Custom trailers in JSON input**: Custom trailers (e.g., `Assisted-by`, `Ticket`) passed in JSON input to `lore commit` were silently stripped. Now collected and persisted in the commit message. ([#20](https://github.com/Ian-stetsenko/lore-protocol/issues/20))
+- **Validation error detail in text mode**: `ValidationError` now shows each specific issue (e.g., "Required trailer 'Assisted-by' is missing") instead of a generic "Commit input validation failed" message.
+- **`hasTrailer` for custom trailers**: Required trailer validation now correctly recognizes custom trailers as present.
+
+### Added
+
+- **`CustomTrailerCollection` value object**: Encapsulates all custom trailer logic — extraction from JSON, presence detection, line counting, iteration, and serialization. Replaces scattered `Map` handling across `CommitBuilder` and `JsonInputReader`.
+- **`lore coverage`**: Alias for `lore tested`, matching the paper's CLI interface (Figure 2).
+- **Agent skill files**: Drop-in instruction files for Claude Code, Cursor, GitHub Copilot, Windsurf, and Aider. Teach AI agents to query Lore before modifying code and write Lore-enriched commits.
+- **String-to-array coercion**: JSON input now accepts `"Directive": "value"` (string) in addition to `"Directive": ["value"]` (array) for array trailers.
+
+### Changed
+
+- **`CommitInput.trailers.custom`** type changed from `Record<string, readonly string[]>` to `CustomTrailerCollection`.
+- **`LoreTrailers.custom`** type changed from `ReadonlyMap<string, readonly string[]>` to `CustomTrailerCollection`.
+
 ## [0.1.0] - 2026-03-20
 
 Initial release implementing the Lore protocol ([arXiv:2603.15566](https://arxiv.org/abs/2603.15566)).
@@ -28,4 +48,5 @@ Initial release implementing the Lore protocol ([arXiv:2603.15566](https://arxiv
 - **Custom trailers**: Extend the vocabulary via `config.toml` without code changes.
 - **Configurable validation**: Required trailers, strict mode, message length limits.
 
+[0.2.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.1.0

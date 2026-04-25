@@ -3,11 +3,12 @@ import type { AtomRepository } from '../services/atom-repository.js';
 import type { SupersessionResolver } from '../services/supersession-resolver.js';
 import type { SearchFilter } from '../services/search-filter.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
-import type { TrailerKey, SupersessionStatus } from '../types/domain.js';
+import type { TrailerKey, LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { SearchOptions, QueryResult } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
+import { parsePositiveInt } from './helpers/path-query.js';
 
 interface SearchCommandOptions {
   readonly confidence?: string;
@@ -21,6 +22,7 @@ interface SearchCommandOptions {
   readonly until?: string;
   readonly limit?: number;
   readonly maxCommits?: number;
+  readonly all?: boolean;
 }
 
 /**
@@ -48,8 +50,9 @@ export function registerSearchCommand(
     .option('--text <query>', 'Full-text search across intent, body, and trailer values')
     .option('--since <ref>', 'Only consider commits since ref/date')
     .option('--until <ref>', 'Upper time/revision bound')
-    .option('--limit <n>', 'Maximum number of results to display', parseInt)
-    .option('--max-commits <n>', 'Maximum number of git commits to scan (performance)', parseInt)
+    .option('--all', 'Include superseded entries')
+    .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
+    .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
     .action(async (_options: SearchCommandOptions, command: Command) => {
       const options = mergeOptions<SearchCommandOptions>(command);
       const { atomRepository, supersessionResolver, searchFilter, getFormatter } = deps;
@@ -78,15 +81,23 @@ export function registerSearchCommand(
       // Apply filters via SearchFilter service
       atoms = searchFilter.applyFilters(atoms, searchOptions);
 
-      // Compute supersession before limiting (so all atoms get correct status)
+      // Compute supersession on full set so each atom's status is available to the formatter
       const supersessionMap: Map<string, SupersessionStatus> = supersessionResolver.resolve(atoms);
 
       const totalAtoms = atoms.length;
 
+      // Filter superseded atoms unless --all
+      let displayAtoms: readonly LoreAtom[];
+      if (options.all) {
+        displayAtoms = atoms;
+      } else {
+        displayAtoms = supersessionResolver.filterActive(atoms, supersessionMap);
+      }
+
       // Apply result limit (--limit) after all filtering and supersession
-      const displayAtoms = (searchOptions.limit !== null && searchOptions.limit > 0)
-        ? atoms.slice(0, searchOptions.limit)
-        : atoms;
+      if (searchOptions.limit !== null && searchOptions.limit > 0) {
+        displayAtoms = displayAtoms.slice(0, searchOptions.limit);
+      }
 
       const result: QueryResult = {
         command: 'search',

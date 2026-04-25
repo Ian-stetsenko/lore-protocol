@@ -15,6 +15,7 @@ export interface PathQueryOptions {
   readonly follow: boolean;
   readonly all: boolean;
   readonly author: string | null;
+  /** Result-level cap applied by the command layer after querying. Not used by the repository. */
   readonly limit: number | null;
   readonly maxCommits: number | null;
   readonly since: string | null;

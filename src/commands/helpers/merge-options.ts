@@ -22,5 +22,7 @@ export function mergeOptions<T>(command: Command): T {
     }
   }
 
+  // Trust boundary: Commander.js provides untyped option bags, so the cast
+  // is unavoidable. Callers rely on Commander option definitions for correctness.
   return merged as T;
 }

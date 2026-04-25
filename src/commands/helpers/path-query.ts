@@ -9,6 +9,18 @@ import type { PathQueryOptions, QueryResult, TargetType } from '../../types/quer
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
 
+/** Parse a CLI value as a strict positive integer; rejects non-numeric trailing chars. */
+export function parsePositiveInt(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`Expected a positive integer, got "${value}"`);
+  }
+  const n = Number(value);
+  if (n < 1) {
+    throw new Error(`Expected a positive integer, got "${value}"`);
+  }
+  return n;
+}
+
 export interface PathQueryDeps {
   readonly atomRepository: AtomRepository;
   readonly supersessionResolver: SupersessionResolver;
@@ -122,7 +134,7 @@ export function addPathQueryOptions(cmd: Command): Command {
     .option('--follow', 'Transitively follow Related/Supersedes/Depends-on links')
     .option('--all', 'Include superseded entries')
     .option('--author <email>', 'Filter by commit author')
-    .option('--limit <n>', 'Maximum number of results to display', parseInt)
-    .option('--max-commits <n>', 'Maximum number of git commits to scan (performance)', parseInt)
+    .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
+    .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
     .option('--since <ref>', 'Only consider commits since ref/date');
 }

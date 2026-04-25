@@ -25,10 +25,7 @@ function makeTrailers(loreId: string): LoreTrailers {
 }
 
 function makeAtom(id: string, supersedes: string[] = []): LoreAtom {
-  const trailers = makeTrailers(id);
-  if (supersedes.length > 0) {
-    (trailers as any).Supersedes = supersedes;
-  }
+  const trailers: LoreTrailers = { ...makeTrailers(id), Supersedes: supersedes };
   return {
     loreId: id,
     commitHash: `hash_${id}`,

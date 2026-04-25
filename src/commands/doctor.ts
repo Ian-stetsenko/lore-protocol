@@ -36,6 +36,7 @@ export function registerDoctorCommand(
       // Get all atoms for remaining checks
       let allAtoms: LoreAtom[];
       try {
+        // Scan up to 10k commits — enough for most repos while bounding runtime
         allAtoms = await atomRepository.findAll({ maxCommits: 10000 });
       } catch {
         checks.push({

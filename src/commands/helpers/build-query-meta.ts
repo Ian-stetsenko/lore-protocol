@@ -8,14 +8,23 @@ import type { QueryMeta } from '../../types/query.js';
  * @param displayAtoms - The atoms that will actually be shown to the user
  */
 export function buildQueryMeta(totalAtoms: number, displayAtoms: readonly LoreAtom[]): QueryMeta {
+  if (displayAtoms.length === 0) {
+    return { totalAtoms, filteredAtoms: 0, oldest: null, newest: null };
+  }
+
+  // Use reduce instead of Math.min/max spread to avoid call-stack overflow on large arrays
+  const { min, max } = displayAtoms.reduce(
+    (acc, a) => {
+      const t = a.date.getTime();
+      return { min: t < acc.min ? t : acc.min, max: t > acc.max ? t : acc.max };
+    },
+    { min: Infinity, max: -Infinity },
+  );
+
   return {
     totalAtoms,
     filteredAtoms: displayAtoms.length,
-    oldest: displayAtoms.length > 0
-      ? new Date(Math.min(...displayAtoms.map((a) => a.date.getTime())))
-      : null,
-    newest: displayAtoms.length > 0
-      ? new Date(Math.max(...displayAtoms.map((a) => a.date.getTime())))
-      : null,
+    oldest: new Date(min),
+    newest: new Date(max),
   };
 }

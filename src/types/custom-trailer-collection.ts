@@ -4,12 +4,18 @@ const KNOWN_KEYS = new Set<string>(LORE_TRAILER_KEYS);
 
 export class CustomTrailerCollection {
   private readonly map: ReadonlyMap<string, readonly string[]>;
+  private readonly _lineCount: number;
+  private _record: Readonly<Record<string, readonly string[]>> | null = null;
 
   constructor(entries: ReadonlyMap<string, readonly string[]>) {
     this.map = new Map(entries);
+    let count = 0;
+    for (const values of this.map.values()) {
+      count += values.length;
+    }
+    this._lineCount = count;
   }
 
-  /** Shared empty instance */
   static empty(): CustomTrailerCollection {
     return EMPTY_INSTANCE;
   }
@@ -21,9 +27,9 @@ export class CustomTrailerCollection {
    */
   static fromRaw(raw: Readonly<Record<string, unknown>>): CustomTrailerCollection {
     const entries = new Map<string, readonly string[]>();
-    for (const [key, value] of Object.entries(raw)) {
+    for (const key of Object.keys(raw)) {
       if (KNOWN_KEYS.has(key)) continue;
-      const arr = toStringArray(value);
+      const arr = toStringArray(raw[key]);
       if (arr && arr.length > 0) {
         entries.set(key, arr);
       }
@@ -41,11 +47,7 @@ export class CustomTrailerCollection {
   }
 
   get lineCount(): number {
-    let count = 0;
-    for (const values of this.map.values()) {
-      count += values.length;
-    }
-    return count;
+    return this._lineCount;
   }
 
   get size(): number {
@@ -61,11 +63,10 @@ export class CustomTrailerCollection {
   }
 
   toRecord(): Readonly<Record<string, readonly string[]>> {
-    const record: Record<string, readonly string[]> = {};
-    for (const [key, values] of this.map) {
-      record[key] = values;
+    if (!this._record) {
+      this._record = Object.fromEntries(this.map);
     }
-    return record;
+    return this._record;
   }
 }
 

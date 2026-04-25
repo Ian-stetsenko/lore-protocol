@@ -71,7 +71,7 @@ export class AtomRepository {
   /**
    * Find all Lore atoms, optionally filtered by date range and limit.
    */
-  async findAll(options: { since?: string; until?: string; limit?: number } = {}): Promise<LoreAtom[]> {
+  async findAll(options: { since?: string; until?: string; maxCommits?: number } = {}): Promise<LoreAtom[]> {
     const args = this.buildBaseLogArgs();
 
     if (options.since) {
@@ -80,8 +80,8 @@ export class AtomRepository {
     if (options.until) {
       args.push(`--until=${options.until}`);
     }
-    if (options.limit !== undefined && options.limit > 0) {
-      args.push(`--max-count=${options.limit}`);
+    if (options.maxCommits !== undefined && options.maxCommits > 0) {
+      args.push(`--max-count=${options.maxCommits}`);
     }
 
     const rawCommits = await this.gitClient.log(args);
@@ -177,8 +177,8 @@ export class AtomRepository {
     if (options.since) {
       args.push(`--since=${options.since}`);
     }
-    if (options.limit !== null && options.limit > 0) {
-      args.push(`--max-count=${options.limit}`);
+    if (options.maxCommits !== null && options.maxCommits > 0) {
+      args.push(`--max-count=${options.maxCommits}`);
     }
     if (options.author) {
       args.push(`--author=${options.author}`);
@@ -287,10 +287,6 @@ export class AtomRepository {
       if (!isNaN(sinceDate.getTime())) {
         result = result.filter((atom) => atom.date >= sinceDate);
       }
-    }
-
-    if (options.limit !== null && options.limit > 0) {
-      result = result.slice(0, options.limit);
     }
 
     return result;

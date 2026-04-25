@@ -16,6 +16,7 @@ export interface PathQueryOptions {
   readonly all: boolean;
   readonly author: string | null;
   readonly limit: number | null;
+  readonly maxCommits: number | null;
   readonly since: string | null;
 }
 
@@ -30,6 +31,7 @@ export interface SearchOptions {
   readonly since: string | null;
   readonly until: string | null;
   readonly limit: number | null;
+  readonly maxCommits: number | null;
 }
 
 export interface QueryResult {

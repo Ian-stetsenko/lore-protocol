@@ -50,6 +50,7 @@ export function registerStaleCommand(
           all: false,
           author: null,
           limit: null,
+          maxCommits: null,
           since: null,
         };
         atoms = await atomRepository.findByTarget(gitLogArgs, queryOptions);

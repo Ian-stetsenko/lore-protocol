@@ -4,8 +4,10 @@ import type { SupersessionResolver } from '../services/supersession-resolver.js'
 import type { SearchFilter } from '../services/search-filter.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { TrailerKey, SupersessionStatus } from '../types/domain.js';
-import type { SearchOptions, QueryResult, QueryMeta } from '../types/query.js';
+import type { SearchOptions, QueryResult } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
+import { mergeOptions } from './helpers/merge-options.js';
+import { buildQueryMeta } from './helpers/build-query-meta.js';
 
 interface SearchCommandOptions {
   readonly confidence?: string;
@@ -18,6 +20,7 @@ interface SearchCommandOptions {
   readonly since?: string;
   readonly until?: string;
   readonly limit?: number;
+  readonly maxCommits?: number;
 }
 
 /**
@@ -45,8 +48,10 @@ export function registerSearchCommand(
     .option('--text <query>', 'Full-text search across intent, body, and trailer values')
     .option('--since <ref>', 'Only consider commits since ref/date')
     .option('--until <ref>', 'Upper time/revision bound')
-    .option('--limit <n>', 'Max results', parseInt)
-    .action(async (options: SearchCommandOptions) => {
+    .option('--limit <n>', 'Maximum number of results to display', parseInt)
+    .option('--max-commits <n>', 'Maximum number of git commits to scan (performance)', parseInt)
+    .action(async (_options: SearchCommandOptions, command: Command) => {
+      const options = mergeOptions<SearchCommandOptions>(command);
       const { atomRepository, supersessionResolver, searchFilter, getFormatter } = deps;
 
       const searchOptions: SearchOptions = {
@@ -60,45 +65,35 @@ export function registerSearchCommand(
         since: options.since ?? null,
         until: options.until ?? null,
         limit: options.limit ?? null,
+        maxCommits: options.maxCommits ?? null,
       };
 
-      // Get all atoms with date range filters
+      // Get all atoms with date range and scan-level filters
       let atoms = await atomRepository.findAll({
         since: searchOptions.since ?? undefined,
         until: searchOptions.until ?? undefined,
-        limit: searchOptions.limit ?? undefined,
+        maxCommits: searchOptions.maxCommits ?? undefined,
       });
 
       // Apply filters via SearchFilter service
       atoms = searchFilter.applyFilters(atoms, searchOptions);
 
-      const totalAtoms = atoms.length;
-
-      // Apply limit after filtering
-      if (searchOptions.limit !== null && searchOptions.limit > 0) {
-        atoms = atoms.slice(0, searchOptions.limit);
-      }
-
-      // Compute supersession
+      // Compute supersession before limiting (so all atoms get correct status)
       const supersessionMap: Map<string, SupersessionStatus> = supersessionResolver.resolve(atoms);
 
-      const meta: QueryMeta = {
-        totalAtoms,
-        filteredAtoms: atoms.length,
-        oldest: atoms.length > 0
-          ? new Date(Math.min(...atoms.map((a) => a.date.getTime())))
-          : null,
-        newest: atoms.length > 0
-          ? new Date(Math.max(...atoms.map((a) => a.date.getTime())))
-          : null,
-      };
+      const totalAtoms = atoms.length;
+
+      // Apply result limit (--limit) after all filtering and supersession
+      const displayAtoms = (searchOptions.limit !== null && searchOptions.limit > 0)
+        ? atoms.slice(0, searchOptions.limit)
+        : atoms;
 
       const result: QueryResult = {
         command: 'search',
         target: buildSearchTargetDescription(searchOptions),
         targetType: 'search',
-        atoms,
-        meta,
+        atoms: displayAtoms,
+        meta: buildQueryMeta(totalAtoms, displayAtoms),
       };
 
       const formattable: FormattableQueryResult = {

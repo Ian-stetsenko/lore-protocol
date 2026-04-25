@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TrailerParser } from '../../../src/services/trailer-parser.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 describe('TrailerParser', () => {
   const parser = new TrailerParser();
@@ -298,9 +299,10 @@ describe('TrailerParser', () => {
     });
 
     it('should serialize custom trailers', () => {
-      const custom = new Map<string, readonly string[]>();
-      custom.set('Team', ['platform']);
-      custom.set('Ticket', ['PROJ-123', 'PROJ-456']);
+      const customMap = new Map<string, readonly string[]>();
+      customMap.set('Team', ['platform']);
+      customMap.set('Ticket', ['PROJ-123', 'PROJ-456']);
+      const custom = new CustomTrailerCollection(customMap);
       const trailers = makeTrailers({ custom });
       const result = parser.serialize(trailers);
       expect(result).toContain('Team: platform');
@@ -539,7 +541,7 @@ function makeTrailers(overrides: Partial<{
   Supersedes: readonly string[];
   'Depends-on': readonly string[];
   Related: readonly string[];
-  custom: ReadonlyMap<string, readonly string[]>;
+  custom: CustomTrailerCollection;
 }>) {
   return {
     'Lore-id': overrides['Lore-id'] ?? '',
@@ -554,6 +556,6 @@ function makeTrailers(overrides: Partial<{
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? new Map<string, readonly string[]>(),
+    custom: overrides.custom ?? CustomTrailerCollection.empty(),
   };
 }

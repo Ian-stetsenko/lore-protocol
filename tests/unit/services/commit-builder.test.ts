@@ -4,6 +4,7 @@ import type { CommitInput } from '../../../src/services/commit-builder.js';
 import type { LoreConfig } from '../../../src/types/config.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
 import { DEFAULT_CONFIG } from '../../../src/types/config.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 // Mock TrailerParser
 function createMockTrailerParser() {
@@ -138,14 +139,14 @@ describe('CommitBuilder', () => {
     });
 
     it('should pass custom trailers through to LoreTrailers.custom map', () => {
+      const customMap = new Map<string, readonly string[]>();
+      customMap.set('Assisted-by', ['Gemini:CLI']);
+      customMap.set('Ticket', ['PROJ-123']);
       const input: CommitInput = {
         intent: 'feat: with custom trailers',
         trailers: {
           Confidence: 'high' as const,
-          custom: {
-            'Assisted-by': ['Gemini:CLI'],
-            'Ticket': ['PROJ-123'],
-          },
+          custom: new CustomTrailerCollection(customMap),
         },
       };
 
@@ -382,7 +383,7 @@ describe('CommitBuilder', () => {
         intent: 'test',
         trailers: {
           Confidence: 'high' as const,
-          custom: { 'Assisted-by': ['Gemini:CLI'] },
+          custom: new CustomTrailerCollection(new Map([['Assisted-by', ['Gemini:CLI']]])),
         },
       };
 

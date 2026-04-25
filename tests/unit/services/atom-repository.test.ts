@@ -3,6 +3,7 @@ import { AtomRepository } from '../../../src/services/atom-repository.js';
 import type { IGitClient, RawCommit } from '../../../src/interfaces/git-client.js';
 import type { PathQueryOptions } from '../../../src/types/query.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 /**
  * Minimal TrailerParser mock that satisfies the AtomRepository's usage.
@@ -73,7 +74,7 @@ function parseTrailersFromText(raw: string): LoreTrailers {
     Supersedes: supersedes,
     'Depends-on': dependsOn,
     Related: related,
-    custom: new Map(),
+    custom: CustomTrailerCollection.empty(),
   };
 }
 
@@ -415,7 +416,7 @@ describe('AtomRepository', () => {
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: new Map(),
+          custom: CustomTrailerCollection.empty(),
         } as LoreTrailers,
         filesChanged: [],
       }];
@@ -449,7 +450,7 @@ describe('AtomRepository', () => {
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: new Map(),
+          custom: CustomTrailerCollection.empty(),
         } as LoreTrailers,
         filesChanged: [],
       }];
@@ -481,7 +482,7 @@ describe('AtomRepository', () => {
           Supersedes: [],
           'Depends-on': [],
           Related: [],
-          custom: new Map(),
+          custom: CustomTrailerCollection.empty(),
         } as LoreTrailers,
         filesChanged: [],
       }];
@@ -519,7 +520,7 @@ describe('AtomRepository', () => {
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: new Map(),
+          custom: CustomTrailerCollection.empty(),
         } as LoreTrailers,
         filesChanged: [],
       };
@@ -559,7 +560,7 @@ describe('AtomRepository', () => {
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: new Map(),
+          custom: CustomTrailerCollection.empty(),
         } as LoreTrailers,
         filesChanged: [],
       };

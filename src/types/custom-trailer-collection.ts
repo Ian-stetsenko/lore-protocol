@@ -1,0 +1,82 @@
+import { LORE_TRAILER_KEYS } from '../util/constants.js';
+
+const KNOWN_KEYS = new Set<string>(LORE_TRAILER_KEYS);
+
+export class CustomTrailerCollection {
+  private readonly map: ReadonlyMap<string, readonly string[]>;
+
+  constructor(entries: ReadonlyMap<string, readonly string[]>) {
+    this.map = new Map(entries);
+  }
+
+  /** Shared empty instance */
+  static empty(): CustomTrailerCollection {
+    return EMPTY_INSTANCE;
+  }
+
+  /**
+   * Extract custom trailers from a raw key-value record.
+   * Filters out known Lore trailer keys.
+   * Coerces single strings to [string] arrays.
+   */
+  static fromRaw(raw: Readonly<Record<string, unknown>>): CustomTrailerCollection {
+    const entries = new Map<string, readonly string[]>();
+    for (const [key, value] of Object.entries(raw)) {
+      if (KNOWN_KEYS.has(key)) continue;
+      const arr = toStringArray(value);
+      if (arr && arr.length > 0) {
+        entries.set(key, arr);
+      }
+    }
+    return entries.size > 0 ? new CustomTrailerCollection(entries) : CustomTrailerCollection.empty();
+  }
+
+  has(key: string): boolean {
+    const values = this.map.get(key);
+    return values !== undefined && values.length > 0;
+  }
+
+  get(key: string): readonly string[] | undefined {
+    return this.map.get(key);
+  }
+
+  get lineCount(): number {
+    let count = 0;
+    for (const values of this.map.values()) {
+      count += values.length;
+    }
+    return count;
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+
+  get isEmpty(): boolean {
+    return this.map.size === 0;
+  }
+
+  [Symbol.iterator](): IterableIterator<[string, readonly string[]]> {
+    return this.map[Symbol.iterator]();
+  }
+
+  toRecord(): Readonly<Record<string, readonly string[]>> {
+    const record: Record<string, readonly string[]> = {};
+    for (const [key, values] of this.map) {
+      record[key] = values;
+    }
+    return record;
+  }
+}
+
+function toStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === 'string');
+  }
+  if (typeof value === 'string') {
+    return [value];
+  }
+  return undefined;
+}
+
+const EMPTY_INSTANCE = new CustomTrailerCollection(new Map());

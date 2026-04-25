@@ -3,6 +3,7 @@ import type { LoreIdGenerator } from './lore-id-generator.js';
 import type { LoreConfig } from '../types/config.js';
 import type { LoreTrailers, ConfidenceLevel, ScopeRiskLevel, ReversibilityLevel, LoreId } from '../types/domain.js';
 import type { ValidationIssue } from '../types/output.js';
+import { CustomTrailerCollection } from '../types/custom-trailer-collection.js';
 import {
   CONFIDENCE_VALUES,
   SCOPE_RISK_VALUES,
@@ -25,7 +26,7 @@ export interface CommitInput {
     readonly Supersedes?: readonly string[];
     readonly 'Depends-on'?: readonly string[];
     readonly Related?: readonly string[];
-    readonly custom?: Readonly<Record<string, readonly string[]>>;
+    readonly custom?: CustomTrailerCollection;
   };
 }
 
@@ -182,7 +183,7 @@ export class CommitBuilder {
       Supersedes: input.trailers?.Supersedes ? [...input.trailers.Supersedes] : [],
       'Depends-on': input.trailers?.['Depends-on'] ? [...input.trailers['Depends-on']] : [],
       Related: input.trailers?.Related ? [...input.trailers.Related] : [],
-      custom: this.buildCustomMap(input.trailers?.custom),
+      custom: input.trailers?.custom ?? CustomTrailerCollection.empty(),
     };
   }
 
@@ -200,25 +201,9 @@ export class CommitBuilder {
     }
 
     // Check custom trailers
-    if (input.trailers.custom) {
-      const customValue = input.trailers.custom[key];
-      if (customValue && customValue.length > 0) return true;
-    }
+    if (input.trailers.custom?.has(key)) return true;
 
     return false;
-  }
-
-  private buildCustomMap(
-    custom: Readonly<Record<string, readonly string[]>> | undefined,
-  ): ReadonlyMap<string, readonly string[]> {
-    if (!custom) return new Map();
-    const map = new Map<string, readonly string[]>();
-    for (const [key, values] of Object.entries(custom)) {
-      if (Array.isArray(values) && values.length > 0) {
-        map.set(key, [...values]);
-      }
-    }
-    return map;
   }
 
   private estimateLineCount(input: CommitInput): number {
@@ -254,9 +239,7 @@ export class CommitBuilder {
         }
       }
       if (input.trailers.custom) {
-        for (const values of Object.values(input.trailers.custom)) {
-          count += values.length;
-        }
+        count += input.trailers.custom.lineCount;
       }
     }
     return count;

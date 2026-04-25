@@ -152,7 +152,8 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.custom).toEqual({ 'Assisted-by': ['Gemini:CLI'] });
+      expect(result.trailers?.custom?.get('Assisted-by')).toEqual(['Gemini:CLI']);
+      expect(result.trailers?.custom?.size).toBe(1);
       expect(result.trailers?.Confidence).toBe('high');
     });
 
@@ -169,8 +170,8 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.custom?.['Assisted-by']).toEqual(['Gemini:CLI']);
-      expect(result.trailers?.custom?.['Ticket']).toEqual(['PROJ-123', 'PROJ-456']);
+      expect(result.trailers?.custom?.get('Assisted-by')).toEqual(['Gemini:CLI']);
+      expect(result.trailers?.custom?.get('Ticket')).toEqual(['PROJ-123', 'PROJ-456']);
       expect(result.trailers?.Constraint).toEqual(['some constraint']);
     });
 
@@ -200,8 +201,8 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.custom?.['Valid-custom']).toEqual(['value']);
-      expect(result.trailers?.custom?.['Invalid-custom']).toBeUndefined();
+      expect(result.trailers?.custom?.get('Valid-custom')).toEqual(['value']);
+      expect(result.trailers?.custom?.get('Invalid-custom')).toBeUndefined();
     });
   });
 

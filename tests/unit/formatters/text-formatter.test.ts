@@ -8,6 +8,7 @@ import type {
   FormattableTraceResult,
   FormattableDoctorResult,
 } from '../../../src/types/output.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
@@ -23,7 +24,7 @@ function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? new Map(),
+    custom: overrides.custom ?? CustomTrailerCollection.empty(),
   };
 }
 

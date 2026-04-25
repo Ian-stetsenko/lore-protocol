@@ -3,6 +3,7 @@ import { StalenessDetector } from '../../../src/services/staleness-detector.js';
 import type { IGitClient } from '../../../src/interfaces/git-client.js';
 import type { LoreConfig } from '../../../src/types/config.js';
 import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../../../src/types/domain.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function createMockGitClient(overrides: Partial<IGitClient> = {}): IGitClient {
   return {
@@ -67,7 +68,7 @@ function makeAtom(options: {
       Supersedes: options.supersedes ?? [],
       'Depends-on': options.dependsOn ?? [],
       Related: [],
-      custom: new Map(),
+      custom: CustomTrailerCollection.empty(),
     } as LoreTrailers,
     filesChanged: options.filesChanged ?? [],
   };

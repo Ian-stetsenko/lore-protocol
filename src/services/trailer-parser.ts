@@ -8,6 +8,7 @@ import type {
   ScopeRiskLevel,
   ReversibilityLevel,
 } from '../types/domain.js';
+import { CustomTrailerCollection } from '../types/custom-trailer-collection.js';
 import {
   LORE_TRAILER_KEYS,
   ARRAY_TRAILER_KEYS,
@@ -101,7 +102,7 @@ export class TrailerParser {
       Supersedes: arrays['Supersedes'],
       'Depends-on': arrays['Depends-on'],
       Related: arrays['Related'],
-      custom,
+      custom: new CustomTrailerCollection(custom),
     };
   }
 

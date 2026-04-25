@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SupersessionResolver } from '../../../src/services/supersession-resolver.js';
 import type { LoreAtom, LoreTrailers } from '../../../src/types/domain.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function makeAtom(options: {
   loreId: string;
@@ -28,7 +29,7 @@ function makeAtom(options: {
       Supersedes: options.supersedes ?? [],
       'Depends-on': options.dependsOn ?? [],
       Related: options.related ?? [],
-      custom: new Map(),
+      custom: CustomTrailerCollection.empty(),
     } as LoreTrailers,
     filesChanged: [],
   };

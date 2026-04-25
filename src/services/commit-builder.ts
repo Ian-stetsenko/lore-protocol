@@ -3,6 +3,7 @@ import type { LoreIdGenerator } from './lore-id-generator.js';
 import type { LoreConfig } from '../types/config.js';
 import type { LoreTrailers, ConfidenceLevel, ScopeRiskLevel, ReversibilityLevel, LoreId } from '../types/domain.js';
 import type { ValidationIssue } from '../types/output.js';
+import { CustomTrailerCollection } from '../types/custom-trailer-collection.js';
 import {
   CONFIDENCE_VALUES,
   SCOPE_RISK_VALUES,
@@ -25,6 +26,7 @@ export interface CommitInput {
     readonly Supersedes?: readonly string[];
     readonly 'Depends-on'?: readonly string[];
     readonly Related?: readonly string[];
+    readonly custom?: CustomTrailerCollection;
   };
 }
 
@@ -181,20 +183,18 @@ export class CommitBuilder {
       Supersedes: input.trailers?.Supersedes ? [...input.trailers.Supersedes] : [],
       'Depends-on': input.trailers?.['Depends-on'] ? [...input.trailers['Depends-on']] : [],
       Related: input.trailers?.Related ? [...input.trailers.Related] : [],
-      custom: new Map(),
+      custom: input.trailers?.custom ?? CustomTrailerCollection.empty(),
     };
   }
 
   private hasTrailer(input: CommitInput, key: string): boolean {
     if (!input.trailers) return false;
 
-    const trailerMap = input.trailers as Record<string, unknown>;
-    const value = trailerMap[key];
-
-    if (value === undefined || value === null) return false;
+    const value = (input.trailers as Record<string, unknown>)[key];
     if (Array.isArray(value)) return value.length > 0;
     if (typeof value === 'string') return value.length > 0;
-    return true;
+
+    return input.trailers.custom?.has(key) ?? false;
   }
 
   private estimateLineCount(input: CommitInput): number {
@@ -228,6 +228,9 @@ export class CommitBuilder {
         if (input.trailers[key] !== undefined) {
           count += 1;
         }
+      }
+      if (input.trailers.custom) {
+        count += input.trailers.custom.lineCount;
       }
     }
     return count;

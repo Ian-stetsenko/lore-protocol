@@ -1,6 +1,7 @@
 import type { ICommitInputReader } from '../../interfaces/commit-input-reader.js';
 import type { CommitInput } from '../commit-builder.js';
 import type { ConfidenceLevel, ScopeRiskLevel, ReversibilityLevel } from '../../types/domain.js';
+import { CustomTrailerCollection } from '../../types/custom-trailer-collection.js';
 
 /**
  * Reads commit input by parsing a JSON string.
@@ -30,6 +31,8 @@ export class JsonInputReader implements ICommitInputReader {
 
     let trailers: CommitInput['trailers'];
     if (trailersRaw) {
+      const custom = CustomTrailerCollection.fromRaw(trailersRaw);
+
       trailers = {
         Constraint: this.asStringArray(trailersRaw['Constraint']),
         Rejected: this.asStringArray(trailersRaw['Rejected']),
@@ -42,6 +45,7 @@ export class JsonInputReader implements ICommitInputReader {
         Supersedes: this.asStringArray(trailersRaw['Supersedes']),
         'Depends-on': this.asStringArray(trailersRaw['Depends-on']),
         Related: this.asStringArray(trailersRaw['Related']),
+        custom: custom.isEmpty ? undefined : custom,
       };
     }
 

@@ -8,6 +8,7 @@ import type {
   FormattableTraceResult,
   FormattableDoctorResult,
 } from '../../../src/types/output.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
@@ -23,7 +24,7 @@ function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? new Map(),
+    custom: overrides.custom ?? CustomTrailerCollection.empty(),
   };
 }
 
@@ -375,6 +376,18 @@ describe('TextFormatter', () => {
       expect(output).toContain('[intent]');
       expect(output).toContain('Too long');
       expect(output).toContain('exit code 1');
+    });
+
+    it('should show each validation issue individually', () => {
+      const output = formatter.formatError(1, [
+        { severity: 'error', message: 'Required trailer "Assisted-by" is missing' },
+        { severity: 'error', message: 'Required trailer "Ticket" is missing' },
+        { severity: 'warning', message: 'Intent exceeds 72 characters' },
+      ]);
+
+      expect(output).toContain('Required trailer "Assisted-by" is missing');
+      expect(output).toContain('Required trailer "Ticket" is missing');
+      expect(output).toContain('Intent exceeds 72 characters');
     });
 
     it('should not show exit code when code is 0', () => {

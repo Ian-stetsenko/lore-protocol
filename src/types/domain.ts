@@ -1,3 +1,5 @@
+import { CustomTrailerCollection } from './custom-trailer-collection.js';
+
 /** 8-character hex string identifying a Lore atom. */
 export type LoreId = string;
 
@@ -47,7 +49,7 @@ export interface LoreTrailers {
   readonly Supersedes: readonly LoreId[];
   readonly 'Depends-on': readonly LoreId[];
   readonly Related: readonly LoreId[];
-  readonly custom: ReadonlyMap<string, readonly string[]>;
+  readonly custom: CustomTrailerCollection;
 }
 
 export interface LoreAtom {

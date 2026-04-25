@@ -5,6 +5,7 @@ import type { RawCommit } from '../../../src/interfaces/git-client.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
 import type { AtomRepository } from '../../../src/services/atom-repository.js';
 import { DEFAULT_CONFIG } from '../../../src/types/config.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
@@ -20,7 +21,7 @@ function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? new Map(),
+    custom: overrides.custom ?? CustomTrailerCollection.empty(),
   };
 }
 

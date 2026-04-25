@@ -8,6 +8,7 @@ import type {
   FormattableTraceResult,
   FormattableDoctorResult,
 } from '../../../src/types/output.js';
+import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
@@ -23,7 +24,7 @@ function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? new Map(),
+    custom: overrides.custom ?? CustomTrailerCollection.empty(),
   };
 }
 
@@ -396,6 +397,20 @@ describe('JsonFormatter', () => {
       expect(parsed.messages[0].severity).toBe('error');
       expect(parsed.messages[0].field).toBeNull();
       expect(parsed.messages[1].field).toBe('intent');
+    });
+
+    it('should include all validation issue details in JSON output', () => {
+      const output = formatter.formatError(1, [
+        { severity: 'error', message: 'Required trailer "Assisted-by" is missing' },
+        { severity: 'warning', message: 'Intent exceeds 72 characters' },
+      ]);
+      const parsed = JSON.parse(output);
+
+      expect(parsed.messages).toHaveLength(2);
+      expect(parsed.messages[0].message).toBe('Required trailer "Assisted-by" is missing');
+      expect(parsed.messages[0].severity).toBe('error');
+      expect(parsed.messages[1].message).toBe('Intent exceeds 72 characters');
+      expect(parsed.messages[1].severity).toBe('warning');
     });
   });
 

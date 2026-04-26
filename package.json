@@ -2,6 +2,10 @@
   "name": "lore-protocol",
   "version": "0.3.0",
   "description": "CLI tool for the Lore protocol — structured decision context in git commits",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ian-stetsenko/lore-protocol"
+  },
   "type": "module",
   "bin": {
     "lore": "./bin/lore.js"

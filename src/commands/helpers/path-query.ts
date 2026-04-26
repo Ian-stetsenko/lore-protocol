@@ -5,8 +5,21 @@ import type { PathResolver } from '../../services/path-resolver.js';
 import type { IOutputFormatter } from '../../interfaces/output-formatter.js';
 import type { LoreConfig } from '../../types/config.js';
 import type { TrailerKey, LoreAtom, SupersessionStatus } from '../../types/domain.js';
-import type { PathQueryOptions, QueryResult, QueryMeta, TargetType } from '../../types/query.js';
+import type { PathQueryOptions, QueryResult, TargetType } from '../../types/query.js';
 import type { FormattableQueryResult } from '../../types/output.js';
+import { buildQueryMeta } from './build-query-meta.js';
+
+/** Parse a CLI value as a strict positive integer; rejects non-numeric trailing chars. */
+export function parsePositiveInt(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`Expected a positive integer, got "${value}"`);
+  }
+  const n = Number(value);
+  if (n < 1) {
+    throw new Error(`Expected a positive integer, got "${value}"`);
+  }
+  return n;
+}
 
 export interface PathQueryDeps {
   readonly atomRepository: AtomRepository;
@@ -22,6 +35,7 @@ export interface PathQueryCommandOptions {
   readonly all?: boolean;
   readonly author?: string;
   readonly limit?: number;
+  readonly maxCommits?: number;
   readonly since?: string;
 }
 
@@ -47,6 +61,7 @@ export async function executePathQuery(
     all: options.all ?? false,
     author: options.author ?? null,
     limit: options.limit ?? null,
+    maxCommits: options.maxCommits ?? null,
     since: options.since ?? null,
   };
 
@@ -85,24 +100,18 @@ export async function executePathQuery(
     displayAtoms = supersessionResolver.filterActive(atoms, supersessionMap);
   }
 
-  // Step 5: Build QueryResult
-  const meta: QueryMeta = {
-    totalAtoms,
-    filteredAtoms: displayAtoms.length,
-    oldest: displayAtoms.length > 0
-      ? new Date(Math.min(...displayAtoms.map((a) => a.date.getTime())))
-      : null,
-    newest: displayAtoms.length > 0
-      ? new Date(Math.max(...displayAtoms.map((a) => a.date.getTime())))
-      : null,
-  };
+  // Step 4b: Apply result limit (--limit) after supersession filtering
+  if (queryOptions.limit !== null && queryOptions.limit > 0) {
+    displayAtoms = displayAtoms.slice(0, queryOptions.limit);
+  }
 
+  // Step 5: Build QueryResult
   const result: QueryResult = {
     command: commandName,
     target: targetDisplay,
     targetType,
     atoms: displayAtoms,
-    meta,
+    meta: buildQueryMeta(totalAtoms, displayAtoms),
   };
 
   const formattable: FormattableQueryResult = {
@@ -125,6 +134,7 @@ export function addPathQueryOptions(cmd: Command): Command {
     .option('--follow', 'Transitively follow Related/Supersedes/Depends-on links')
     .option('--all', 'Include superseded entries')
     .option('--author <email>', 'Filter by commit author')
-    .option('--limit <n>', 'Limit number of results', parseInt)
+    .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
+    .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
     .option('--since <ref>', 'Only consider commits since ref/date');
 }

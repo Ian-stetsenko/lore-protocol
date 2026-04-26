@@ -125,6 +125,7 @@ function makeQueryOptions(overrides: Partial<PathQueryOptions> = {}): PathQueryO
     all: false,
     author: null,
     limit: null,
+    maxCommits: null,
     since: null,
     ...overrides,
   };
@@ -198,10 +199,10 @@ describe('AtomRepository', () => {
       expect(logArgs).toContain('--since=2025-01-01');
     });
 
-    it('should pass limit to git log args', async () => {
+    it('should pass maxCommits to git log args', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([]);
 
-      const options = makeQueryOptions({ limit: 5 });
+      const options = makeQueryOptions({ maxCommits: 5 });
       await repo.findByTarget(makeGitLogArgs(), options);
 
       const logArgs = vi.mocked(gitClient.log).mock.calls[0][0];
@@ -229,7 +230,7 @@ describe('AtomRepository', () => {
       expect(result[0].author).toBe('alice@example.com');
     });
 
-    it('should apply limit filter at the application level', async () => {
+    it('should not apply limit at the repository level (caller responsibility)', async () => {
       const commits = [
         makeLoreCommit({ hash: 'aaa', loreId: 'aaaa1111' }),
         makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' }),
@@ -241,7 +242,7 @@ describe('AtomRepository', () => {
       const options = makeQueryOptions({ limit: 2 });
       const result = await repo.findByTarget(makeGitLogArgs(), options);
 
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(3);
     });
   });
 
@@ -313,10 +314,10 @@ describe('AtomRepository', () => {
       expect(logArgs).toContain('--until=2025-06-01');
     });
 
-    it('should pass limit option to git log', async () => {
+    it('should pass maxCommits option to git log', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([]);
 
-      await repo.findAll({ limit: 10 });
+      await repo.findAll({ maxCommits: 10 });
 
       const logArgs = vi.mocked(gitClient.log).mock.calls[0][0];
       expect(logArgs).toContain('--max-count=10');

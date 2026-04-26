@@ -8,6 +8,7 @@ import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { PathQueryOptions } from '../types/query.js';
 import type { FormattableStalenessResult, StaleAtomReport } from '../types/output.js';
 import { STALE_SIGNAL } from '../util/constants.js';
+import { mergeOptions } from './helpers/merge-options.js';
 
 interface StaleCommandOptions {
   readonly olderThan?: string;
@@ -36,7 +37,8 @@ export function registerStaleCommand(
     .option('--older-than <duration>', 'Time-based staleness threshold (e.g., 6m, 1y)')
     .option('--drift <n>', 'File drift threshold (commits since atom)', parseInt)
     .option('--low-confidence', 'Flag low-confidence atoms')
-    .action(async (target: string | undefined, options: StaleCommandOptions) => {
+    .action(async (target: string | undefined, _options: StaleCommandOptions, command: Command) => {
+      const options = mergeOptions<StaleCommandOptions>(command);
       const { atomRepository, supersessionResolver, stalenessDetector, pathResolver, getFormatter } = deps;
 
       let atoms: LoreAtom[];
@@ -50,6 +52,7 @@ export function registerStaleCommand(
           all: false,
           author: null,
           limit: null,
+          maxCommits: null,
           since: null,
         };
         atoms = await atomRepository.findByTarget(gitLogArgs, queryOptions);

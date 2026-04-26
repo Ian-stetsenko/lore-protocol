@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import { executePathQuery, addPathQueryOptions, type PathQueryDeps, type PathQueryCommandOptions } from './helpers/path-query.js';
+import { mergeOptions } from './helpers/merge-options.js';
 
 /**
  * Register the `lore context <target>` command.
@@ -15,7 +16,8 @@ export function registerContextCommand(
 
   addPathQueryOptions(cmd);
 
-  cmd.action(async (target: string, options: PathQueryCommandOptions) => {
+  cmd.action(async (target: string, _options: PathQueryCommandOptions, command: Command) => {
+    const options = mergeOptions<PathQueryCommandOptions>(command);
     await executePathQuery(target, options, deps, 'context', 'all');
   });
 }

@@ -59,13 +59,11 @@ async function main(): Promise<void> {
     .description('CLI tool for the Lore protocol -- structured decision context in git commits')
     .version(version);
 
-  // Global options
+  // Global options (display/format only — query flags live on subcommands)
   program
     .option('--json', 'Shorthand for --format json')
     .option('--format <type>', 'Output format: text or json', 'text')
-    .option('--no-color', 'Disable colored output')
-    .option('--limit <n>', 'Limit number of results', parseInt)
-    .option('--since <ref>', 'Only consider commits since ref/date');
+    .option('--no-color', 'Disable colored output');
 
   // 1. Create concrete implementations
   const gitClient: IGitClient = new GitClient();

@@ -296,6 +296,25 @@ describe('AtomRepository', () => {
       expect(result).toHaveLength(2);
     });
 
+    it('should strip trailers from body when body is exactly the trailer block', async () => {
+      const trailersRaw = 'Lore-id: aaaa1111\nDirective: keep simple';
+      const commit: RawCommit = {
+        hash: 'aaa',
+        date: '2025-01-15T10:00:00Z',
+        author: 'dev@example.com',
+        subject: 'feat: no body',
+        body: trailersRaw,
+        trailers: trailersRaw,
+      };
+      vi.mocked(gitClient.log).mockResolvedValue([commit]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+
+      const result = await repo.findAll();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].body).toBe('');
+    });
+
     it('should pass since option to git log', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([]);
 

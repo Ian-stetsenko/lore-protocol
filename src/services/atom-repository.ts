@@ -260,7 +260,7 @@ export class AtomRepository {
     // Try to find the first trailer line in the body and strip from there
     const firstTrailerLine = trailerLines[0].trim();
     const idx = body.lastIndexOf(firstTrailerLine);
-    if (idx > 0) {
+    if (idx >= 0) {
       return body.slice(0, idx).trim();
     }
 

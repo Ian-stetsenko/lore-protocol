@@ -18,14 +18,20 @@ export interface CommitResult {
   readonly success: boolean;
 }
 
+export interface CommitOptions {
+  readonly amend?: boolean;
+  readonly noEdit?: boolean;
+}
+
 export interface IGitClient {
   log(args: readonly string[]): Promise<readonly RawCommit[]>;
   blame(file: string, lineStart: number, lineEnd: number): Promise<readonly BlameLine[]>;
-  commit(message: string): Promise<CommitResult>;
+  commit(message: string, options?: CommitOptions): Promise<CommitResult>;
   hasStagedChanges(): Promise<boolean>;
   getRepoRoot(): Promise<string>;
   isInsideRepo(): Promise<boolean>;
   getFilesChanged(commitHash: string): Promise<readonly string[]>;
   countCommitsSince(path: string, sinceCommitHash: string): Promise<number>;
   resolveRef(ref: string): Promise<string>;
+  getHeadMessage(): Promise<string>;
 }

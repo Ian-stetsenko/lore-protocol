@@ -124,6 +124,23 @@ describe('CommitBuilder', () => {
       expect(result).toContain('Lore-id: deadbeef');
     });
 
+    it('should use provided existingLoreId instead of generating one', () => {
+      const input: CommitInput = { intent: 'amend: update commit' };
+
+      const result = builder.build(input, 'cafebabe');
+
+      expect(result).toContain('Lore-id: cafebabe');
+      expect(mockIdGen.generate).not.toHaveBeenCalled();
+    });
+
+    it('should generate new Lore-id when no existingLoreId is provided', () => {
+      const input: CommitInput = { intent: 'new commit' };
+
+      builder.build(input);
+
+      expect(mockIdGen.generate).toHaveBeenCalledOnce();
+    });
+
     it('should pass correct trailers to serialize', () => {
       const input: CommitInput = {
         intent: 'test',

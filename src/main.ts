@@ -21,6 +21,7 @@ import { SquashMerger } from './services/squash-merger.js';
 import { Validator } from './services/validator.js';
 import { TerminalPrompt } from './services/terminal-prompt.js';
 import { CommitInputResolver } from './services/commit-input-resolver.js';
+import { HeadLoreIdReader } from './services/head-lore-id-reader.js';
 import { SearchFilter } from './services/search-filter.js';
 
 import { TextFormatter } from './formatters/text-formatter.js';
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
   const searchFilter = new SearchFilter();
   const prompt = new TerminalPrompt();
   const commitInputResolver = new CommitInputResolver(prompt);
+  const headLoreIdReader = new HeadLoreIdReader(gitClient, trailerParser);
 
   // 4. Formatter factory (reads --format/--json from program options at call time)
   // Memoized: the formatter is created once on first call and reused thereafter.
@@ -165,6 +167,7 @@ async function main(): Promise<void> {
     gitClient,
     getFormatter,
     commitInputResolver,
+    headLoreIdReader,
   });
 
   registerValidateCommand(program, {

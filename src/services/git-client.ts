@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { IGitClient, RawCommit, BlameLine, CommitResult } from '../interfaces/git-client.js';
+import type { IGitClient, RawCommit, BlameLine, CommitResult, CommitOptions } from '../interfaces/git-client.js';
 import { GitError } from '../util/errors.js';
 
 const execFile = promisify(execFileCb);
@@ -76,8 +76,15 @@ export class GitClient implements IGitClient {
     return this.parseBlameOutput(stdout);
   }
 
-  async commit(message: string): Promise<CommitResult> {
-    const stdout = await this.exec(['commit', '-m', message]);
+  async commit(message: string, options?: CommitOptions): Promise<CommitResult> {
+    const args = ['commit'];
+    if (options?.amend) args.push('--amend');
+    if (options?.noEdit) {
+      args.push('--no-edit');
+    } else {
+      args.push('-m', message);
+    }
+    const stdout = await this.exec(args);
 
     // Extract the commit hash from git commit output.
     // Git outputs something like: [main abc1234] commit message
@@ -85,6 +92,11 @@ export class GitClient implements IGitClient {
     const hash = hashMatch ? hashMatch[1] : '';
 
     return { hash, success: true };
+  }
+
+  async getHeadMessage(): Promise<string> {
+    const stdout = await this.exec(['log', '-1', '--format=%B']);
+    return stdout.trimEnd();
   }
 
   async hasStagedChanges(): Promise<boolean> {

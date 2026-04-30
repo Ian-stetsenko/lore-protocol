@@ -3,7 +3,8 @@ import type { CommitBuilder } from '../services/commit-builder.js';
 import type { IGitClient } from '../interfaces/git-client.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { CommitInputResolver, CommitCommandOptions } from '../services/commit-input-resolver.js';
-import { NoStagedChangesError, ValidationError } from '../util/errors.js';
+import type { HeadLoreIdReader } from '../services/head-lore-id-reader.js';
+import { LoreError, NoStagedChangesError, ValidationError } from '../util/errors.js';
 
 /**
  * Register the `lore commit` command.
@@ -11,6 +12,8 @@ import { NoStagedChangesError, ValidationError } from '../util/errors.js';
  * --file <path>: read JSON from file.
  * -i / --interactive: interactive mode (guided prompts).
  * Flags: --intent, --body, --constraint, etc.
+ * --amend: amend the last commit (preserves Lore-id).
+ * --no-edit: keep existing message (use with --amend).
  */
 export function registerCommitCommand(
   program: Command,
@@ -19,11 +22,14 @@ export function registerCommitCommand(
     gitClient: IGitClient;
     getFormatter: () => IOutputFormatter;
     commitInputResolver: CommitInputResolver;
+    headLoreIdReader: HeadLoreIdReader;
   },
 ): void {
   program
     .command('commit')
     .description('Create a Lore-enriched commit')
+    .option('--amend', 'Amend the last commit')
+    .option('--no-edit', 'Keep the existing commit message (use with --amend)')
     .option('--file <path>', 'Read JSON input from file')
     .option('-i, --interactive', 'Interactive mode (guided prompts)')
     .option('--intent <text>', 'Intent line (why the change was made)')
@@ -40,35 +46,53 @@ export function registerCommitCommand(
     .option('--depends-on <id...>', 'Depends-on Lore-id (repeatable)')
     .option('--related <id...>', 'Related Lore-id (repeatable)')
     .action(async (options: CommitCommandOptions) => {
-      const { commitBuilder, gitClient, getFormatter, commitInputResolver } = deps;
+      const { commitBuilder, gitClient, getFormatter, commitInputResolver, headLoreIdReader } = deps;
       const formatter = getFormatter();
 
-      // 1. Check for staged changes
-      const hasStaged = await gitClient.hasStagedChanges();
-      if (!hasStaged) {
-        throw new NoStagedChangesError();
+      // --no-edit without --amend is invalid
+      if (options.noEdit && !options.amend) {
+        throw new LoreError('--no-edit can only be used with --amend', 1);
       }
 
-      // 2. Resolve input from the appropriate source
+      // --amend --no-edit: pass through to git, no Lore processing
+      if (options.amend && options.noEdit) {
+        const result = await gitClient.commit('', { amend: true, noEdit: true });
+        console.log(formatter.formatSuccess(`Commit amended: ${result.hash}`, { hash: result.hash }));
+        return;
+      }
+
+      // Check for staged changes (skip when amending)
+      if (!options.amend) {
+        const hasStaged = await gitClient.hasStagedChanges();
+        if (!hasStaged) {
+          throw new NoStagedChangesError();
+        }
+      }
+
+      // Read existing Lore-id when amending
+      const existingLoreId = options.amend ? await headLoreIdReader.read() : null;
+
+      // Resolve input from the appropriate source
       const input = await commitInputResolver.resolve(options);
 
-      // 3. Validate input
+      // Validate input
       const issues = commitBuilder.validate(input);
       const errors = issues.filter((i) => i.severity === 'error');
       if (errors.length > 0) {
         throw new ValidationError('Commit input validation failed', issues);
       }
 
-      // 4. Build the commit message
-      const message = commitBuilder.build(input);
+      // Build the commit message (reuse existing Lore-id on amend)
+      const message = commitBuilder.build(input, existingLoreId ?? undefined);
 
-      // 5. Run git commit
-      const result = await gitClient.commit(message);
+      // Run git commit
+      const result = await gitClient.commit(message, options.amend ? { amend: true } : undefined);
 
-      // 6. Output
+      // Output
+      const verb = options.amend ? 'amended' : 'created';
       console.log(
         formatter.formatSuccess(
-          `Commit created: ${result.hash}`,
+          `Commit ${verb}: ${result.hash}`,
           { hash: result.hash },
         ),
       );

@@ -23,6 +23,8 @@ export enum InputMode {
  * CLI options passed to the commit command.
  */
 export interface CommitCommandOptions {
+  readonly amend?: boolean;
+  readonly noEdit?: boolean;
   readonly file?: string;
   readonly interactive?: boolean;
   readonly intent?: string;

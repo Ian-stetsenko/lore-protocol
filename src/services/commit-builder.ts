@@ -45,8 +45,8 @@ export class CommitBuilder {
     this.config = config;
   }
 
-  build(input: CommitInput): string {
-    const loreId = this.loreIdGenerator.generate();
+  build(input: CommitInput, existingLoreId?: LoreId): string {
+    const loreId = existingLoreId ?? this.loreIdGenerator.generate();
     const trailers = this.buildTrailers(loreId, input);
     const serialized = this.trailerParser.serialize(trailers);
 

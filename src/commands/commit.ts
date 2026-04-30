@@ -29,7 +29,7 @@ export function registerCommitCommand(
     .command('commit')
     .description('Create a Lore-enriched commit')
     .option('--amend', 'Amend the last commit')
-    .option('--edit', 'Edit the commit message (default: true)', true)
+    .option('--no-edit', 'Keep the existing commit message (use with --amend)')
     .option('--file <path>', 'Read JSON input from file')
     .option('-i, --interactive', 'Interactive mode (guided prompts)')
     .option('--intent <text>', 'Intent line (why the change was made)')

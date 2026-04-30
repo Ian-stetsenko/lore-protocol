@@ -97,6 +97,16 @@ describe('HeadLoreIdReader', () => {
     expect(result).toBe('deadbeef');
   });
 
+  it('should return null when getHeadMessage throws (empty repo)', async () => {
+    const gitClient = createMockGitClient('');
+    vi.mocked(gitClient.getHeadMessage).mockRejectedValue(new Error('fatal: bad default revision'));
+    const reader = new HeadLoreIdReader(gitClient, trailerParser);
+
+    const result = await reader.read();
+
+    expect(result).toBeNull();
+  });
+
   it('should return null when Lore-id is not valid hex format', async () => {
     const message = [
       'feat: broken lore-id',

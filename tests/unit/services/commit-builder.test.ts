@@ -133,15 +133,7 @@ describe('CommitBuilder', () => {
       expect(mockIdGen.generate).not.toHaveBeenCalled();
     });
 
-    it('should not call loreIdGenerator.generate() when existingLoreId is provided', () => {
-      const input: CommitInput = { intent: 'amend: keep id' };
-
-      builder.build(input, '11223344');
-
-      expect(mockIdGen.generate).not.toHaveBeenCalled();
-    });
-
-    it('should fall back to generating when no existingLoreId is provided', () => {
+    it('should generate new Lore-id when no existingLoreId is provided', () => {
       const input: CommitInput = { intent: 'new commit' };
 
       builder.build(input);

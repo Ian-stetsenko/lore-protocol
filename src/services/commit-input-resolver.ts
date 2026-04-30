@@ -24,7 +24,7 @@ export enum InputMode {
  */
 export interface CommitCommandOptions {
   readonly amend?: boolean;
-  readonly noEdit?: boolean;
+  readonly edit?: boolean;
   readonly file?: string;
   readonly interactive?: boolean;
   readonly intent?: string;

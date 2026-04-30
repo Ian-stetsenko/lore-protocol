@@ -29,7 +29,7 @@ export function registerCommitCommand(
     .command('commit')
     .description('Create a Lore-enriched commit')
     .option('--amend', 'Amend the last commit')
-    .option('--no-edit', 'Keep the existing commit message (use with --amend)')
+    .option('--edit', 'Edit the commit message (default: true)', true)
     .option('--file <path>', 'Read JSON input from file')
     .option('-i, --interactive', 'Interactive mode (guided prompts)')
     .option('--intent <text>', 'Intent line (why the change was made)')
@@ -50,12 +50,12 @@ export function registerCommitCommand(
       const formatter = getFormatter();
 
       // --no-edit without --amend is invalid
-      if (options.noEdit && !options.amend) {
+      if (options.edit === false && !options.amend) {
         throw new LoreError('--no-edit can only be used with --amend', 1);
       }
 
       // --amend --no-edit: pass through to git, no Lore processing
-      if (options.amend && options.noEdit) {
+      if (options.amend && options.edit === false) {
         const result = await gitClient.commit('', { amend: true, noEdit: true });
         console.log(formatter.formatSuccess(`Commit amended: ${result.hash}`, { hash: result.hash }));
         return;

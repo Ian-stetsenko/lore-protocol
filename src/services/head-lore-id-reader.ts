@@ -19,12 +19,18 @@ export class HeadLoreIdReader {
   ) {}
 
   async read(): Promise<LoreId | null> {
-    const message = await this.gitClient.getHeadMessage();
+    let message: string;
+    try {
+      message = await this.gitClient.getHeadMessage();
+    } catch {
+      return null;
+    }
+
     const trailerBlock = this.trailerParser.extractTrailerBlock(message);
     if (!trailerBlock) return null;
 
     const trailers = this.trailerParser.parse(trailerBlock, []);
     const loreId = trailers['Lore-id'];
-    return LORE_ID_PATTERN.test(loreId) ? loreId : null;
+    return loreId && LORE_ID_PATTERN.test(loreId) ? loreId : null;
   }
 }

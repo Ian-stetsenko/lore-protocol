@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-30
+
+### Added
+
+- **`lore commit --amend`**: Amend the last commit while preserving the existing Lore-id, keeping knowledge-graph references (Related, Supersedes, Depends-on) valid. ([#39](https://github.com/Ian-stetsenko/lore-protocol/issues/39))
+- **`lore commit --amend --no-edit`**: Add staged files to the last commit without changing the message or trailers — passes through directly to git.
+- **`HeadLoreIdReader` service**: Reads the Lore-id from HEAD's commit message for reuse during amend.
+- **Command-level tests for amend**: 8 tests covering all amend code paths including Lore-id preservation, --no-edit passthrough, validation, and edge cases.
+
+### Fixed
+
+- **`--no-edit` Commander.js registration**: Fixed option registration to use `.option('--no-edit')` (Commander's boolean negation pattern) instead of `.option('--edit', ..., true)` which didn't recognize `--no-edit` from the CLI.
+
+## [0.3.0] - 2026-04-26
+
+### Fixed
+
+- **`--version` flag stuck on old version**: Now reads dynamically from `package.json` via `createRequire` instead of a hardcoded string. Added smoke test to prevent regression. ([#27](https://github.com/Ian-stetsenko/lore-protocol/issues/27))
+- **`--limit` semantics and query pipeline**: Hardened query pipeline edge cases for limit handling. ([#24](https://github.com/Ian-stetsenko/lore-protocol/issues/24), [#26](https://github.com/Ian-stetsenko/lore-protocol/issues/26))
+
+### Added
+
+- **CI/CD**: GitHub Actions for CI (typecheck + tests) and npm publish workflow with OIDC trusted publishing.
+
 ## [0.2.0] - 2026-04-25
 
 ### Fixed
@@ -48,5 +72,7 @@ Initial release implementing the Lore protocol ([arXiv:2603.15566](https://arxiv
 - **Custom trailers**: Extend the vocabulary via `config.toml` without code changes.
 - **Configurable validation**: Required trailers, strict mode, message length limits.
 
+[0.4.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.4.0
+[0.3.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.1.0

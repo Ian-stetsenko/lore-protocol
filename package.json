@@ -1,6 +1,6 @@
 {
   "name": "lore-protocol",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "CLI tool for the Lore protocol — structured decision context in git commits",
   "repository": {
     "type": "git",

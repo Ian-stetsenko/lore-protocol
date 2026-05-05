@@ -27,6 +27,9 @@ const CAMEL_TO_SNAKE: Record<string, Record<string, string>> = {
   follow: {
     maxDepth: 'max_depth',
   },
+  cli: {
+    updateCheck: 'update_check',
+  },
 };
 
 const VALID_OUTPUT_FORMATS = new Set(['text', 'json']);

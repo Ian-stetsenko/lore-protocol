@@ -44,6 +44,10 @@ import { registerSquashCommand } from './commands/squash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 
 import { LoreError, ValidationError } from './util/errors.js';
+import { UpdateChecker } from './services/update-checker.js';
+import type { IUpdateChecker } from './interfaces/update-checker.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * Composition root: constructs all dependencies and wires them together.
@@ -188,8 +192,20 @@ async function main(): Promise<void> {
     getFormatter,
   });
 
-  // 6. Parse and run
+  // 6. Update checker (show cached notification, fire-and-forget background check)
+  const updateChecker: IUpdateChecker = new UpdateChecker(
+    'lore-protocol',
+    version,
+    join(homedir(), '.lore'),
+    { configUpdateCheck: config.cli.updateCheck },
+  );
+  updateChecker.showCachedNotification();
+
+  // 7. Parse and run
   await program.parseAsync(process.argv);
+
+  // 8. Fire-and-forget: check for updates (writes cache for next run)
+  updateChecker.checkForUpdateAsync();
 }
 
 // Top-level error handler

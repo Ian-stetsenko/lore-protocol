@@ -91,3 +91,9 @@ export const PROMPT_STRINGS = {
   ADD_RELATED: 'Add a Related reference?',
   RELATED_INPUT: 'Related (8-char hex Lore-id):',
 } as const;
+
+// Update checker constants
+export const NPM_REGISTRY_BASE_URL = 'https://registry.npmjs.org';
+export const UPDATE_CHECK_CACHE_FILENAME = 'update-check.json';
+export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const UPDATE_CHECK_TIMEOUT_MS = 5000;

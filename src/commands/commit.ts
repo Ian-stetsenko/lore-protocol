@@ -6,6 +6,20 @@ import type { CommitInputResolver, CommitCommandOptions } from '../services/comm
 import type { HeadLoreIdReader } from '../services/head-lore-id-reader.js';
 import { LoreError, NoStagedChangesError, ValidationError } from '../util/errors.js';
 
+/** Keys on CommitCommandOptions that are NOT user-supplied input. */
+const NON_INPUT_KEYS: ReadonlySet<string> = new Set(['amend', 'edit']);
+
+/**
+ * Detect conflicting input when --no-edit is used.
+ * Uses exclusion: anything in options that is NOT amend/edit is user input.
+ * New flags are caught automatically — no maintenance list to update.
+ */
+function hasConflictingInput(options: CommitCommandOptions): boolean {
+  return Object.entries(options)
+    .filter(([k]) => !NON_INPUT_KEYS.has(k))
+    .some(([, v]) => v !== undefined);
+}
+
 /**
  * Register the `lore commit` command.
  * Default: read JSON from stdin.
@@ -56,13 +70,7 @@ export function registerCommitCommand(
 
       // --amend --no-edit: pass through to git, no Lore processing
       if (options.amend && options.edit === false) {
-        const INPUT_FLAG_KEYS: ReadonlyArray<keyof CommitCommandOptions> = [
-          'file', 'interactive', 'intent', 'body', 'constraint', 'rejected',
-          'confidence', 'scopeRisk', 'reversibility', 'directive', 'tested',
-          'notTested', 'supersedes', 'dependsOn', 'related',
-        ];
-        const hasInputFlags = INPUT_FLAG_KEYS.some(k => options[k] !== undefined) || !process.stdin.isTTY;
-        if (hasInputFlags) {
+        if (hasConflictingInput(options)) {
           throw new LoreError(
             '--no-edit keeps the existing message unchanged. Remove --no-edit to update trailers, or remove the input flags/payload to keep the message as-is.',
             1,

@@ -119,11 +119,8 @@ describe('lore commit --amend', () => {
 
   it('should bypass Lore processing with --amend --no-edit', async () => {
     const deps = createDeps();
-    const originalIsTTY = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
 
-    try {
-      await runCommitCommand(['--amend', '--no-edit'], deps);
+    await runCommitCommand(['--amend', '--no-edit'], deps);
 
     expect(deps.commitInputResolver.resolve).not.toHaveBeenCalled();
     expect(deps.commitBuilder.build).not.toHaveBeenCalled();
@@ -132,9 +129,6 @@ describe('lore commit --amend', () => {
       '',
       { amend: true, noEdit: true },
     );
-    } finally {
-      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
-    }
   });
 
   it('should throw when --no-edit is combined with --file', async () => {
@@ -169,6 +163,20 @@ describe('lore commit --amend', () => {
     const deps = createDeps();
     await expect(
       runCommitCommand(['--amend', '--no-edit', '--constraint', 'must use X'], deps),
+    ).rejects.toThrow('--no-edit keeps the existing message unchanged');
+  });
+
+  it('should throw when --no-edit is combined with enum trailer flags', async () => {
+    const deps = createDeps();
+    await expect(
+      runCommitCommand(['--amend', '--no-edit', '--confidence', 'high'], deps),
+    ).rejects.toThrow('--no-edit keeps the existing message unchanged');
+  });
+
+  it('should throw when --no-edit is combined with reference trailer flags', async () => {
+    const deps = createDeps();
+    await expect(
+      runCommitCommand(['--amend', '--no-edit', '--related', 'abc12345'], deps),
     ).rejects.toThrow('--no-edit keeps the existing message unchanged');
   });
 

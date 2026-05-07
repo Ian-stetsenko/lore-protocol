@@ -131,6 +131,30 @@ describe('lore commit --amend', () => {
     );
   });
 
+  it('should throw when --no-edit is combined with --file', async () => {
+    const deps = createDeps();
+
+    await expect(
+      runCommitCommand(['--amend', '--no-edit', '--file', 'input.json'], deps),
+    ).rejects.toThrow('--no-edit keeps the existing message unchanged');
+  });
+
+  it('should throw when --no-edit is combined with --intent', async () => {
+    const deps = createDeps();
+
+    await expect(
+      runCommitCommand(['--amend', '--no-edit', '--intent', 'new intent'], deps),
+    ).rejects.toThrow('--no-edit keeps the existing message unchanged');
+  });
+
+  it('should throw when --no-edit is combined with --interactive', async () => {
+    const deps = createDeps();
+
+    await expect(
+      runCommitCommand(['--amend', '--no-edit', '-i'], deps),
+    ).rejects.toThrow('--no-edit keeps the existing message unchanged');
+  });
+
   it('should throw when --no-edit is used without --amend', async () => {
     const deps = createDeps();
 

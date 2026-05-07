@@ -119,16 +119,36 @@ describe('lore commit --amend', () => {
 
   it('should bypass Lore processing with --amend --no-edit', async () => {
     const deps = createDeps();
+    const originalIsTTY = process.stdin.isTTY;
+    process.stdin.isTTY = true;
 
-    await runCommitCommand(['--amend', '--no-edit'], deps);
+    try {
+      await runCommitCommand(['--amend', '--no-edit'], deps);
 
-    expect(deps.commitInputResolver.resolve).not.toHaveBeenCalled();
-    expect(deps.commitBuilder.build).not.toHaveBeenCalled();
-    expect(deps.commitBuilder.validate).not.toHaveBeenCalled();
-    expect(deps.gitClient.commit).toHaveBeenCalledWith(
-      '',
-      { amend: true, noEdit: true },
-    );
+      expect(deps.commitInputResolver.resolve).not.toHaveBeenCalled();
+      expect(deps.commitBuilder.build).not.toHaveBeenCalled();
+      expect(deps.commitBuilder.validate).not.toHaveBeenCalled();
+      expect(deps.gitClient.commit).toHaveBeenCalledWith(
+        '',
+        { amend: true, noEdit: true },
+      );
+    } finally {
+      process.stdin.isTTY = originalIsTTY;
+    }
+  });
+
+  it('should throw when --no-edit is combined with piped stdin', async () => {
+    const deps = createDeps();
+    const originalIsTTY = process.stdin.isTTY;
+    process.stdin.isTTY = false; // Simulate piped input
+
+    try {
+      await expect(
+        runCommitCommand(['--amend', '--no-edit'], deps),
+      ).rejects.toThrow('--no-edit keeps the existing message unchanged');
+    } finally {
+      process.stdin.isTTY = originalIsTTY;
+    }
   });
 
   it('should throw when --no-edit is combined with --file', async () => {

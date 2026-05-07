@@ -12,12 +12,20 @@ const NON_INPUT_KEYS: ReadonlySet<string> = new Set(['amend', 'edit']);
 /**
  * Detect conflicting input when --no-edit is used.
  * Uses exclusion: anything in options that is NOT amend/edit is user input.
- * New flags are caught automatically — no maintenance list to update.
+ * Also detects piped stdin (heredoc) when not in a TTY.
  */
 function hasConflictingInput(options: CommitCommandOptions): boolean {
-  return Object.entries(options)
+  const hasFlagInput = Object.entries(options)
     .filter(([k]) => !NON_INPUT_KEYS.has(k))
     .some(([, v]) => v !== undefined);
+
+  if (hasFlagInput) {
+    return true;
+  }
+
+  // If stdin is not a TTY, lore defaults to reading from it.
+  // This conflicts with --no-edit.
+  return !process.stdin.isTTY;
 }
 
 /**

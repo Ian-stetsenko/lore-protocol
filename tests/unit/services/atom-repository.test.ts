@@ -3,6 +3,7 @@ import { AtomRepository } from '../../../src/services/atom-repository.js';
 import type { IGitClient, RawCommit } from '../../../src/interfaces/git-client.js';
 import type { PathQueryOptions } from '../../../src/types/query.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
+import type { IAtomCache } from '../../../src/interfaces/atom-cache.js';
 import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 /**
@@ -17,6 +18,13 @@ function createMockTrailerParser() {
     }),
     serialize: vi.fn(() => ''),
     extractTrailerBlock: vi.fn(() => ''),
+  };
+}
+
+function createMockCache(): IAtomCache {
+  return {
+    getFiles: vi.fn(async () => null),
+    setFiles: vi.fn(async () => {}),
   };
 }
 
@@ -134,12 +142,14 @@ function makeQueryOptions(overrides: Partial<PathQueryOptions> = {}): PathQueryO
 describe('AtomRepository', () => {
   let gitClient: IGitClient;
   let trailerParser: ReturnType<typeof createMockTrailerParser>;
+  let cache: IAtomCache;
   let repo: AtomRepository;
 
   beforeEach(() => {
     gitClient = createMockGitClient();
     trailerParser = createMockTrailerParser();
-    repo = new AtomRepository(gitClient, trailerParser as any);
+    cache = createMockCache();
+    repo = new AtomRepository(gitClient, trailerParser as any, cache);
   });
 
   describe('findByTarget', () => {
@@ -664,6 +674,30 @@ describe('AtomRepository', () => {
       await expect(
         repo.findByTarget(makeGitLogArgs(), makeQueryOptions()),
       ).rejects.toThrow('git failed');
+    });
+
+    it('should use and update cache', async () => {
+      const commit = makeLoreCommit({ hash: 'abc', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockResolvedValue([commit]);
+      vi.mocked(cache.getFiles).mockResolvedValue(null);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['file.ts']);
+
+      await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
+
+      expect(cache.getFiles).toHaveBeenCalledWith('abc');
+      expect(gitClient.getFilesChanged).toHaveBeenCalledWith('abc');
+      expect(cache.setFiles).toHaveBeenCalledWith('abc', ['file.ts']);
+    });
+
+    it('should return cached files without calling git when cache hits', async () => {
+      const commit = makeLoreCommit({ hash: 'abc', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockResolvedValue([commit]);
+      vi.mocked(cache.getFiles).mockResolvedValue(['cached.ts']);
+
+      const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
+
+      expect(result[0].filesChanged).toEqual(['cached.ts']);
+      expect(gitClient.getFilesChanged).not.toHaveBeenCalled();
     });
   });
 });

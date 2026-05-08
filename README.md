@@ -131,6 +131,7 @@ lore search --text "session" --confidence high
 | `--format <type>` | Output format: `text` (default) or `json` |
 | `--no-color` | Disable colored output |
 | `--no-update-notifier` | Disable update notification |
+| `--no-cache` | Bypass caching in the CLI |
 | `--limit <n>` | Limit number of results |
 | `--since <ref>` | Only consider commits since ref/date |
 
@@ -188,6 +189,7 @@ update_check = true    # Set to false to disable update notifications
 
 | Variable | Description |
 |----------|-------------|
+| `LORE_NO_CACHE` | Set to `1` or `true` to bypass the atom cache |
 | `LORE_NO_UPDATE_CHECK` | Set to `1` or `true` to disable update notifications |
 | `NO_UPDATE_NOTIFIER` | Standard variable to disable update notifications (set to `1` or `true`) |
 | `CI` | Set to `true` or `1` to disable notifications (automatic in most CI) |

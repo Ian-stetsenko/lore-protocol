@@ -27,6 +27,7 @@ default_format = "text"
 max_depth = 3
 
 [cli]
+cache = true
 update_check = true
 `;
 

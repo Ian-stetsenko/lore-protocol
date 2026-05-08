@@ -2,7 +2,9 @@ import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
 import type { PathQueryOptions } from '../types/query.js';
 import type { LoreAtom, LoreId, LoreTrailers } from '../types/domain.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
+import type { IAtomCache } from '../interfaces/atom-cache.js';
 import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS, GIT_FILES_CHANGED_BATCH_SIZE } from '../util/constants.js';
+import { NullAtomCache } from './atom-cache.js';
 
 /**
  * Retrieves LoreAtoms from git history.
@@ -15,8 +17,10 @@ export class AtomRepository {
   constructor(
     private readonly gitClient: IGitClient,
     private readonly trailerParser: TrailerParser,
+    private readonly atomCache: IAtomCache = new NullAtomCache(),
     private readonly customTrailerKeys: readonly string[] = [],
   ) {}
+
 
   /**
    * Find atoms that touched the given target path/file/directory.
@@ -207,20 +211,35 @@ export class AtomRepository {
       loreCommits.push({ raw, trailers });
     }
 
-    // Second pass: batch getFilesChanged calls with concurrency limit.
-    // Results accumulate in insertion order, maintaining 1:1 alignment with loreCommits.
-    const filesPerCommit: (readonly string[])[] = [];
-    for (let i = 0; i < loreCommits.length; i += GIT_FILES_CHANGED_BATCH_SIZE) {
-      const batch = loreCommits.slice(i, i + GIT_FILES_CHANGED_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(({ raw }) => this.gitClient.getFilesChanged(raw.hash)),
-      );
-      filesPerCommit.push(...batchResults);
+    // Second pass: get files changed using a 2-stage strategy.
+    // Stage 1: Fast concurrent cache check for all identified Lore commits.
+    const filesPerCommit: (readonly string[] | null)[] = await Promise.all(
+      loreCommits.map(({ raw }) => this.atomCache.getFiles(raw.hash)),
+    );
+
+    const misses: Array<{ index: number; hash: string }> = [];
+    for (let i = 0; i < filesPerCommit.length; i++) {
+      if (filesPerCommit[i] === null) {
+        misses.push({ index: i, hash: loreCommits[i].raw.hash });
+      }
     }
+
+    // Stage 2: Batched Git fetch for cache misses only (respecting concurrency limit).
+    for (let i = 0; i < misses.length; i += GIT_FILES_CHANGED_BATCH_SIZE) {
+      const batch = misses.slice(i, i + GIT_FILES_CHANGED_BATCH_SIZE);
+      await Promise.all(
+        batch.map(async ({ index, hash }) => {
+          const files = await this.gitClient.getFilesChanged(hash);
+          await this.atomCache.setFiles(hash, files);
+          filesPerCommit[index] = files;
+        }),
+      );
+    }
+
 
     // Build atoms by pairing parsed trailers with their file lists
     const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) =>
-      this.buildAtom(raw, trailers, filesPerCommit[index]),
+      this.buildAtom(raw, trailers, filesPerCommit[index] as readonly string[]),
     );
 
     return atoms;

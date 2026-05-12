@@ -1,0 +1,8 @@
+- id: lore-validate
+  name: Lore protocol validation
+  description: Validate commit messages follow the Lore protocol
+  entry: lore validate --last 1 --strict
+  language: node
+  stages: [commit-msg]
+  always_run: true
+  additional_dependencies: ['lore-protocol']

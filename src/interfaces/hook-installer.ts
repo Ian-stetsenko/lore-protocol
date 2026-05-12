@@ -1,3 +1,9 @@
+import type { LoreConfig } from '../types/config.js';
+
+export interface IHookScriptGenerator {
+  generateCommitMsgHook(config: LoreConfig['hooks']): string;
+}
+
 export interface HookInstallResult {
   readonly installed: boolean;
   readonly hookPath: string;

@@ -1,7 +1,6 @@
 import { readFile, writeFile, mkdir, rename, unlink, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { IHookInstaller, HookInstallResult, HookUninstallResult } from '../interfaces/hook-installer.js';
-import type { HookScriptGenerator } from './hook-script-generator.js';
+import type { IHookInstaller, IHookScriptGenerator, HookInstallResult, HookUninstallResult } from '../interfaces/hook-installer.js';
 import type { LoreConfig } from '../types/config.js';
 import { LORE_MARKER } from './hook-script-generator.js';
 
@@ -14,7 +13,7 @@ import { LORE_MARKER } from './hook-script-generator.js';
  */
 export class HookInstaller implements IHookInstaller {
   constructor(
-    private readonly scriptGenerator: HookScriptGenerator,
+    private readonly scriptGenerator: IHookScriptGenerator,
     private readonly hooksConfig: LoreConfig['hooks'],
   ) {}
 

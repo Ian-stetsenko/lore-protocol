@@ -1,6 +1,9 @@
 import type { LoreConfig } from '../types/config.js';
 
-const LORE_MARKER = '# LORE-MANAGED-HOOK';
+export const LORE_MARKER = '# LORE-MANAGED-HOOK';
+
+const SAFE_PATTERN = /^[a-zA-Z0-9 ^$.*+?|[\]()\\/_-]+$/;
+const SAFE_AUTHOR = /^[^"$`\\\n]+$/;
 
 /**
  * Generates shell script content for git hooks.
@@ -30,8 +33,9 @@ export class HookScriptGenerator {
       );
     }
 
-    // Skip patterns from config
+    // Skip patterns from config (validated for shell safety)
     for (const pattern of config.skipPatterns) {
+      if (!SAFE_PATTERN.test(pattern)) continue;
       lines.push(
         `# Skip pattern: ${pattern}`,
         `if [[ "$COMMIT_MSG" =~ ${pattern} ]]; then`,
@@ -41,11 +45,12 @@ export class HookScriptGenerator {
       );
     }
 
-    // Skip authors from config
-    if (config.skipAuthors.length > 0) {
+    // Skip authors from config (validated for shell safety)
+    const safeAuthors = config.skipAuthors.filter((a) => SAFE_AUTHOR.test(a));
+    if (safeAuthors.length > 0) {
       lines.push('# Skip configured authors');
       lines.push('AUTHOR=$(git var GIT_AUTHOR_IDENT 2>/dev/null | sed \'s/>.*/>/\')');
-      for (const author of config.skipAuthors) {
+      for (const author of safeAuthors) {
         lines.push(
           `if [[ "$AUTHOR" == *"${author}"* ]]; then`,
           '  exit 0',
@@ -55,14 +60,14 @@ export class HookScriptGenerator {
       lines.push('');
     }
 
-    // Run validation
+    // Run validation against the commit message file
     const strictFlag = config.enforce ? ' --strict' : '';
     lines.push(
-      '# Run Lore protocol validation',
+      '# Run Lore protocol validation against the commit message file',
       'if command -v lore &> /dev/null; then',
-      `  lore validate --last 1${strictFlag}`,
+      `  lore validate --commit-msg-file "$COMMIT_MSG_FILE"${strictFlag}`,
       'else',
-      `  npx --yes lore-protocol validate --last 1${strictFlag}`,
+      `  npx --yes lore-protocol validate --commit-msg-file "$COMMIT_MSG_FILE"${strictFlag}`,
       'fi',
       '',
     );
@@ -70,5 +75,3 @@ export class HookScriptGenerator {
     return lines.join('\n');
   }
 }
-
-export { LORE_MARKER };

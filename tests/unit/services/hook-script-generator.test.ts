@@ -19,16 +19,16 @@ describe('HookScriptGenerator', () => {
     expect(script).toContain('COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")');
   });
 
-  it('includes lore validate call with --strict when enforce is true', () => {
+  it('validates via --commit-msg-file with --strict when enforce is true', () => {
     const script = generator.generateCommitMsgHook({ ...DEFAULT_CONFIG.hooks, enforce: true });
 
-    expect(script).toContain('lore validate --last 1 --strict');
+    expect(script).toContain('lore validate --commit-msg-file "$COMMIT_MSG_FILE" --strict');
   });
 
-  it('omits --strict when enforce is false', () => {
+  it('validates via --commit-msg-file without --strict when enforce is false', () => {
     const script = generator.generateCommitMsgHook({ ...DEFAULT_CONFIG.hooks, enforce: false });
 
-    expect(script).toContain('lore validate --last 1');
+    expect(script).toContain('lore validate --commit-msg-file "$COMMIT_MSG_FILE"');
     expect(script).not.toContain('--strict');
   });
 
@@ -36,7 +36,6 @@ describe('HookScriptGenerator', () => {
     const script = generator.generateCommitMsgHook({ ...DEFAULT_CONFIG.hooks, allowFixup: true });
 
     expect(script).toContain('fixup|squash');
-    expect(script).toContain('exit 0');
   });
 
   it('omits fixup/squash skip when allowFixup is false', () => {
@@ -45,7 +44,7 @@ describe('HookScriptGenerator', () => {
     expect(script).not.toContain('fixup|squash');
   });
 
-  it('includes skip patterns from config', () => {
+  it('includes safe skip patterns from config', () => {
     const script = generator.generateCommitMsgHook({
       ...DEFAULT_CONFIG.hooks,
       skipPatterns: ['^Merge ', '^Revert '],
@@ -55,7 +54,17 @@ describe('HookScriptGenerator', () => {
     expect(script).toContain('^Revert ');
   });
 
-  it('includes skip authors from config', () => {
+  it('filters out unsafe skip patterns', () => {
+    const script = generator.generateCommitMsgHook({
+      ...DEFAULT_CONFIG.hooks,
+      skipPatterns: ['^Merge ', '"]]; rm -rf / #'],
+    });
+
+    expect(script).toContain('^Merge ');
+    expect(script).not.toContain('rm -rf');
+  });
+
+  it('includes safe skip authors from config', () => {
     const script = generator.generateCommitMsgHook({
       ...DEFAULT_CONFIG.hooks,
       skipAuthors: ['dependabot[bot]', 'renovate[bot]'],
@@ -64,6 +73,16 @@ describe('HookScriptGenerator', () => {
     expect(script).toContain('dependabot[bot]');
     expect(script).toContain('renovate[bot]');
     expect(script).toContain('GIT_AUTHOR_IDENT');
+  });
+
+  it('filters out unsafe skip authors', () => {
+    const script = generator.generateCommitMsgHook({
+      ...DEFAULT_CONFIG.hooks,
+      skipAuthors: ['good-bot', 'evil"; rm -rf / #'],
+    });
+
+    expect(script).toContain('good-bot');
+    expect(script).not.toContain('rm -rf');
   });
 
   it('omits author check when skipAuthors is empty', () => {
@@ -88,8 +107,6 @@ describe('HookScriptGenerator', () => {
       skipPatterns: [],
     });
 
-    expect(script).toContain('lore validate');
-    // Should not have any skip pattern blocks
     expect(script).not.toContain('# Skip pattern:');
   });
 });

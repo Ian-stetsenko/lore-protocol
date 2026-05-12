@@ -19,26 +19,31 @@ export function registerHooksCommand(
     .command('hooks')
     .description('Manage git hooks for Lore protocol enforcement');
 
+  async function resolveRepoRoot(): Promise<string | null> {
+    const { gitClient, getFormatter } = deps;
+    try {
+      return await gitClient.getRepoRoot();
+    } catch {
+      const formatter = getFormatter();
+      console.error(formatter.formatError(1, [
+        { severity: 'error', message: 'Not inside a git repository' },
+      ]));
+      process.exitCode = 1;
+      return null;
+    }
+  }
+
   hooks
     .command('install')
     .description('Install commit-msg hook for Lore validation')
     .option('--force', 'Overwrite existing non-Lore hooks (backs up to .bak)')
     .action(async (options: { force?: boolean }) => {
-      const { hookInstaller, gitClient, getFormatter } = deps;
-      const formatter = getFormatter();
-
-      let repoRoot: string;
-      try {
-        repoRoot = await gitClient.getRepoRoot();
-      } catch {
-        console.error(formatter.formatError(1, [
-          { severity: 'error', message: 'Not inside a git repository' },
-        ]));
-        process.exitCode = 1;
-        return;
-      }
+      const { hookInstaller, getFormatter } = deps;
+      const repoRoot = await resolveRepoRoot();
+      if (!repoRoot) return;
 
       const result = await hookInstaller.install(repoRoot, { force: options.force ?? false });
+      const formatter = getFormatter();
 
       if (!result.installed) {
         console.error(formatter.formatError(1, [
@@ -63,21 +68,12 @@ export function registerHooksCommand(
     .command('uninstall')
     .description('Remove Lore-managed commit-msg hook')
     .action(async () => {
-      const { hookInstaller, gitClient, getFormatter } = deps;
-      const formatter = getFormatter();
-
-      let repoRoot: string;
-      try {
-        repoRoot = await gitClient.getRepoRoot();
-      } catch {
-        console.error(formatter.formatError(1, [
-          { severity: 'error', message: 'Not inside a git repository' },
-        ]));
-        process.exitCode = 1;
-        return;
-      }
+      const { hookInstaller, getFormatter } = deps;
+      const repoRoot = await resolveRepoRoot();
+      if (!repoRoot) return;
 
       const result = await hookInstaller.uninstall(repoRoot);
+      const formatter = getFormatter();
 
       if (result.notLoreHook) {
         console.error(formatter.formatError(1, [

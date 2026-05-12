@@ -186,6 +186,7 @@ async function main(): Promise<void> {
   registerValidateCommand(program, {
     validator,
     gitClient,
+    trailerParser,
     getFormatter,
   });
 

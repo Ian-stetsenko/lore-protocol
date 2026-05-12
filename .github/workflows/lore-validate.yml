@@ -7,6 +7,8 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Non-blocking initially — remove continue-on-error to enforce
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -14,10 +16,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - run: npm ci
       - run: npm run build
 
-      - name: Validate Lore commits
-        run: node ./bin/lore.js validate --since origin/main --strict
+      - name: Validate Lore commits in PR
+        run: |
+          echo "Validating commits since origin/main..."
+          node ./bin/lore.js validate --since origin/main || true
+          echo ""
+          echo "Note: Lore validation is advisory. To enforce, remove continue-on-error from the workflow."

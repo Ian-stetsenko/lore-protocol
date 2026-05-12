@@ -1,7 +1,7 @@
 - id: lore-validate
   name: Lore protocol validation
   description: Validate commit messages follow the Lore protocol
-  entry: lore validate --last 1 --strict
+  entry: lore validate --commit-msg-file
   language: node
   stages: [commit-msg]
   always_run: true

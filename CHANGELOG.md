@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-11
+
+### Added
+
+- **Update notifier**: Non-blocking check for new versions on subsequent runs. Suppressed automatically in CI, non-TTY, JSON output, or via `--no-update-notifier` / `LORE_NO_UPDATE_CHECK` env var. ([#42](https://github.com/Ian-stetsenko/lore-protocol/issues/42)) — thanks @c-ferrier
+- **`shouldCheckForUpdate` utility**: Extracted to `src/util/update-check.ts` to avoid side-effect-on-import from `main.ts`.
+
+### Fixed
+
+- **`--no-edit` silently discards input**: When `--amend --no-edit` was combined with any input flags or piped JSON, the input was silently ignored. Now detects conflicting input via exclusion-based check and throws an actionable error. ([#48](https://github.com/Ian-stetsenko/lore-protocol/issues/48)) — thanks @c-ferrier
+- **Duplicate trailers in body display**: Fixed `stripTrailersFromBody` for commits with no narrative body paragraph — trailers no longer appear twice in text output. ([#43](https://github.com/Ian-stetsenko/lore-protocol/issues/43)) — thanks @c-ferrier
+
 ## [0.4.0] - 2026-04-30
 
 ### Added
@@ -72,6 +84,7 @@ Initial release implementing the Lore protocol ([arXiv:2603.15566](https://arxiv
 - **Custom trailers**: Extend the vocabulary via `config.toml` without code changes.
 - **Configurable validation**: Required trailers, strict mode, message length limits.
 
+[0.5.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Ian-stetsenko/lore-protocol/releases/tag/v0.2.0

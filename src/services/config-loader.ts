@@ -30,6 +30,11 @@ const CAMEL_TO_SNAKE: Record<string, Record<string, string>> = {
   cli: {
     updateCheck: 'update_check',
   },
+  hooks: {
+    allowFixup: 'allow_fixup',
+    skipAuthors: 'skip_authors',
+    skipPatterns: 'skip_patterns',
+  },
 };
 
 const VALID_OUTPUT_FORMATS = new Set(['text', 'json']);

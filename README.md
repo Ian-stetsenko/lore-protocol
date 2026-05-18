@@ -107,6 +107,7 @@ lore search --text "session" --confidence high
 | Command | Description |
 |---------|-------------|
 | `lore init` | Initialize `.lore/` config in repository |
+| `lore cache --clean` | Clear all local cache data |
 | `lore commit` | Create a Lore-enriched commit |
 | `lore context <target>` | Full lore summary for a code region |
 | `lore constraints <target>` | Active constraints for a code region |
@@ -131,6 +132,7 @@ lore search --text "session" --confidence high
 | `--format <type>` | Output format: `text` (default) or `json` |
 | `--no-color` | Disable colored output |
 | `--no-update-notifier` | Disable update notification |
+| `--no-cache` | Bypass caching in the CLI |
 | `--limit <n>` | Limit number of results |
 | `--since <ref>` | Only consider commits since ref/date |
 
@@ -155,7 +157,7 @@ Every Lore-enriched commit carries a `Lore-id` and any combination of these trai
 
 ## Configuration
 
-`lore init` creates `.lore/config.toml`:
+`lore init` creates `.lore/config.toml` and ensures `.lore/cache` is added to your `.gitignore` to prevent local cache files from being tracked.
 
 ```toml
 [protocol]
@@ -188,6 +190,7 @@ update_check = true    # Set to false to disable update notifications
 
 | Variable | Description |
 |----------|-------------|
+| `LORE_NO_CACHE` | Set to `1` or `true` to bypass the atom cache |
 | `LORE_NO_UPDATE_CHECK` | Set to `1` or `true` to disable update notifications |
 | `NO_UPDATE_NOTIFIER` | Standard variable to disable update notifications (set to `1` or `true`) |
 | `CI` | Set to `true` or `1` to disable notifications (automatic in most CI) |

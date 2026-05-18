@@ -27,6 +27,7 @@ default_format = "text"
 max_depth = 3
 
 [cli]
+cache = true
 update_check = true
 `;
 
@@ -34,6 +35,7 @@ update_check = true
  * Register the `lore init` command.
  * Creates .lore/config.toml with default content.
  * If the config file already exists, prints its content and exits.
+ * Also ensures .lore/cache is added to .gitignore.
  */
 export function registerInitCommand(
   program: Command,
@@ -64,15 +66,52 @@ export function registerInitCommand(
           `Config already exists at ${CONFIG_DIR}/${CONFIG_FILENAME}:`,
         ));
         console.log(content);
-        return;
+      } else {
+        // Create directory and write config
+        await mkdir(configDir, { recursive: true });
+        await writeFile(configPath, DEFAULT_CONFIG_CONTENT, 'utf-8');
+
+        console.log(formatter.formatSuccess(
+          `Created ${CONFIG_DIR}/${CONFIG_FILENAME} with protocol version 1.0`,
+        ));
       }
 
-      // Create directory and write config
-      await mkdir(configDir, { recursive: true });
-      await writeFile(configPath, DEFAULT_CONFIG_CONTENT, 'utf-8');
-
-      console.log(formatter.formatSuccess(
-        `Created ${CONFIG_DIR}/${CONFIG_FILENAME} with protocol version 1.0`,
-      ));
+      // Ensure cache is ignored
+      await ensureCacheIgnored(formatter);
     });
+}
+
+/**
+ * Ensures that .lore/cache is added to the .gitignore in the current directory.
+ * Uses process.cwd() to match where `lore init` creates .lore/config.toml.
+ * Idempotent: does nothing if the pattern is already present.
+ */
+async function ensureCacheIgnored(formatter: IOutputFormatter): Promise<void> {
+  const gitignorePath = join(process.cwd(), '.gitignore');
+  const ignorePattern = '.lore/cache';
+  let content = '';
+  let exists = false;
+
+  try {
+    content = await readFile(gitignorePath, 'utf-8');
+    exists = true;
+  } catch {
+    // File does not exist
+  }
+
+  const lines = content.split('\n').map((l) => l.trim());
+  if (lines.includes(ignorePattern)) {
+    return;
+  }
+
+  const suffix = content === '' || content.endsWith('\n') ? '' : '\n';
+  const newContent = `${content}${suffix}${ignorePattern}\n`;
+
+  await writeFile(gitignorePath, newContent, 'utf-8');
+
+  if (exists) {
+    console.log(formatter.formatSuccess(`Updated .gitignore to ignore ${ignorePattern}`));
+  } else {
+    console.log(formatter.formatSuccess(`Created .gitignore to ignore ${ignorePattern}`));
+  }
 }

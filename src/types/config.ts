@@ -22,6 +22,7 @@ export interface LoreConfig {
     readonly maxDepth: number;
   };
   readonly cli: {
+    readonly cache: boolean;
     readonly updateCheck: boolean;
   };
 }
@@ -33,5 +34,5 @@ export const DEFAULT_CONFIG: LoreConfig = {
   stale: { olderThan: '6m', driftThreshold: 20 },
   output: { defaultFormat: 'text' },
   follow: { maxDepth: 3 },
-  cli: { updateCheck: true },
+  cli: { cache: true, updateCheck: true },
 };

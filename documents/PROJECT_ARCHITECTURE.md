@@ -1,7 +1,7 @@
 # Lore CLI -- Project Architecture
 
 > Authoritative reference for contributors (human or AI) to the lore-cli codebase.
-> Last updated 2026-03-22. Reflects the codebase after PR #1-15 merge cycle.
+> Last updated 2026-05-11. Reflects the codebase after the Atom Cache implementation.
 
 ---
 
@@ -148,6 +148,12 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependencies**: None.
 - **Dependents**: `TerminalPrompt` (implements), `commit.ts`, `main.ts`.
 
+#### `src/interfaces/atom-cache.ts`
+- **Contains**: `IAtomCache` interface.
+- **Single Responsibility**: Contract for sharded immutable file list caching.
+- **Dependencies**: None.
+- **Dependents**: `AtomCache` (implements), `NullAtomCache` (implements), `AtomRepository`.
+
 #### `src/interfaces/commit-input-reader.ts`
 - **Contains**: `ICommitInputReader` interface.
 - **Single Responsibility**: Strategy contract for reading commit input from any source.
@@ -167,6 +173,12 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Single Responsibility**: Defines the error hierarchy. Each error carries a semantic exit code.
 - **Dependencies**: `output.ts` (`ValidationIssue`).
 - **Dependents**: `GitClient`, `commit.ts`, `squash.ts`, `trace.ts`, `why.ts`, `main.ts`.
+
+#### `src/util/cache-check.ts`
+- **Contains**: `shouldBypassCache()` function.
+- **Single Responsibility**: Determines whether the atom cache should be bypassed based on CLI flags, environment variables, and config. Extracted to avoid side effects during testing.
+- **Dependencies**: None.
+- **Dependents**: `main.ts`.
 
 #### `src/util/constants.ts`
 - **Contains**: All protocol constants: `LORE_TRAILER_KEYS`, `ARRAY_TRAILER_KEYS`, `ENUM_TRAILER_KEYS`, valid enum value arrays, `LORE_ID_PATTERN` regex, `REFERENCE_TRAILER_KEYS`, default limits/thresholds, config file names, exit codes.
@@ -197,10 +209,17 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependents**: `CommitBuilder`, `SquashMerger`, `main.ts`.
 - **Key methods**: `generate()`.
 
+#### `src/services/atom-cache.ts`
+- **Contains**: `AtomCache` and `NullAtomCache` classes.
+- **Single Responsibility**: Implements sharded immutable file list caching on the filesystem. Uses a sharded structure (e.g., `.lore/cache/atoms/ab/cd/ef...`) to avoid directory entry limits.
+- **Dependencies**: `IAtomCache`, Node.js `fs`, `path`.
+- **Dependents**: `main.ts`, `AtomRepository`.
+- **Key methods**: `getFiles()`, `setFiles()`.
+
 #### `src/services/atom-repository.ts`
 - **Contains**: `AtomRepository` class.
-- **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal.
-- **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`.
+- **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal and file-list caching.
+- **Dependencies**: `IGitClient`, `TrailerParser`, `IAtomCache`, `domain.ts`, `query.ts`, `constants.ts`.
 - **Dependents**: Commands (`context`, `constraints`, `rejected`, `directives`, `tested`, `search`, `log`, `stale`, `trace`, `squash`, `doctor`), `Validator`, `main.ts`.
 - **Key methods**: `findByTarget()`, `findByLoreId()`, `findByRange()`, `findAll()`, `findByScope()`, `resolveFollowLinks()`.
 
@@ -329,7 +348,12 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/commands/init.ts`
 - **Contains**: `registerInitCommand()` function.
-- **Single Responsibility**: Creates `.lore/config.toml` with default content. Shows existing config if already present.
+- **Single Responsibility**: Creates `.lore/config.toml` with default content and ensures `.lore/cache` is ignored via `.gitignore`. Shows existing config if already present.
+- **Dependencies**: `IOutputFormatter`, `constants.ts`, Node.js `fs`.
+
+#### `src/commands/cache.ts`
+- **Contains**: `registerCacheCommand()` function.
+- **Single Responsibility**: Provides local cache management, including clearing the `.lore/cache` directory.
 - **Dependencies**: `IOutputFormatter`, `constants.ts`, Node.js `fs`.
 
 #### `src/commands/context.ts`
@@ -597,6 +621,7 @@ graph LR
         LIG[LoreIdGenerator]
         CL[ConfigLoader]
         TMP[TerminalPrompt]
+        AC[AtomCache]
     end
 
     subgraph Composed Services
@@ -614,6 +639,7 @@ graph LR
     MAIN --> LIG
     MAIN --> CL
     MAIN --> TMP
+    MAIN --> AC
 
     MAIN --> AR
     MAIN --> SR
@@ -624,6 +650,7 @@ graph LR
 
     AR -.->|IGitClient| GC
     AR -.-> TP
+    AR -.->|IAtomCache| AC
     SD -.->|IGitClient| GC
     CB -.-> TP
     CB -.-> LIG
@@ -697,6 +724,7 @@ graph LR
 AtomRepository(
   gitClient: IGitClient,
   trailerParser: TrailerParser,
+  atomCache: IAtomCache,
   customTrailerKeys: readonly string[]
 )
 

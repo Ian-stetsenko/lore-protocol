@@ -24,6 +24,9 @@ function createMockTrailerParser() {
       for (const v of trailers.Supersedes) lines.push(`Supersedes: ${v}`);
       for (const v of trailers['Depends-on']) lines.push(`Depends-on: ${v}`);
       for (const v of trailers.Related) lines.push(`Related: ${v}`);
+      for (const [key, values] of trailers.custom) {
+        for (const v of values) lines.push(`${key}: ${v}`);
+      }
       return lines.join('\n');
     }),
     containsLoreTrailers: vi.fn(),
@@ -61,12 +64,13 @@ describe('CommitBuilder', () => {
         intent: 'feat(auth): add login flow',
       };
 
-      const result = builder.build(input);
+      const { message, loreId } = builder.build(input);
 
       expect(mockIdGen.generate).toHaveBeenCalledOnce();
       expect(mockParser.serialize).toHaveBeenCalledOnce();
-      expect(result).toContain('feat(auth): add login flow');
-      expect(result).toContain('Lore-id: a1b2c3d4');
+      expect(message).toContain('feat(auth): add login flow');
+      expect(message).toContain('Lore-id: a1b2c3d4');
+      expect(loreId).toBe('a1b2c3d4');
     });
 
     it('should include body separated by blank lines', () => {
@@ -75,10 +79,10 @@ describe('CommitBuilder', () => {
         body: 'This is a detailed explanation.',
       };
 
-      const result = builder.build(input);
+      const { message } = builder.build(input);
 
-      expect(result).toContain('feat: add feature');
-      expect(result).toContain('\n\nThis is a detailed explanation.\n\n');
+      expect(message).toContain('feat: add feature');
+      expect(message).toContain('\n\nThis is a detailed explanation.\n\n');
     });
 
     it('should include all trailer types', () => {
@@ -99,46 +103,49 @@ describe('CommitBuilder', () => {
         },
       };
 
-      const result = builder.build(input);
+      const { message } = builder.build(input);
 
-      expect(result).toContain('Constraint: Must use HTTPS');
-      expect(result).toContain('Constraint: No external deps');
-      expect(result).toContain('Rejected: Polling approach');
-      expect(result).toContain('Confidence: high');
-      expect(result).toContain('Scope-risk: narrow');
-      expect(result).toContain('Reversibility: clean');
-      expect(result).toContain('Directive: Review in 3 months');
-      expect(result).toContain('Tested: Unit tests for auth module');
-      expect(result).toContain('Not-tested: Edge case with expired tokens');
-      expect(result).toContain('Supersedes: bbccddee');
-      expect(result).toContain('Depends-on: 11223344');
-      expect(result).toContain('Related: aabbccdd');
+      expect(message).toContain('Constraint: Must use HTTPS');
+      expect(message).toContain('Constraint: No external deps');
+      expect(message).toContain('Rejected: Polling approach');
+      expect(message).toContain('Confidence: high');
+      expect(message).toContain('Scope-risk: narrow');
+      expect(message).toContain('Reversibility: clean');
+      expect(message).toContain('Directive: Review in 3 months');
+      expect(message).toContain('Tested: Unit tests for auth module');
+      expect(message).toContain('Not-tested: Edge case with expired tokens');
+      expect(message).toContain('Supersedes: bbccddee');
+      expect(message).toContain('Depends-on: 11223344');
+      expect(message).toContain('Related: aabbccdd');
     });
 
     it('should auto-generate Lore-id', () => {
       mockIdGen.generate.mockReturnValue('deadbeef');
       const input: CommitInput = { intent: 'test' };
 
-      const result = builder.build(input);
+      const { message, loreId } = builder.build(input);
 
-      expect(result).toContain('Lore-id: deadbeef');
+      expect(message).toContain('Lore-id: deadbeef');
+      expect(loreId).toBe('deadbeef');
     });
 
     it('should use provided existingLoreId instead of generating one', () => {
       const input: CommitInput = { intent: 'amend: update commit' };
 
-      const result = builder.build(input, 'cafebabe');
+      const { message, loreId } = builder.build(input, 'cafebabe');
 
-      expect(result).toContain('Lore-id: cafebabe');
+      expect(message).toContain('Lore-id: cafebabe');
+      expect(loreId).toBe('cafebabe');
       expect(mockIdGen.generate).not.toHaveBeenCalled();
     });
 
     it('should generate new Lore-id when no existingLoreId is provided', () => {
       const input: CommitInput = { intent: 'new commit' };
 
-      builder.build(input);
+      const { message } = builder.build(input);
 
       expect(mockIdGen.generate).toHaveBeenCalledOnce();
+      expect(message).toContain('Lore-id: a1b2c3d4');
     });
 
     it('should pass correct trailers to serialize', () => {
@@ -147,12 +154,13 @@ describe('CommitBuilder', () => {
         trailers: { Confidence: 'medium' },
       };
 
-      builder.build(input);
+      const { message } = builder.build(input);
 
       const passedTrailers = mockParser.serialize.mock.calls[0][0] as LoreTrailers;
       expect(passedTrailers['Lore-id']).toBe('a1b2c3d4');
       expect(passedTrailers.Confidence).toBe('medium');
       expect(passedTrailers.Constraint).toEqual([]);
+      expect(message).toContain('Lore-id: a1b2c3d4');
     });
 
     it('should pass custom trailers through to LoreTrailers.custom map', () => {
@@ -167,11 +175,12 @@ describe('CommitBuilder', () => {
         },
       };
 
-      builder.build(input);
+      const { message } = builder.build(input);
 
       const passedTrailers = vi.mocked(mockParser.serialize).mock.calls[0][0] as LoreTrailers;
       expect(passedTrailers.custom.get('Assisted-by')).toEqual(['Gemini:CLI']);
       expect(passedTrailers.custom.get('Ticket')).toEqual(['PROJ-123']);
+      expect(message).toContain('Assisted-by: Gemini:CLI');
     });
 
     it('should produce empty custom map when no custom trailers provided', () => {
@@ -180,10 +189,11 @@ describe('CommitBuilder', () => {
         trailers: { Confidence: 'high' as const },
       };
 
-      builder.build(input);
+      const { message } = builder.build(input);
 
       const passedTrailers = vi.mocked(mockParser.serialize).mock.calls[0][0] as LoreTrailers;
       expect(passedTrailers.custom.size).toBe(0);
+      expect(message).toContain('Lore-id: a1b2c3d4');
     });
   });
 

@@ -15,6 +15,7 @@ import { TrailerParser } from './services/trailer-parser.js';
 import { PathResolver } from './services/path-resolver.js';
 import { LoreIdGenerator } from './services/lore-id-generator.js';
 import { ConfigLoader } from './services/config-loader.js';
+import { SearchFilter } from './services/search-filter.js';
 import { AtomRepository } from './services/atom-repository.js';
 import { SupersessionResolver } from './services/supersession-resolver.js';
 import { StalenessDetector } from './services/staleness-detector.js';
@@ -24,7 +25,6 @@ import { Validator } from './services/validator.js';
 import { TerminalPrompt } from './services/terminal-prompt.js';
 import { CommitInputResolver } from './services/commit-input-resolver.js';
 import { HeadLoreIdReader } from './services/head-lore-id-reader.js';
-import { SearchFilter } from './services/search-filter.js';
 
 import { TextFormatter } from './formatters/text-formatter.js';
 import { JsonFormatter } from './formatters/json-formatter.js';
@@ -93,13 +93,13 @@ async function main(): Promise<void> {
   }
 
   // 4. Create services that depend on others
-  const atomRepository = new AtomRepository(gitClient, trailerParser, config.trailers.custom);
+  const searchFilter = new SearchFilter();
+  const atomRepository = new AtomRepository(gitClient, trailerParser, searchFilter, config.trailers.custom);
   const supersessionResolver = new SupersessionResolver();
   const stalenessDetector = new StalenessDetector(gitClient, config);
   const commitBuilder = new CommitBuilder(trailerParser, loreIdGenerator, config);
   const squashMerger = new SquashMerger(loreIdGenerator);
   const validator = new Validator(trailerParser, atomRepository, config);
-  const searchFilter = new SearchFilter();
   const prompt = new TerminalPrompt();
   const commitInputResolver = new CommitInputResolver(prompt);
   const headLoreIdReader = new HeadLoreIdReader(gitClient, trailerParser);
@@ -148,7 +148,6 @@ async function main(): Promise<void> {
   registerSearchCommand(program, {
     atomRepository,
     supersessionResolver,
-    searchFilter,
     getFormatter,
   });
 

@@ -1,10 +1,9 @@
 import type { Command } from 'commander';
 import type { AtomRepository } from '../services/atom-repository.js';
 import type { SupersessionResolver } from '../services/supersession-resolver.js';
-import type { SearchFilter } from '../services/search-filter.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { TrailerKey, LoreAtom, SupersessionStatus } from '../types/domain.js';
-import type { SearchOptions, QueryResult } from '../types/query.js';
+import type { QueryOptions, QueryResult } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
@@ -34,7 +33,6 @@ export function registerSearchCommand(
   deps: {
     atomRepository: AtomRepository;
     supersessionResolver: SupersessionResolver;
-    searchFilter: SearchFilter;
     getFormatter: () => IOutputFormatter;
   },
 ): void {
@@ -55,12 +53,12 @@ export function registerSearchCommand(
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
     .action(async (_options: SearchCommandOptions, command: Command) => {
       const options = mergeOptions<SearchCommandOptions>(command);
-      const { atomRepository, supersessionResolver, searchFilter, getFormatter } = deps;
+      const { atomRepository, supersessionResolver, getFormatter } = deps;
 
-      const searchOptions: SearchOptions = {
-        confidence: (options.confidence as SearchOptions['confidence']) ?? null,
-        scopeRisk: (options.scopeRisk as SearchOptions['scopeRisk']) ?? null,
-        reversibility: (options.reversibility as SearchOptions['reversibility']) ?? null,
+      const searchOptions: QueryOptions = {
+        confidence: (options.confidence as QueryOptions['confidence']) ?? null,
+        scopeRisk: (options.scopeRisk as QueryOptions['scopeRisk']) ?? null,
+        reversibility: (options.reversibility as QueryOptions['reversibility']) ?? null,
         has: (options.has as TrailerKey) ?? null,
         author: options.author ?? null,
         scope: options.scope ?? null,
@@ -76,10 +74,14 @@ export function registerSearchCommand(
         since: searchOptions.since ?? undefined,
         until: searchOptions.until ?? undefined,
         maxCommits: searchOptions.maxCommits ?? undefined,
+        author: searchOptions.author,
+        scope: searchOptions.scope,
+        has: searchOptions.has,
+        confidence: searchOptions.confidence,
+        scopeRisk: searchOptions.scopeRisk,
+        reversibility: searchOptions.reversibility,
+        text: searchOptions.text,
       });
-
-      // Apply filters via SearchFilter service
-      atoms = searchFilter.applyFilters(atoms, searchOptions);
 
       // Compute supersession on full set so each atom's status is available to the formatter
       const supersessionMap: Map<string, SupersessionStatus> = supersessionResolver.resolve(atoms);
@@ -95,7 +97,7 @@ export function registerSearchCommand(
       }
 
       // Apply result limit (--limit) after all filtering and supersession
-      if (searchOptions.limit !== null && searchOptions.limit > 0) {
+      if (searchOptions.limit !== null && searchOptions.limit !== undefined && searchOptions.limit > 0) {
         displayAtoms = displayAtoms.slice(0, searchOptions.limit);
       }
 
@@ -118,7 +120,7 @@ export function registerSearchCommand(
     });
 }
 
-function buildSearchTargetDescription(options: SearchOptions): string {
+function buildSearchTargetDescription(options: QueryOptions): string {
   const parts: string[] = [];
 
   if (options.confidence) parts.push(`confidence=${options.confidence}`);

@@ -33,5 +33,6 @@ export interface IGitClient {
   getFilesChanged(commitHash: string): Promise<readonly string[]>;
   countCommitsSince(path: string, sinceCommitHash: string): Promise<number>;
   resolveRef(ref: string): Promise<string>;
+  resolveDate(dateStr: string): Promise<Date | null>;
   getHeadMessage(): Promise<string>;
 }

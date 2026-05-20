@@ -149,6 +149,41 @@ export class GitClient implements IGitClient {
     return stdout.trim();
   }
 
+  async resolveDate(dateStr: string): Promise<Date | null> {
+    // 1. INTUITIVE: Handle YYYY-MM-DD as LOCAL MIDNIGHT.
+    // This fixes Git's quirk where it resolves YYYY-MM-DD to "Now".
+    const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = parseInt(isoMatch[2], 10) - 1; // 0-indexed
+      const day = parseInt(isoMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    // 2. FAST: Handle full ISO-8601 natively in JS.
+    const jsDate = new Date(dateStr);
+    if (!isNaN(jsDate.getTime())) {
+      return jsDate;
+    }
+
+    // 3. SMART: Resolve commit refs/hashes (Plumbing: show -s)
+    try {
+      const refTs = await this.exec(['show', '-s', '--format=%at', dateStr]);
+      const ts = parseInt(refTs.trim(), 10);
+      return !isNaN(ts) ? new Date(ts * 1000) : null;
+    } catch {
+      // 4. FALLBACK: Relative strings (Git rev-parse)
+      try {
+        const output = await this.exec(['rev-parse', `--since=${dateStr}`]);
+        const tsMatch = output.match(/=(\d+)/);
+        const ts = tsMatch ? parseInt(tsMatch[1], 10) : NaN;
+        return !isNaN(ts) ? new Date(ts * 1000) : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+
   /**
    * Parse the standard git log output with our custom format.
    * Records are separated by double null bytes; fields within a record

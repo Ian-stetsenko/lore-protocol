@@ -5,7 +5,7 @@ import type { PathResolver } from '../../services/path-resolver.js';
 import type { IOutputFormatter } from '../../interfaces/output-formatter.js';
 import type { LoreConfig } from '../../types/config.js';
 import type { TrailerKey, LoreAtom, SupersessionStatus } from '../../types/domain.js';
-import type { PathQueryOptions, QueryResult, TargetType } from '../../types/query.js';
+import type { QueryOptions, QueryResult, TargetType } from '../../types/query.js';
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
 
@@ -37,6 +37,7 @@ export interface PathQueryCommandOptions {
   readonly limit?: number;
   readonly maxCommits?: number;
   readonly since?: string;
+  readonly until?: string;
 }
 
 /**
@@ -55,14 +56,15 @@ export async function executePathQuery(
 ): Promise<void> {
   const { atomRepository, supersessionResolver, pathResolver, getFormatter, config } = deps;
 
-  const queryOptions: PathQueryOptions = {
+  const queryOptions: QueryOptions = {
     scope: options.scope ?? null,
-    follow: options.follow ?? false,
-    all: options.all ?? false,
+    followLinks: options.follow ?? false,
+    includeSuperseded: options.all ?? false,
     author: options.author ?? null,
     limit: options.limit ?? null,
     maxCommits: options.maxCommits ?? null,
     since: options.since ?? null,
+    until: options.until ?? null,
   };
 
   // Step 1: Resolve target or use --scope
@@ -71,7 +73,7 @@ export async function executePathQuery(
   let targetDisplay: string;
 
   if (queryOptions.scope) {
-    atoms = await atomRepository.findByScope(queryOptions.scope, queryOptions);
+    atoms = await atomRepository.findAll(queryOptions);
     targetType = 'global';
     targetDisplay = `scope:${queryOptions.scope}`;
   } else {
@@ -83,7 +85,7 @@ export async function executePathQuery(
   }
 
   // Step 2: Follow links if requested
-  if (queryOptions.follow && atoms.length > 0) {
+  if (queryOptions.followLinks && atoms.length > 0) {
     atoms = await atomRepository.resolveFollowLinks(atoms, config.follow.maxDepth);
   }
 
@@ -94,14 +96,14 @@ export async function executePathQuery(
 
   // Step 4: Filter superseded atoms unless --all
   let displayAtoms: readonly LoreAtom[];
-  if (queryOptions.all) {
+  if (queryOptions.includeSuperseded) {
     displayAtoms = atoms;
   } else {
     displayAtoms = supersessionResolver.filterActive(atoms, supersessionMap);
   }
 
   // Step 4b: Apply result limit (--limit) after supersession filtering
-  if (queryOptions.limit !== null && queryOptions.limit > 0) {
+  if (queryOptions.limit !== null && queryOptions.limit !== undefined && queryOptions.limit > 0) {
     displayAtoms = displayAtoms.slice(0, queryOptions.limit);
   }
 

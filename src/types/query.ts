@@ -10,29 +10,38 @@ export interface QueryTarget {
   readonly lineEnd: number | null;
 }
 
-export interface PathQueryOptions {
-  readonly scope: string | null;
-  readonly follow: boolean;
-  readonly all: boolean;
-  readonly author: string | null;
-  /** Result-level cap applied by the command layer after querying. Not used by the repository. */
-  readonly limit: number | null;
-  readonly maxCommits: number | null;
-  readonly since: string | null;
+export interface DiscoveryOptions {
+  /** Filter by conventional commit scope. */
+  readonly scope?: string | null;
+  /** Filter by author email (partial match supported). */
+  readonly author?: string | null;
+  /** Filter by presence of a specific trailer key. */
+  readonly has?: TrailerKey | null;
+  /** Filter by confidence level. */
+  readonly confidence?: ConfidenceLevel | null;
+  /** Filter by scope-risk level. */
+  readonly scopeRisk?: ScopeRiskLevel | null;
+  /** Filter by reversibility level. */
+  readonly reversibility?: ReversibilityLevel | null;
+  /** Full-text search across intent, body, and trailer values. */
+  readonly text?: string | null;
+  readonly since?: string | null;
+  readonly until?: string | null;
+  readonly maxCommits?: number | null;
 }
 
-export interface SearchOptions {
-  readonly confidence: ConfidenceLevel | null;
-  readonly scopeRisk: ScopeRiskLevel | null;
-  readonly reversibility: ReversibilityLevel | null;
-  readonly has: TrailerKey | null;
-  readonly author: string | null;
-  readonly scope: string | null;
-  readonly text: string | null;
-  readonly since: string | null;
-  readonly until: string | null;
-  readonly limit: number | null;
-  readonly maxCommits: number | null;
+/**
+ * Unified options for any Lore query (path-based or search-based).
+ */
+export interface QueryOptions extends DiscoveryOptions {
+  /** Result-level cap applied by the command layer (after querying). */
+  readonly limit?: number | null;
+
+  /** Include superseded entries in the result. */
+  readonly includeSuperseded?: boolean;
+
+  /** Transitively follow Related/Supersedes/Depends-on links (Path queries only). */
+  readonly followLinks?: boolean;
 }
 
 export interface QueryResult {

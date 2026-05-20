@@ -1,51 +1,80 @@
 import type { LoreAtom, TrailerKey } from '../types/domain.js';
-import type { SearchOptions } from '../types/query.js';
+import type { DiscoveryOptions } from '../types/query.js';
 import { ARRAY_TRAILER_KEYS, ENUM_TRAILER_KEYS } from '../util/constants.js';
 
 /**
- * Applies search filters to a collection of LoreAtoms.
+ * Internal options for filtering that include pre-resolved absolute dates.
+ */
+export interface FilterOptions extends DiscoveryOptions {
+  readonly sinceDate?: Date | null;
+  readonly untilDate?: Date | null;
+}
+
+/**
+ * Applies authoritative application-level filtering to a collection of LoreAtoms.
  *
  * GRASP: Information Expert -- knows how to match atoms against search criteria.
- * SRP: Only filtering logic, no git interaction or formatting.
+ * SRP: Only filtering logic, no git interaction or persistence.
+ *
+ * This service provides the "Authoritative Pass" in the Lore Discovery Mode
+ * pipeline, ensuring absolute precision after Git's coarse --grep pass.
  */
 export class SearchFilter {
   /**
-   * Apply all active search filters to the atom list.
+   * Apply application-level filtering to the parsed atoms.
+   *
+   * Note: author, since, and until are also passed to git log (coarse filter)
+   * in the AtomRepository, but this method provides the authoritative second
+   * layer of filtering for absolute precision and Lore-specific semantics.
    */
-  applyFilters(atoms: readonly LoreAtom[], options: SearchOptions): LoreAtom[] {
+  applyFilters(atoms: readonly LoreAtom[], options: FilterOptions): LoreAtom[] {
     let result = [...atoms];
 
-    if (options.confidence !== null) {
+    if (options.confidence !== null && options.confidence !== undefined) {
       result = result.filter((a) => a.trailers.Confidence === options.confidence);
     }
 
-    if (options.scopeRisk !== null) {
+    if (options.scopeRisk !== null && options.scopeRisk !== undefined) {
       result = result.filter((a) => a.trailers['Scope-risk'] === options.scopeRisk);
     }
 
-    if (options.reversibility !== null) {
+    if (options.reversibility !== null && options.reversibility !== undefined) {
       result = result.filter((a) => a.trailers.Reversibility === options.reversibility);
     }
 
-    if (options.has !== null) {
-      const trailerKey = options.has;
-      result = result.filter((a) => this.atomHasTrailer(a, trailerKey));
+    if (options.has !== null && options.has !== undefined) {
+      result = result.filter((a) => this.atomHasTrailer(a, options.has!));
     }
 
-    if (options.author !== null) {
+    if (options.author !== null && options.author !== undefined) {
+      // Authoritative pass: Git --author matches full "Name <email>"; Lore
+      // atoms only store the email (%ae). This pass ensures consistency
+      // with the Lore display.
       const authorLower = options.author.toLowerCase();
-      result = result.filter((a) => a.author.toLowerCase().includes(authorLower));
+      result = result.filter((atom) => atom.author.toLowerCase().includes(authorLower));
     }
 
-    if (options.scope !== null) {
-      const scope = options.scope.toLowerCase();
+    if (options.scope !== null && options.scope !== undefined) {
+      // Precise pass: Git --grep might match code snippets in the body.
+      // This pass ensures we only match the actual intent line's scope.
+      const scopeLower = options.scope.toLowerCase();
       result = result.filter((a) => {
-        const match = a.intent.match(/^[a-zA-Z]+\(([^)]+)\)/);
-        return match !== null && match[1].toLowerCase() === scope;
+        const extracted = this.extractScope(a.intent);
+        return extracted !== null && extracted.toLowerCase() === scopeLower;
       });
     }
 
-    if (options.text !== null) {
+    if (options.sinceDate) {
+      result = result.filter((atom) => atom.date >= options.sinceDate!);
+    }
+
+    if (options.untilDate) {
+      result = result.filter((atom) => atom.date <= options.untilDate!);
+    }
+
+    if (options.text !== null && options.text !== undefined) {
+      // Semantic pass: Git matches keywords anywhere. This pass precisely
+      // checks context (intent, body, specific Lore trailers).
       const textLower = options.text.toLowerCase();
       result = result.filter((a) => this.atomMatchesText(a, textLower));
     }
@@ -89,7 +118,8 @@ export class SearchFilter {
 
     // Check array trailers
     for (const key of ARRAY_TRAILER_KEYS) {
-      for (const value of trailers[key]) {
+      const values = trailers[key] as readonly string[];
+      for (const value of values) {
         if (value.toLowerCase().includes(textLower)) return true;
       }
     }
@@ -101,5 +131,15 @@ export class SearchFilter {
     }
 
     return false;
+  }
+
+  /**
+   * Extract the scope from a conventional commit subject line.
+   * Pattern: `type(scope): description`
+   * Returns null if no scope is found.
+   */
+  private extractScope(subject: string): string | null {
+    const match = subject.match(/^[a-zA-Z]+\(([^)]+)\)/);
+    return match ? match[1] : null;
   }
 }

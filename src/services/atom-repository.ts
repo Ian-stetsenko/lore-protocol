@@ -1,8 +1,20 @@
 import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
-import type { PathQueryOptions } from '../types/query.js';
+import type { QueryOptions, DiscoveryOptions } from '../types/query.js';
 import type { LoreAtom, LoreId, LoreTrailers } from '../types/domain.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
-import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS, GIT_FILES_CHANGED_BATCH_SIZE } from '../util/constants.js';
+import type { SearchFilter, FilterOptions } from '../services/search-filter.js';
+import {
+  LORE_ID_PATTERN,
+  REFERENCE_TRAILER_KEYS,
+  GIT_FILES_CHANGED_BATCH_SIZE,
+} from '../util/constants.js';
+import { escapeRegex } from '../util/regex.js';
+
+/**
+ * Internal extension of QueryOptions that includes pre-resolved dates.
+ * This ensures the Authoritative Pass in SearchFilter is deterministic.
+ */
+interface ResolvedQueryOptions extends QueryOptions, FilterOptions {}
 
 /**
  * Retrieves LoreAtoms from git history.
@@ -15,6 +27,7 @@ export class AtomRepository {
   constructor(
     private readonly gitClient: IGitClient,
     private readonly trailerParser: TrailerParser,
+    private readonly searchFilter: SearchFilter,
     private readonly customTrailerKeys: readonly string[] = [],
   ) {}
 
@@ -23,12 +36,13 @@ export class AtomRepository {
    * Accepts pre-resolved git log args (from PathResolver) so that
    * path resolution is the caller's responsibility (DIP).
    */
-  async findByTarget(gitLogArgs: readonly string[], options: PathQueryOptions): Promise<LoreAtom[]> {
-    const logArgs = this.buildLogArgs(options);
+  async findByTarget(gitLogArgs: readonly string[], options: QueryOptions): Promise<LoreAtom[]> {
+    const resolved = await this.resolveQueryDates(options);
+    const logArgs = this.buildLogArgs(resolved);
     const allArgs = [...logArgs, ...gitLogArgs];
     const rawCommits = await this.gitClient.log(allArgs);
     const atoms = await this.parseRawCommits(rawCommits);
-    return this.applyFilters(atoms, options);
+    return this.searchFilter.applyFilters(atoms, resolved);
   }
 
   /**
@@ -41,10 +55,19 @@ export class AtomRepository {
       return null;
     }
 
-    const logArgs = ['--all', `--grep=Lore-id: ${loreId}`];
+    const logArgs = [
+      '--all',
+      '--extended-regexp',
+      '--regexp-ignore-case',
+      '--all-match',
+      `--grep=^Lore-id: ${escapeRegex(loreId)}`,
+    ];
     const rawCommits = await this.gitClient.log(logArgs);
     const atoms = await this.parseRawCommits(rawCommits);
 
+    // Authoritative Final Pass: Ensure the parsed ID actually matches the target.
+    // This protects against "cross-talk" where the target ID appeared in the
+    // commit body, but the actual trailer block contains a different valid ID.
     return atoms.find((atom) => atom.loreId === loreId) ?? null;
   }
 
@@ -69,40 +92,32 @@ export class AtomRepository {
   }
 
   /**
-   * Find all Lore atoms, optionally filtered by date range and limit.
+   * Find Lore atoms across the entire repository.
+   *
+   * Uses "Atom Discovery Mode" to push filters (Lore-id, author, scope) down to
+   * the Git layer for optimized performance on large repositories.
    */
-  async findAll(options: { since?: string; until?: string; maxCommits?: number } = {}): Promise<LoreAtom[]> {
-    const args = this.buildBaseLogArgs();
-
-    if (options.since) {
-      args.push(`--since=${options.since}`);
-    }
-    if (options.until) {
-      args.push(`--until=${options.until}`);
-    }
-    if (options.maxCommits !== undefined && options.maxCommits > 0) {
-      args.push(`--max-count=${options.maxCommits}`);
-    }
-
+  async findAll(options: DiscoveryOptions = {}): Promise<LoreAtom[]> {
+    const queryOptions = this.makeDefaultOptions(options);
+    const resolved = await this.resolveQueryDates(queryOptions);
+    const args = this.buildLogArgs(resolved);
     const rawCommits = await this.gitClient.log(args);
-    return this.parseRawCommits(rawCommits);
+    const atoms = await this.parseRawCommits(rawCommits);
+    return this.searchFilter.applyFilters(atoms, resolved);
   }
 
   /**
-   * Find atoms matching a conventional commit scope.
-   * Parses the subject line to extract scope from `type(scope): description`.
+   * Resolve symbolic dates (relative, refs, ISO) into absolute JS Date objects.
    */
-  async findByScope(scope: string, options: PathQueryOptions): Promise<LoreAtom[]> {
-    const logArgs = this.buildLogArgs(options);
-    const rawCommits = await this.gitClient.log(logArgs);
-    const atoms = await this.parseRawCommits(rawCommits);
+  private async resolveQueryDates(options: QueryOptions): Promise<ResolvedQueryOptions> {
+    const sinceDate = options.since ? await this.gitClient.resolveDate(options.since) : null;
+    const untilDate = options.until ? await this.gitClient.resolveDate(options.until) : null;
 
-    const scopeFiltered = atoms.filter((atom) => {
-      const extractedScope = this.extractScope(atom.intent);
-      return extractedScope !== null && extractedScope.toLowerCase() === scope.toLowerCase();
-    });
-
-    return this.applyFilters(scopeFiltered, options);
+    return {
+      ...options,
+      sinceDate,
+      untilDate,
+    };
   }
 
   /**
@@ -161,27 +176,76 @@ export class AtomRepository {
   }
 
   /**
-   * Build the base git log format arguments.
-   * Uses NUL-separated fields for reliable parsing.
+   * Build git log arguments including optional filters from DiscoveryOptions.
+   * Uses optimized coarse discovery by pushing filters to the Git layer.
+   *
+   * IMPORTANT: Git's `--grep` matches against the entire commit message.
+   * These patterns are designed for speed but may produce false positives if
+   * the text appears in the body or non-Lore trailers. The
+   * `searchFilter.applyFilters` method must always perform a second
+   * authoritative pass for precision.
+   *
+   * This method adds `--all-match`, `--extended-regexp`, and a mandatory
+   * Lore-id grep pattern. Any additional `--grep` patterns added by callers will
+   * be joined with AND semantics.
    */
-  private buildBaseLogArgs(): string[] {
-    return [];
-  }
+  private buildLogArgs(options: ResolvedQueryOptions): string[] {
+    const args: string[] = [];
 
-  /**
-   * Build git log arguments including optional filters from PathQueryOptions.
-   */
-  private buildLogArgs(options: PathQueryOptions): string[] {
-    const args = this.buildBaseLogArgs();
-
-    if (options.since) {
-      args.push(`--since=${options.since}`);
+    if (options.sinceDate) {
+      args.push(`--since=${options.sinceDate.toISOString()}`);
     }
-    if (options.maxCommits !== null && options.maxCommits > 0) {
+
+    if (options.untilDate) {
+      args.push(`--until=${options.untilDate.toISOString()}`);
+    }
+
+    if (options.maxCommits !== null && options.maxCommits !== undefined && options.maxCommits > 0) {
       args.push(`--max-count=${options.maxCommits}`);
     }
+
+    // Atom Discovery Mode:
+    // We always include a check for a valid Lore-id so Git only returns valid atoms.
+    // This allows us to skip non-Lore commits (merges, chores, etc.) at the Git layer.
+    args.push('--grep=^Lore-id: [0-9a-f]{8}');
+    args.push('--extended-regexp');
+    args.push('--regexp-ignore-case');
+
+    // Use --all-match to ensure the Lore-id AND any other filters match (Lore semantics)
+    args.push('--all-match');
+
     if (options.author) {
-      args.push(`--author=${options.author}`);
+      args.push(`--author=${escapeRegex(options.author)}`);
+    }
+
+    if (options.scope) {
+      // Improved precision: Match conventional commit type prefix and start of line.
+      // Note: Git matches anywhere; searchFilter.applyFilters ensures we only match the intent line.
+      args.push(`--grep=^[a-zA-Z]+\\(${escapeRegex(options.scope)}\\)`);
+    }
+
+    if (options.has) {
+      // Push trailer existence check to Git layer. Matches any line starting with key.
+      args.push(`--grep=^${escapeRegex(options.has)}: `);
+    }
+
+    if (options.confidence) {
+      args.push(`--grep=^Confidence: ${escapeRegex(options.confidence)}`);
+    }
+
+    if (options.scopeRisk) {
+      args.push(`--grep=^Scope-risk: ${escapeRegex(options.scopeRisk)}`);
+    }
+
+    if (options.reversibility) {
+      args.push(`--grep=^Reversibility: ${escapeRegex(options.reversibility)}`);
+    }
+
+    if (options.text) {
+      // Push coarse full-text search to Git.
+      // Note: We use the raw text for a broad match; SearchFilter
+      // provides the authoritative precision pass.
+      args.push(`--grep=${escapeRegex(options.text)}`);
     }
 
     return args;
@@ -189,16 +253,26 @@ export class AtomRepository {
 
   /**
    * Parse an array of RawCommit into LoreAtom[], filtering out non-Lore commits.
+   *
+   * This is the Authoritative Structural Pass. It verifies that commits found
+   * during the coarse Discovery Phase actually contain valid Lore trailers.
+   *
+   * It handles several "False Positive" scenarios from Git's --grep:
+   * 1. Body Matches: Git matches any line; we ensure trailers are in the trailer block.
+   * 2. Case Discrepancy: Git grep is case-insensitive; we enforce strict hex casing.
+   * 3. Structural Validity: We ensure the Lore-id follows the precise 8-char format.
    */
   private async parseRawCommits(rawCommits: readonly RawCommit[]): Promise<LoreAtom[]> {
     // First pass: filter to Lore commits and parse trailers (synchronous work)
     const loreCommits: Array<{ raw: RawCommit; trailers: LoreTrailers }> = [];
 
     for (const raw of rawCommits) {
+      // 1. Structural Pass: Does the trailer block contain Lore keys?
       if (!this.trailerParser.containsLoreTrailers(raw.trailers)) {
         continue;
       }
 
+      // 2. Strict Pass: Parse and validate the Lore-id precisely.
       const trailers = this.trailerParser.parse(raw.trailers, this.customTrailerKeys);
       if (!LORE_ID_PATTERN.test(trailers['Lore-id'])) {
         continue;
@@ -268,38 +342,25 @@ export class AtomRepository {
   }
 
   /**
-   * Apply post-query filters (author, since) that weren't handled at the git level.
-   * Note: author and since are also passed to git log, but this provides a second
-   * layer of filtering for edge cases.
+   * Create a complete QueryOptions object from partial overrides.
    */
-  private applyFilters(atoms: LoreAtom[], options: PathQueryOptions): LoreAtom[] {
-    let result = atoms;
-
-    if (options.author) {
-      const authorLower = options.author.toLowerCase();
-      result = result.filter(
-        (atom) => atom.author.toLowerCase().includes(authorLower),
-      );
-    }
-
-    if (options.since) {
-      const sinceDate = new Date(options.since);
-      if (!isNaN(sinceDate.getTime())) {
-        result = result.filter((atom) => atom.date >= sinceDate);
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Extract the scope from a conventional commit subject line.
-   * Pattern: `type(scope): description`
-   * Returns null if no scope is found.
-   */
-  private extractScope(subject: string): string | null {
-    const match = subject.match(/^[a-zA-Z]+\(([^)]+)\)/);
-    return match ? match[1] : null;
+  private makeDefaultOptions(overrides: DiscoveryOptions = {}): QueryOptions {
+    return {
+      scope: null,
+      followLinks: false,
+      includeSuperseded: false,
+      author: null,
+      has: null,
+      confidence: null,
+      scopeRisk: null,
+      reversibility: null,
+      text: null,
+      limit: null,
+      maxCommits: null,
+      since: null,
+      until: null,
+      ...overrides,
+    };
   }
 
   /**

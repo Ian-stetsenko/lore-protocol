@@ -111,7 +111,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependents**: `IConfigLoader`, `ConfigLoader`, `CommitBuilder`, `StalenessDetector`, `Validator`, `main.ts`, `path-query.ts`.
 
 #### `src/types/query.ts`
-- **Contains**: `TargetType` type, `QueryTarget` interface, `PathQueryOptions` interface, `SearchOptions` interface, `QueryResult` interface, `QueryMeta` interface.
+- **Contains**: `TargetType` type, `QueryTarget` interface, `DiscoveryOptions` interface, `QueryOptions` interface, `QueryResult` interface, `QueryMeta` interface.
 - **Single Responsibility**: Defines the shape of queries (inputs) and their results (outputs) for the query pipeline.
 - **Dependencies**: `domain.ts` (for `LoreAtom`, `ConfidenceLevel`, etc.).
 - **Dependents**: `PathResolver`, `AtomRepository`, `path-query.ts`, command files, formatters.
@@ -202,7 +202,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal.
 - **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`.
 - **Dependents**: Commands (`context`, `constraints`, `rejected`, `directives`, `tested`, `search`, `log`, `stale`, `trace`, `squash`, `doctor`), `Validator`, `main.ts`.
-- **Key methods**: `findByTarget()`, `findByLoreId()`, `findByRange()`, `findAll()`, `findByScope()`, `resolveFollowLinks()`.
+- **Key methods**: `findByTarget()`, `findByLoreId()`, `findByRange()`, `findAll()`, `resolveFollowLinks()`.
 
 #### `src/services/supersession-resolver.ts`
 - **Contains**: `SupersessionResolver` class.
@@ -535,7 +535,7 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 **Gaps / Risks:**
 - `AtomRepository` has the most methods of any service (7 public: `findByTarget`, `findByLoreId`, `findByCommitHash`, `findByRange`, `findAll`, `findByScope`, `resolveFollowLinks`). While all relate to "retrieving atoms from git," the `resolveFollowLinks` BFS traversal is a distinct concern that could be extracted into a `FollowLinkResolver` service.
 - `Validator` has 10 validation rules implemented as private methods within a single class. If the rule set grows, a rule-based dispatch pattern (array of validation rule objects) would improve OCP compliance.
-- Search filtering is extracted into the `SearchFilter` service class with `applyFilters()`, `atomHasTrailer()`, and `atomMatchesText()` methods.
+- Search filtering is extracted into the `SearchFilter` service class which is injected into `AtomRepository`.
 
 ### O -- Open/Closed Principle
 
@@ -737,48 +737,40 @@ JsonFormatter()                  // no dependencies
 
 ## 6. Data Flow
 
-### Query Flow: `lore constraints src/auth.ts`
+### Query Flow: `lore search --author "cole" --text "auth"`
 
 ```mermaid
 sequenceDiagram
     actor User
     participant CLI as Commander (main.ts)
-    participant CMD as constraints.ts
-    participant PQ as path-query.ts
-    participant PR as PathResolver
+    participant CMD as search.ts
     participant AR as AtomRepository
     participant GC as GitClient
     participant TP as TrailerParser
     participant SR as SupersessionResolver
     participant FMT as Formatter
 
-    User->>CLI: lore constraints src/auth.ts
-    CLI->>CMD: route to constraints action
-    CMD->>PQ: executePathQuery("src/auth.ts", opts, deps, "constraints", ["Constraint"])
+    User->>CLI: lore search --author "cole" --text "auth"
+    CLI->>CMD: route to search action
 
-    PQ->>PR: parseTarget("src/auth.ts")
-    PR-->>PQ: QueryTarget { type: "file" }
-    PQ->>PR: toGitLogArgs(target)
-    PR-->>PQ: ["--", "src/auth.ts"]
-
-    PQ->>AR: findByTarget(gitLogArgs, options)
-    AR->>GC: log(["--", "src/auth.ts"])
+    CMD->>AR: findAll({ author: "cole", text: "auth" })
+    Note right of AR: Discovery Mode (Pass 1: Git)
+    AR->>GC: log(["--grep= Lore-id: ...", "--author=cole", "--grep=auth", "--all-match", ...])
     GC-->>AR: RawCommit[]
+
+    Note right of AR: Discovery Mode (Pass 2: Application)
     loop Each RawCommit
         AR->>TP: containsLoreTrailers(trailers)
-        AR->>TP: parse(trailers, customKeys)
-        AR->>GC: getFilesChanged(hash)
+        AR->>TP: parse(trailers)
+        AR->>AR: applyFilters(atom) [Authoritative Pass]
     end
-    AR-->>PQ: LoreAtom[]
+    AR-->>CMD: LoreAtom[]
 
-    PQ->>SR: resolve(atoms)
-    SR-->>PQ: Map‹loreId, SupersessionStatus›
-    PQ->>SR: filterActive(atoms, map)
-    SR-->>PQ: active LoreAtom[]
+    CMD->>SR: resolve(atoms)
+    SR-->>CMD: Map‹loreId, SupersessionStatus›
 
-    PQ->>FMT: formatQueryResult({ visibleTrailers: ["Constraint"] })
-    FMT-->>PQ: formatted string
-    PQ->>User: console.log(output)
+    CMD->>FMT: formatQueryResult()
+    FMT-->>User: console.log(output)
 ```
 
 ### Commit Flow: Agent pipes JSON to `lore commit`
@@ -1100,7 +1092,7 @@ Adding a new trailer type requires modifying all four locations. **Recommendatio
 
 ### `search.ts` Search Logic Extraction (Resolved)
 
-Search filtering logic (`applyFilters`, `atomHasTrailer`, `atomMatchesText`) has been extracted into the `SearchFilter` service class (`src/services/search-filter.ts`). The command file now delegates to this service.
+Search filtering logic (`applyFilters`, `atomHasTrailer`, `atomMatchesText`) has been re-extracted into the `SearchFilter` service and is now injected into `AtomRepository`. This maintains the performance of "Atom Discovery Mode" (Git pushdown) while adhering to SRP and reducing the complexity of the repository. `AtomRepository` coordinates the pipeline: pushing coarse filters to Git and delegating the authoritative second pass to `SearchFilter`.
 
 ---
 

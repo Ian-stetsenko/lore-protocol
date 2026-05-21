@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AtomRepository } from '../../../src/services/atom-repository.js';
 import type { IGitClient, RawCommit } from '../../../src/interfaces/git-client.js';
 import type { PathQueryOptions } from '../../../src/types/query.js';
-import type { LoreTrailers } from '../../../src/types/domain.js';
+import type { LoreTrailers, LoreId } from '../../../src/types/domain.js';
 import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 /**
@@ -86,9 +86,16 @@ function createMockGitClient(overrides: Partial<IGitClient> = {}): IGitClient {
     hasStagedChanges: vi.fn(async () => false),
     getRepoRoot: vi.fn(async () => '/repo'),
     isInsideRepo: vi.fn(async () => true),
-    getFilesChanged: vi.fn(async () => []),
+    getFilesChanged: vi.fn(async (hashes: string[]) => {
+      const map = new Map<string, string[]>();
+      for (const hash of hashes) {
+        map.set(hash, []);
+      }
+      return map;
+    }),
     countCommitsSince: vi.fn(async () => 0),
     resolveRef: vi.fn(async () => 'abc123'),
+    getHeadMessage: vi.fn(async () => 'message'),
     ...overrides,
   };
 }
@@ -146,7 +153,7 @@ describe('AtomRepository', () => {
     it('should return atoms for a file target', async () => {
       const commit = makeLoreCommit({ loreId: 'a1b2c3d4' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['abc12345', ['src/auth.ts']]]));
 
       const gitLogArgs = makeGitLogArgs();
       const options = makeQueryOptions();
@@ -171,7 +178,7 @@ describe('AtomRepository', () => {
       };
 
       vi.mocked(gitClient.log).mockResolvedValue([loreCommit, nonLoreCommit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['abc12345', ['src/auth.ts']]]));
 
       const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
 
@@ -221,7 +228,7 @@ describe('AtomRepository', () => {
       const commit1 = makeLoreCommit({ hash: 'aaa', author: 'alice@example.com', loreId: 'aaaa1111' });
       const commit2 = makeLoreCommit({ hash: 'bbb', author: 'bob@example.com', loreId: 'bbbb2222' });
       vi.mocked(gitClient.log).mockResolvedValue([commit1, commit2]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['aaa', ['src/auth.ts']], ['bbb', ['src/auth.ts']]]));
 
       const options = makeQueryOptions({ author: 'alice' });
       const result = await repo.findByTarget(makeGitLogArgs(), options);
@@ -237,7 +244,7 @@ describe('AtomRepository', () => {
         makeLoreCommit({ hash: 'ccc', loreId: 'cccc3333' }),
       ];
       vi.mocked(gitClient.log).mockResolvedValue(commits);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map(commits.map(c => [c.hash, ['src/auth.ts']])));
 
       const options = makeQueryOptions({ limit: 2 });
       const result = await repo.findByTarget(makeGitLogArgs(), options);
@@ -250,7 +257,7 @@ describe('AtomRepository', () => {
     it('should find an atom by its Lore-id', async () => {
       const commit = makeLoreCommit({ loreId: 'deadbeef' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([[commit.hash, ['src/auth.ts']]]));
 
       const result = await repo.findByLoreId('deadbeef');
 
@@ -261,7 +268,7 @@ describe('AtomRepository', () => {
     it('should return null if no atom matches the Lore-id', async () => {
       const commit = makeLoreCommit({ loreId: 'a1b2c3d4' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map());
 
       const result = await repo.findByLoreId('deadbeef');
 
@@ -289,7 +296,7 @@ describe('AtomRepository', () => {
         makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' }),
       ];
       vi.mocked(gitClient.log).mockResolvedValue(commits);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['aaa', []], ['bbb', []]]));
 
       const result = await repo.findAll();
 
@@ -307,7 +314,7 @@ describe('AtomRepository', () => {
         trailers: trailersRaw,
       };
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['aaa', []]]));
 
       const result = await repo.findAll();
 
@@ -364,7 +371,7 @@ describe('AtomRepository', () => {
       const authCommit = makeLoreCommit({ subject: 'feat(auth): add login', loreId: 'aaaa1111' });
       const dbCommit = makeLoreCommit({ subject: 'fix(database): fix query', loreId: 'bbbb2222' });
       vi.mocked(gitClient.log).mockResolvedValue([authCommit, dbCommit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([[authCommit.hash, []], [dbCommit.hash, []]]));
 
       const result = await repo.findByScope('auth', makeQueryOptions());
 
@@ -375,7 +382,7 @@ describe('AtomRepository', () => {
     it('should match scope case-insensitively', async () => {
       const commit = makeLoreCommit({ subject: 'feat(Auth): add login', loreId: 'aaaa1111' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([[commit.hash, []]]));
 
       const result = await repo.findByScope('auth', makeQueryOptions());
 
@@ -385,7 +392,7 @@ describe('AtomRepository', () => {
     it('should return empty array when no scope matches', async () => {
       const commit = makeLoreCommit({ subject: 'feat(auth): add login', loreId: 'aaaa1111' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([[commit.hash, []]]));
 
       const result = await repo.findByScope('payments', makeQueryOptions());
 
@@ -395,7 +402,7 @@ describe('AtomRepository', () => {
     it('should handle commits without scope in subject', async () => {
       const commit = makeLoreCommit({ subject: 'fix: typo', loreId: 'aaaa1111' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([[commit.hash, []]]));
 
       const result = await repo.findByScope('auth', makeQueryOptions());
 
@@ -413,7 +420,7 @@ describe('AtomRepository', () => {
 
       // First call for initial atoms, second call for findByLoreId
       vi.mocked(gitClient.log).mockResolvedValue([commit1, commit2]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['aaa', []], ['bbb', []]]));
 
       // Parse the initial atoms ourselves
       const initialAtoms = [{
@@ -518,7 +525,7 @@ describe('AtomRepository', () => {
       const commitB = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222', trailerExtras: 'Related: aaaa1111' });
 
       vi.mocked(gitClient.log).mockResolvedValue([commitA, commitB]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['aaa', []], ['bbb', []]]));
 
       const atomA = {
         loreId: 'aaaa1111',
@@ -558,7 +565,7 @@ describe('AtomRepository', () => {
 
       // findByLoreId will search all commits
       vi.mocked(gitClient.log).mockResolvedValue([commitB, commitC, commitD]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['bbb', []], ['ccc', []], ['ddd', []]]));
 
       const atomA = {
         loreId: 'aaaa1111',
@@ -635,25 +642,28 @@ describe('AtomRepository', () => {
         trailers: '',
       };
       vi.mocked(gitClient.log).mockResolvedValue([loreCommit, nonLoreCommit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(new Map([['abc12345', ['src/auth.ts']]]));
 
       await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
 
-      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(1);
-      expect(gitClient.getFilesChanged).toHaveBeenCalledWith('abc12345');
+      expect(gitClient.getFilesChanged).toHaveBeenCalledWith(['abc12345']);
     });
 
-    it('should handle more commits than batch size', async () => {
+    it('should handle many commits in a single batch', async () => {
       const commits = Array.from({ length: 25 }, (_, i) =>
         makeLoreCommit({ hash: `hash${i}`, loreId: `${String(i).padStart(8, '0')}` }),
       );
       vi.mocked(gitClient.log).mockResolvedValue(commits);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['file.ts']);
+      
+      const filesMap = new Map<string, string[]>();
+      commits.forEach(c => filesMap.set(c.hash, ['file.ts']));
+      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(filesMap);
 
       const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
 
       expect(result).toHaveLength(25);
-      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(25);
+      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(gitClient.getFilesChanged).mock.calls[0][0]).toHaveLength(25);
     });
 
     it('should propagate getFilesChanged errors', async () => {
@@ -661,9 +671,7 @@ describe('AtomRepository', () => {
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
       vi.mocked(gitClient.getFilesChanged).mockRejectedValue(new Error('git failed'));
 
-      await expect(
-        repo.findByTarget(makeGitLogArgs(), makeQueryOptions()),
-      ).rejects.toThrow('git failed');
+      await expect(repo.findByTarget(makeGitLogArgs(), makeQueryOptions())).rejects.toThrow('git failed');
     });
   });
 });

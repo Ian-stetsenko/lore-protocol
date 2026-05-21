@@ -122,15 +122,37 @@ export class GitClient implements IGitClient {
     }
   }
 
-  async getFilesChanged(commitHash: string): Promise<readonly string[]> {
+  async getFilesChanged(commitHashes: readonly string[]): Promise<ReadonlyMap<string, readonly string[]>> {
+    if (commitHashes.length === 0) return new Map();
+
     const stdout = await this.exec([
       'diff-tree',
-      '--no-commit-id',
+      '--stdin',
       '--name-only',
       '-r',
-      commitHash,
-    ]);
-    return stdout.trim().split('\n').filter(line => line.length > 0);
+    ], commitHashes.join('\n'));
+
+    const result = new Map<string, string[]>();
+    const requestedHashes = new Set(commitHashes);
+    let currentHash: string | null = null;
+
+    const lines = stdout.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Git outputs the full hash on its own line when using --stdin.
+      // We whitelist the hash to ensure we don't misidentify a file path
+      // that happens to be 40 or 64 characters long.
+      if (requestedHashes.has(trimmed)) {
+        currentHash = trimmed;
+        result.set(currentHash, []);
+      } else if (currentHash) {
+        result.get(currentHash)!.push(trimmed);
+      }
+    }
+
+    return result;
   }
 
   async countCommitsSince(path: string, sinceCommitHash: string): Promise<number> {
@@ -292,21 +314,26 @@ export class GitClient implements IGitClient {
    * Execute a git command and return stdout.
    * Throws GitError on non-zero exit or other errors.
    */
-  private async exec(args: readonly string[]): Promise<string> {
-    try {
-      const { stdout } = await execFile('git', args as string[], {
+  private async exec(args: readonly string[], input?: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = execFileCb('git', args as string[], {
         cwd: this.cwd,
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large repos
         encoding: 'utf-8',
+      }, (error, stdout, stderr) => {
+        if (error) {
+          const execError = error as { stderr?: string; code?: number };
+          const actualStderr = stderr || execError.stderr || error.message;
+          reject(new GitError(`git ${args[0]} failed: ${actualStderr}`));
+        } else {
+          resolve(stdout);
+        }
       });
-      return stdout;
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        const execError = error as { stderr?: string; code?: number };
-        const stderr = execError.stderr ?? error.message;
-        throw new GitError(`git ${args[0]} failed: ${stderr}`);
+
+      if (input !== undefined && child.stdin) {
+        child.stdin.write(input);
+        child.stdin.end();
       }
-      throw new GitError(`git ${args[0]} failed: unknown error`);
-    }
+    });
   }
 }

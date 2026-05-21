@@ -207,20 +207,13 @@ export class AtomRepository {
       loreCommits.push({ raw, trailers });
     }
 
-    // Second pass: batch getFilesChanged calls with concurrency limit.
-    // Results accumulate in insertion order, maintaining 1:1 alignment with loreCommits.
-    const filesPerCommit: (readonly string[])[] = [];
-    for (let i = 0; i < loreCommits.length; i += GIT_FILES_CHANGED_BATCH_SIZE) {
-      const batch = loreCommits.slice(i, i + GIT_FILES_CHANGED_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(({ raw }) => this.gitClient.getFilesChanged(raw.hash)),
-      );
-      filesPerCommit.push(...batchResults);
-    }
+    // Second pass: bulk fetch file lists using high-performance batch mode.
+    const hashes = loreCommits.map(c => c.raw.hash);
+    const filesMap = await this.gitClient.getFilesChanged(hashes);
 
-    // Build atoms by pairing parsed trailers with their file lists
-    const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) =>
-      this.buildAtom(raw, trailers, filesPerCommit[index]),
+    // Build atoms by pairing parsed trailers with their file lists from the batch result
+    const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }) =>
+      this.buildAtom(raw, trailers, filesMap.get(raw.hash) ?? []),
     );
 
     return atoms;

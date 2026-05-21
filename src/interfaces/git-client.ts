@@ -30,7 +30,7 @@ export interface IGitClient {
   hasStagedChanges(): Promise<boolean>;
   getRepoRoot(): Promise<string>;
   isInsideRepo(): Promise<boolean>;
-  getFilesChanged(commitHash: string): Promise<readonly string[]>;
+  getFilesChanged(commitHashes: readonly string[]): Promise<ReadonlyMap<string, readonly string[]>>;
   countCommitsSince(path: string, sinceCommitHash: string): Promise<number>;
   resolveRef(ref: string): Promise<string>;
   getHeadMessage(): Promise<string>;

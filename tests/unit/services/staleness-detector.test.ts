@@ -13,7 +13,7 @@ function createMockGitClient(overrides: Partial<IGitClient> = {}): IGitClient {
     hasStagedChanges: vi.fn(async () => false),
     getRepoRoot: vi.fn(async () => '/repo'),
     isInsideRepo: vi.fn(async () => true),
-    getFilesChanged: vi.fn(async () => []),
+    getFilesChanged: vi.fn(async () => new Map()),
     countCommitsSince: vi.fn(async () => 0),
     resolveRef: vi.fn(async () => 'abc123'),
     ...overrides,

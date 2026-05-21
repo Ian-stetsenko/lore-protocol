@@ -11,7 +11,7 @@ function createMockGitClient(headMessage: string): IGitClient {
     hasStagedChanges: vi.fn(),
     getRepoRoot: vi.fn(),
     isInsideRepo: vi.fn(),
-    getFilesChanged: vi.fn(),
+    getFilesChanged: vi.fn().mockResolvedValue(new Map()),
     countCommitsSince: vi.fn(),
     resolveRef: vi.fn(),
     getHeadMessage: vi.fn().mockResolvedValue(headMessage),

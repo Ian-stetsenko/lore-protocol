@@ -1,4 +1,5 @@
-import type { QueryTarget, TargetType } from '../types/query.js';
+import { resolve, relative } from 'node:path';
+import type { QueryTarget } from '../types/query.js';
 
 const LINE_RANGE_PATTERN = /^(.+):(\d+)-(\d+)$/;
 const SINGLE_LINE_PATTERN = /^(.+):(\d+)$/;
@@ -11,6 +12,11 @@ const GLOB_CHARS_PATTERN = /[*?]/;
  * SRP: Only target -> git-args translation.
  */
 export class PathResolver {
+  constructor(
+    private readonly cwd: string,
+    private readonly loreRoot: string,
+  ) {}
+
   /**
    * Parse a raw target string into a QueryTarget.
    *
@@ -25,7 +31,7 @@ export class PathResolver {
     // Try line-range with start-end (e.g., file.ts:45-80)
     const rangeMatch = LINE_RANGE_PATTERN.exec(raw);
     if (rangeMatch) {
-      const filePath = rangeMatch[1];
+      const filePath = this.normalizePath(rangeMatch[1]);
       const lineStart = parseInt(rangeMatch[2], 10);
       const lineEnd = parseInt(rangeMatch[3], 10);
       return {
@@ -40,7 +46,7 @@ export class PathResolver {
     // Try single-line (e.g., file.ts:45)
     const singleMatch = SINGLE_LINE_PATTERN.exec(raw);
     if (singleMatch) {
-      const filePath = singleMatch[1];
+      const filePath = this.normalizePath(singleMatch[1]);
       const lineStart = parseInt(singleMatch[2], 10);
       return {
         raw,
@@ -56,7 +62,7 @@ export class PathResolver {
       return {
         raw,
         type: 'glob',
-        filePath: raw,
+        filePath: this.normalizePath(raw),
         lineStart: null,
         lineEnd: null,
       };
@@ -67,7 +73,7 @@ export class PathResolver {
       return {
         raw,
         type: 'directory',
-        filePath: raw,
+        filePath: this.normalizePath(raw),
         lineStart: null,
         lineEnd: null,
       };
@@ -77,10 +83,46 @@ export class PathResolver {
     return {
       raw,
       type: 'file',
-      filePath: raw,
+      filePath: this.normalizePath(raw),
       lineStart: null,
       lineEnd: null,
     };
+  }
+
+  /**
+   * Normalize a path relative to the loreRoot.
+   */
+  private normalizePath(rawPath: string): string {
+    // 1. Resolve to an absolute path based on CWD
+    const absolutePath = resolve(this.cwd, rawPath);
+
+    // 2. Compute relative path from loreRoot
+    let relPath = relative(this.loreRoot, absolutePath);
+
+    // 3. Normalize to POSIX separators and handle empty/root case
+    if (relPath === '') {
+      relPath = '.';
+    }
+    
+    let normalized = relPath.replace(/\\/g, '/');
+
+    // 4. Preserve trailing slash if present in raw input
+    if (rawPath.endsWith('/') && !normalized.endsWith('/')) {
+      normalized += '/';
+    }
+
+    return normalized;
+  }
+
+  /**
+   * Convert multiple raw path strings into a combined git log argument array.
+   * Normalizes all paths relative to loreRoot.
+   */
+  toGitLogArgsMulti(rawPaths: string[]): readonly string[] {
+    if (rawPaths.length === 0) return [];
+
+    const normalized = rawPaths.map((p) => this.normalizePath(p));
+    return ['--', ...normalized];
   }
 
   /**

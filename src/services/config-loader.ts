@@ -81,9 +81,17 @@ export class ConfigLoader implements IConfigLoader {
 
     while (true) {
       const configPath = join(dir, CONFIG_DIR, CONFIG_FILENAME);
-      if (await this.fileExists(configPath)) {
+      const hasConfig = await this.fileExists(configPath);
+      if (hasConfig) {
         paths.push(configPath);
         if (stopAtFirst) return paths;
+      }
+
+      // Stop walking up if we hit a Git repository boundary.
+      // This prevents Lore from picking up parent configs that belong to a 
+      // different Git history (e.g. submodules or nested repos).
+      if (await this.fileExists(join(dir, '.git'))) {
+        break;
       }
 
       const parentDir = dirname(dir);

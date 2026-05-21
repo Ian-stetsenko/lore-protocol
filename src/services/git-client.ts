@@ -128,6 +128,7 @@ export class GitClient implements IGitClient {
       '--no-commit-id',
       '--name-only',
       '-r',
+      '--relative',
       commitHash,
     ]);
     return stdout.trim().split('\n').filter(line => line.length > 0);

@@ -1,7 +1,5 @@
 import type { ICommitInputReader } from '../../interfaces/commit-input-reader.js';
-import type { CommitInput } from '../commit-builder.js';
-import type { ConfidenceLevel, ScopeRiskLevel, ReversibilityLevel } from '../../types/domain.js';
-import { CustomTrailerCollection } from '../../types/custom-trailer-collection.js';
+import type { CommitInput } from '../../types/commit.js';
 
 /**
  * Reads commit input by parsing a JSON string.
@@ -13,56 +11,49 @@ import { CustomTrailerCollection } from '../../types/custom-trailer-collection.j
  * SOLID: SRP -- single responsibility of parsing JSON into CommitInput.
  */
 export class JsonInputReader implements ICommitInputReader {
-  constructor(private readonly content: string) {}
+  constructor(private readonly json: string) {}
 
   async read(): Promise<CommitInput> {
-    return this.parseJsonInput(this.content);
-  }
+    if (!this.json || !this.json.trim()) {
+      throw new Error('Empty JSON input');
+    }
 
-  private parseJsonInput(content: string): CommitInput {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-
-    const intent = typeof parsed.intent === 'string' ? parsed.intent : '';
-    const body = typeof parsed.body === 'string' ? parsed.body : undefined;
-
-    const trailersRaw = typeof parsed.trailers === 'object' && parsed.trailers !== null
-      ? parsed.trailers as Record<string, unknown>
-      : undefined;
-
-    let trailers: CommitInput['trailers'];
-    if (trailersRaw) {
-      const custom = CustomTrailerCollection.fromRaw(trailersRaw);
-
-      trailers = {
-        Constraint: this.asStringArray(trailersRaw['Constraint']),
-        Rejected: this.asStringArray(trailersRaw['Rejected']),
-        Confidence: this.asEnumValue(trailersRaw['Confidence']) as ConfidenceLevel | undefined,
-        'Scope-risk': this.asEnumValue(trailersRaw['Scope-risk']) as ScopeRiskLevel | undefined,
-        Reversibility: this.asEnumValue(trailersRaw['Reversibility']) as ReversibilityLevel | undefined,
-        Directive: this.asStringArray(trailersRaw['Directive']),
-        Tested: this.asStringArray(trailersRaw['Tested']),
-        'Not-tested': this.asStringArray(trailersRaw['Not-tested']),
-        Supersedes: this.asStringArray(trailersRaw['Supersedes']),
-        'Depends-on': this.asStringArray(trailersRaw['Depends-on']),
-        Related: this.asStringArray(trailersRaw['Related']),
-        custom: custom.isEmpty ? undefined : custom,
+    try {
+      const data = JSON.parse(this.json);
+      const input: CommitInput = {
+        intent: typeof data.intent === 'string' ? data.intent : '',
+        body: typeof data.body === 'string' ? data.body : undefined,
       };
-    }
 
-    return { intent, body, trailers };
-  }
+      if (data.trailers && typeof data.trailers === 'object' && !Array.isArray(data.trailers)) {
+        const trailers: Record<string, string[]> = {};
+        const rawTrailers = data.trailers as Record<string, unknown>;
 
-  private asStringArray(value: unknown): string[] | undefined {
-    if (Array.isArray(value)) {
-      return value.filter((v): v is string => typeof v === 'string');
-    }
-    if (typeof value === 'string') {
-      return [value];
-    }
-    return undefined;
-  }
+        for (const key of Object.keys(rawTrailers)) {
+          const val = rawTrailers[key];
+          
+          if (Array.isArray(val)) {
+            const stringValues = val.filter((v) => typeof v === 'string');
+            if (stringValues.length > 0) {
+              trailers[key] = stringValues;
+            }
+          } else if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (trimmed) {
+              trailers[key] = [trimmed];
+            }
+          }
+        }
+        
+        (input as any).trailers = trailers;
+      }
 
-  private asEnumValue(value: unknown): string | undefined {
-    return typeof value === 'string' ? value : undefined;
+      return input;
+    } catch (err) {
+      if (err instanceof Error) {
+        throw new Error(`Failed to parse JSON input: ${err.message}`);
+      }
+      throw err;
+    }
   }
 }

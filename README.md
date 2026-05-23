@@ -77,7 +77,8 @@ lore commit \
   --rejected "class-validator decorators | too much magic for simple checks" \
   --confidence high \
   --scope-risk narrow \
-  --tested "unit tests for all validation rules"
+  --tested "unit tests for all validation rules" \
+  --trailer "Team=Gamma" "Ticket-Id=PROJ-123"
 
 # Or pipe JSON (ideal for AI agents)
 echo '{"intent":"fix: handle null user in auth middleware","trailers":{"Constraint":["must not throw -- return 401 instead"],"Confidence":"high"}}' | lore commit
@@ -121,6 +122,7 @@ lore search --text "session" --confidence high
 | `lore trace <lore-id>` | Trace decision chain via references (Supersedes, Depends-on, Related) |
 | `lore validate [range]` | Validate commits for Lore protocol compliance |
 | `lore squash <range>` | Merge Lore atoms from a revision range for squash merges |
+| `lore config` | Show effective configuration and trailer definitions |
 | `lore doctor` | Health checks: config validity, ID uniqueness, reference integrity |
 
 ### Global Options
@@ -133,6 +135,7 @@ lore search --text "session" --confidence high
 | `--no-update-notifier` | Disable update notification |
 | `--limit <n>` | Limit number of results |
 | `--since <ref>` | Only consider commits since ref/date |
+| `--until <ref>` | Only consider commits until ref/date |
 
 ## Trailer Vocabulary
 
@@ -153,6 +156,8 @@ Every Lore-enriched commit carries a `Lore-id` and any combination of these trai
 | `Depends-on` | 0..n | Lore-id | This atom requires another atom to hold |
 | `Related` | 0..n | Lore-id | Informational link to another atom |
 
+You can also define your own custom trailers with rich validation rules (enums, patterns, requiredness) and UI hints (colors, semantic kinds) in `.lore/config.toml`. Custom trailers are automatically supported by all query and commit commands.
+
 ## Configuration
 
 `lore init` creates `.lore/config.toml`:
@@ -163,7 +168,27 @@ version = "1.0"
 
 [trailers]
 required = []          # Trailers every commit must include, e.g. ["Constraint", "Confidence"]
-custom = []            # Additional trailer keys beyond the standard set
+custom = ["Team"]      # Additional trailer keys beyond the standard set (auto-prompts)
+permissive = true      # If false, only defined/custom trailers are kept
+
+# Define rich validation rules and UI hints for custom trailers
+[trailers.definitions.Department]
+description = "The department responsible for this change"
+multivalue = false
+validation = "values"
+values = ["Engineering", "Product", "Design"]
+required = true
+ui = { kind = "risk", color = "cyan" }
+prompt = { order = 125 }  # Optional: prompt between Confidence (120) and Scope-risk (130)
+squash = "union"          # Default: list all departments if they differ during squash
+
+[trailers.definitions.Ticket-Id]
+description = "Jira or GitHub issue ID"
+multivalue = true
+validation = "pattern"
+pattern = "^[A-Z]+-[0-9]+$"
+ui = { kind = "reference", color = "dim" }
+# Default order for custom definitions is 1000 (after all core trailers)
 
 [validation]
 strict = false         # Treat warnings as errors in lore validate

@@ -54,6 +54,7 @@ export function registerStaleCommand(
           limit: null,
           maxCommits: null,
           since: null,
+          until: null,
         };
         atoms = await atomRepository.findByTarget(gitLogArgs, queryOptions);
       } else {

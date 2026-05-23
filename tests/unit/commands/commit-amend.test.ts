@@ -6,6 +6,9 @@ import type { IGitClient } from '../../../src/interfaces/git-client.js';
 import type { IOutputFormatter } from '../../../src/interfaces/output-formatter.js';
 import type { CommitInputResolver } from '../../../src/services/commit-input-resolver.js';
 import type { HeadLoreIdReader } from '../../../src/services/head-lore-id-reader.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 
 function createMockGitClient(): IGitClient {
   return {
@@ -21,7 +24,7 @@ function createMockGitClient(): IGitClient {
     getHeadMessage: vi.fn().mockResolvedValue(''),
     countAllCommits: vi.fn().mockResolvedValue(0),
     listTrackedFiles: vi.fn().mockResolvedValue([]),
-  };
+  } as any;
 }
 
 function createMockFormatter(): IOutputFormatter {
@@ -73,6 +76,8 @@ function createDeps(overrides?: {
     getFormatter: () => createMockFormatter(),
     commitInputResolver: createMockInputResolver(),
     headLoreIdReader: overrides?.headLoreIdReader ?? createMockHeadLoreIdReader(),
+    config: DEFAULT_CONFIG,
+    protocol: new Protocol(DEFAULT_CONFIG),
   };
 }
 
@@ -93,7 +98,7 @@ describe('lore commit --amend', () => {
     expect(gitClient.hasStagedChanges).not.toHaveBeenCalled();
   });
 
-  it('should pass existing Lore-id to commitBuilder.build when amending', async () => {
+  it(`should pass existing ${LORE_ID_KEY} to commitBuilder.build when amending`, async () => {
     const headLoreIdReader = createMockHeadLoreIdReader('cafebabe');
     const deps = createDeps({ headLoreIdReader });
 
@@ -188,7 +193,7 @@ describe('lore commit --amend', () => {
     ).rejects.toThrow('--no-edit can only be used with --amend');
   });
 
-  it('should generate new Lore-id when amending a non-Lore commit', async () => {
+  it(`should generate new ${LORE_ID_KEY} when amending a non-Lore commit`, async () => {
     const headLoreIdReader = createMockHeadLoreIdReader(null);
     const deps = createDeps({ headLoreIdReader });
 
@@ -202,7 +207,7 @@ describe('lore commit --amend', () => {
     );
   });
 
-  it('should not read Lore-id from HEAD for normal commits', async () => {
+  it(`should not read ${LORE_ID_KEY} from HEAD for normal commits`, async () => {
     const headLoreIdReader = createMockHeadLoreIdReader('cafebabe');
     const deps = createDeps({ headLoreIdReader });
 

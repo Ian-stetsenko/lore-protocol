@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SupersessionResolver } from '../../../src/services/supersession-resolver.js';
 import type { LoreAtom, LoreTrailers } from '../../../src/types/domain.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 
 function makeAtom(options: {
   loreId: string;
@@ -17,7 +17,7 @@ function makeAtom(options: {
     intent: 'test commit',
     body: '',
     trailers: {
-      'Lore-id': options.loreId,
+      [LORE_ID_KEY]: options.loreId,
       Constraint: [],
       Rejected: [],
       Confidence: null,
@@ -29,7 +29,6 @@ function makeAtom(options: {
       Supersedes: options.supersedes ?? [],
       'Depends-on': options.dependsOn ?? [],
       Related: options.related ?? [],
-      custom: CustomTrailerCollection.empty(),
     } as LoreTrailers,
     filesChanged: [],
   };
@@ -159,7 +158,7 @@ describe('SupersessionResolver', () => {
       expect(result.get('dddd4444')!.superseded).toBe(true);
     });
 
-    it('should skip invalid Lore-id references', () => {
+    it(`should skip invalid ${LORE_ID_KEY} references`, () => {
       const atoms = [
         makeAtom({ loreId: 'aaaa1111', supersedes: ['not-valid', 'bbbb2222'] }),
         makeAtom({ loreId: 'bbbb2222' }),

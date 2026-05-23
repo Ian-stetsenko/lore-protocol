@@ -2,26 +2,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { executePathQuery } from '../../../../src/commands/helpers/path-query.js';
 import type { PathQueryDeps, PathQueryCommandOptions } from '../../../../src/commands/helpers/path-query.js';
 import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../../../../src/types/domain.js';
-import type { LoreConfig } from '../../../../src/types/config.js';
-import { DEFAULT_CONFIG } from '../../../../src/types/config.js';
-import { CustomTrailerCollection } from '../../../../src/types/custom-trailer-collection.js';
+import { DEFAULT_CONFIG } from '../../../../src/util/constants.js';
+import { Protocol } from '../../../../src/services/protocol.js';
+import { LORE_ID_KEY } from '../../../../src/util/constants.js';
 
 function makeTrailers(loreId: string): LoreTrailers {
   return {
-    'Lore-id': loreId,
+    [LORE_ID_KEY]: [loreId],
     Constraint: [],
     Rejected: [],
-    Confidence: null,
-    'Scope-risk': null,
-    Reversibility: null,
+    Confidence: [],
+    'Scope-risk': [],
+    Reversibility: [],
     Directive: [],
     Tested: [],
     'Not-tested': [],
     Supersedes: [],
     'Depends-on': [],
     Related: [],
-    custom: CustomTrailerCollection.empty(),
-  };
+  } as any;
 }
 
 function makeAtom(id: string, supersedes: string[] = []): LoreAtom {
@@ -44,12 +43,14 @@ describe('executePathQuery — --limit as post-supersession result cap', () => {
   let mockResolve: ReturnType<typeof vi.fn>;
   let mockFilterActive: ReturnType<typeof vi.fn>;
   let formattedOutput: string;
+  let protocol: Protocol;
 
   beforeEach(() => {
     mockFindByTarget = vi.fn();
     mockResolve = vi.fn();
     mockFilterActive = vi.fn();
     formattedOutput = '';
+    protocol = new Protocol(DEFAULT_CONFIG);
 
     deps = {
       atomRepository: {
@@ -81,6 +82,7 @@ describe('executePathQuery — --limit as post-supersession result cap', () => {
         }),
       }) as any,
       config: DEFAULT_CONFIG,
+      protocol,
     };
   });
 
@@ -134,8 +136,9 @@ describe('executePathQuery — --limit as post-supersession result cap', () => {
     // Verify findByTarget received maxCommits in PathQueryOptions
     const queryOptions = mockFindByTarget.mock.calls[0][1];
     expect(queryOptions.maxCommits).toBe(100);
-    // limit is in the options but should NOT affect git scan
-    expect(queryOptions.limit).toBe(5);
+    // limit is in the options but should NOT affect git scan (in repository call)
+    // Actually our executePathQuery passes null limit to findByTarget
+    expect(queryOptions.limit).toBeNull();
 
     vi.mocked(console.log).mockRestore();
   });

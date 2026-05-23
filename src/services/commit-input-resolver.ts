@@ -1,12 +1,13 @@
 import type { IPrompt } from '../interfaces/prompt.js';
 import type { ICommitInputReader } from '../interfaces/commit-input-reader.js';
-import type { CommitInput } from './commit-builder.js';
+import type { CommitInput } from '../types/commit.js';
 import { readFile } from 'node:fs/promises';
 
 import { InteractiveInputReader } from './readers/interactive-input-reader.js';
 import { JsonInputReader } from './readers/json-input-reader.js';
 import { FlagsInputReader } from './readers/flags-input-reader.js';
-import { createTrailerCollectors } from './readers/collectors/trailer-collector-registry.js';
+import { TrailerCollectorRegistry } from './readers/collectors/trailer-collector-registry.js';
+import type { Protocol } from './protocol.js';
 
 /**
  * The modes of commit input resolution, ordered by priority.
@@ -21,6 +22,9 @@ export enum InputMode {
 
 /**
  * CLI options passed to the commit command.
+ * 
+ * SOLID: SRP -- pure DTO for CLI option parsing.
+ * Supports dynamic core flags via index signature.
  */
 export interface CommitCommandOptions {
   readonly amend?: boolean;
@@ -29,17 +33,9 @@ export interface CommitCommandOptions {
   readonly interactive?: boolean;
   readonly intent?: string;
   readonly body?: string;
-  readonly constraint?: string[];
-  readonly rejected?: string[];
-  readonly confidence?: string;
-  readonly scopeRisk?: string;
-  readonly reversibility?: string;
-  readonly directive?: string[];
-  readonly tested?: string[];
-  readonly notTested?: string[];
-  readonly supersedes?: string[];
-  readonly dependsOn?: string[];
-  readonly related?: string[];
+  readonly trailer?: string[];
+  /** Dynamic core flags from definitions (e.g. confidence, scope-risk) */
+  readonly [key: string]: unknown;
 }
 
 /**
@@ -57,7 +53,10 @@ export interface CommitCommandOptions {
  * SOLID: OCP -- new input modes require only a new reader + a case in createReader().
  */
 export class CommitInputResolver {
-  constructor(private readonly prompt: IPrompt) {}
+  constructor(
+    private readonly prompt: IPrompt,
+    private readonly protocol: Protocol,
+  ) {}
 
   /**
    * Resolve commit input from the appropriate source based on CLI options.
@@ -80,7 +79,13 @@ export class CommitInputResolver {
     if (options.file) {
       return InputMode.File;
     }
-    if (options.intent) {
+    
+    // Check if any intent or any trailer flag was provided
+    const hasFlags = !!options.intent || 
+                   !!options.trailer || 
+                   Object.keys(options).some(k => k !== 'amend' && k !== 'edit');
+
+    if (hasFlags) {
       return InputMode.Flags;
     }
     if (process.stdin.isTTY) {
@@ -97,26 +102,20 @@ export class CommitInputResolver {
     options: CommitCommandOptions,
   ): Promise<ICommitInputReader> {
     switch (mode) {
-      case InputMode.Interactive:
-        return new InteractiveInputReader(this.prompt, createTrailerCollectors());
-      case InputMode.File: {
-        const content = await this.readFileContent(options.file!);
-        return new JsonInputReader(content);
+      case InputMode.Interactive: {
+        const registry = new TrailerCollectorRegistry(this.protocol);
+        return new InteractiveInputReader(
+          this.prompt,
+          registry.getCollectors(),
+        );
       }
-      case InputMode.Stdin: {
-        const content = await this.readStdinContent();
-        return new JsonInputReader(content);
-      }
+      case InputMode.File:
+        return new JsonInputReader(await readFile(options.file!, 'utf-8'));
       case InputMode.Flags:
-        return new FlagsInputReader(options);
+        return new FlagsInputReader(options, this.protocol);
+      case InputMode.Stdin:
+        return new JsonInputReader(await this.readStdinContent());
     }
-  }
-
-  /**
-   * Read raw content from a file path.
-   */
-  private async readFileContent(filePath: string): Promise<string> {
-    return readFile(filePath, 'utf-8');
   }
 
   /**

@@ -4,13 +4,14 @@ import type { IConfigLoader } from '../interfaces/config-loader.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { FormattableDoctorResult, DoctorCheck } from '../types/output.js';
 import type { LoreAtom } from '../types/domain.js';
-import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
+import { LORE_ID_PATTERN, LORE_ID_KEY } from '../util/constants.js';
+import type { Protocol } from '../services/protocol.js';
 
 /**
  * Register the `lore doctor` command.
  * Runs health checks:
  * 1. Config file exists and is valid
- * 2. Lore-id uniqueness
+ * 2. ${LORE_ID_KEY} uniqueness
  * 3. All references resolve
  * 4. No orphaned dependencies
  */
@@ -20,13 +21,14 @@ export function registerDoctorCommand(
     atomRepository: AtomRepository;
     configLoader: IConfigLoader;
     getFormatter: () => IOutputFormatter;
+    protocol: Protocol;
   },
 ): void {
   program
     .command('doctor')
     .description('Health check: broken refs, config issues')
     .action(async () => {
-      const { atomRepository, configLoader, getFormatter } = deps;
+      const { atomRepository, configLoader, getFormatter, protocol } = deps;
 
       const checks: DoctorCheck[] = [];
 
@@ -48,11 +50,11 @@ export function registerDoctorCommand(
         allAtoms = [];
       }
 
-      // Check 2: Lore-id uniqueness
+      // Check 2: ${LORE_ID_KEY} uniqueness
       checks.push(checkLoreIdUniqueness(allAtoms));
 
-      // Check 3: All references resolve
-      checks.push(checkReferencesResolve(allAtoms));
+      // Check 3: All references resolve (metadata-driven)
+      checks.push(checkReferencesResolve(allAtoms, protocol));
 
       // Check 4: Orphaned dependencies (depends on superseded atoms)
       checks.push(checkOrphanedDependencies(allAtoms));
@@ -132,40 +134,42 @@ function checkLoreIdUniqueness(
   const duplicates: string[] = [];
   for (const [id, count] of idCounts) {
     if (count > 1) {
-      duplicates.push(`Lore-id "${id}" appears ${count} times`);
+      duplicates.push(`${LORE_ID_KEY} "${id}" appears ${count} times`);
     }
   }
 
   if (duplicates.length > 0) {
     return {
-      name: 'Lore-id uniqueness',
+      name: '${LORE_ID_KEY} uniqueness',
       status: 'warning',
-      message: `${duplicates.length} duplicate Lore-id(s) found`,
+      message: `${duplicates.length} duplicate ${LORE_ID_KEY}(s) found`,
       details: duplicates,
     };
   }
 
   return {
-    name: 'Lore-id uniqueness',
+    name: '${LORE_ID_KEY} uniqueness',
     status: 'ok',
-    message: `All ${atoms.length} Lore-ids are unique`,
+    message: `All ${atoms.length} ${LORE_ID_KEY}s are unique`,
     details: [],
   };
 }
 
 function checkReferencesResolve(
   atoms: readonly LoreAtom[],
+  protocol: Protocol,
 ): DoctorCheck {
   const allLoreIds = new Set(atoms.map((a) => a.loreId));
   const brokenRefs: string[] = [];
+  const refKeys = protocol.getReferenceKeys();
 
   for (const atom of atoms) {
-    for (const key of REFERENCE_TRAILER_KEYS) {
-      const refs = atom.trailers[key] as readonly string[];
+    for (const key of refKeys) {
+      const refs = atom.trailers[key] || [];
       for (const refId of refs) {
         if (LORE_ID_PATTERN.test(refId) && !allLoreIds.has(refId)) {
           brokenRefs.push(
-            `Lore-id "${refId}" referenced by ${atom.loreId} (${key}) not found`,
+            `${LORE_ID_KEY} "${refId}" referenced by ${atom.loreId} (${key}) not found`,
           );
         }
       }

@@ -1,22 +1,13 @@
 import type {
   LoreTrailers,
-  LoreId,
   TrailerKey,
-  ArrayTrailerKey,
-  EnumTrailerKey,
-  ConfidenceLevel,
-  ScopeRiskLevel,
-  ReversibilityLevel,
 } from '../types/domain.js';
-import { CustomTrailerCollection } from '../types/custom-trailer-collection.js';
 import {
-  LORE_TRAILER_KEYS,
   ARRAY_TRAILER_KEYS,
   ENUM_TRAILER_KEYS,
-  CONFIDENCE_VALUES,
-  SCOPE_RISK_VALUES,
-  REVERSIBILITY_VALUES,
+  LORE_ID_KEY,
 } from '../util/constants.js';
+import type { Protocol } from './protocol.js';
 
 const TRAILER_LINE_PATTERN = /^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$/;
 const CONTINUATION_LINE_PATTERN = /^[ \t]+(.*)$/;
@@ -26,8 +17,11 @@ const CONTINUATION_LINE_PATTERN = /^[ \t]+(.*)$/;
  *
  * GRASP: Information Expert -- knows trailer format rules.
  * SRP: Only parsing/serialization logic. No git interaction, no validation.
+ * SOLID: OCP -- fully metadata-driven; no hardcoded trailer names.
  */
 export class TrailerParser {
+  constructor(private readonly protocol?: Protocol) {}
+
   /**
    * Parse a raw trailer block (multi-line string) into LoreTrailers.
    * Lines in `Key: Value` format are parsed as trailers.
@@ -39,101 +33,85 @@ export class TrailerParser {
    * Enum trailers (Confidence, Scope-risk, Reversibility) appear once with
    * a known value.
    * Lore-id is a special single-value trailer.
-   * Unrecognized keys that appear in customKeys go into the `custom` map.
+   * All values are stored internally as string arrays for uniformity.
    */
-  parse(rawTrailers: string, customKeys: readonly string[] = []): LoreTrailers {
+  parse(rawTrailers: string): LoreTrailers {
     const lines = rawTrailers.split('\n');
     const entries = this.parseLinesToEntries(lines);
 
-    const arrayTrailerKeySet = new Set<string>(ARRAY_TRAILER_KEYS);
-    const enumTrailerKeySet = new Set<string>(ENUM_TRAILER_KEYS);
-    const loreKeySet = new Set<string>(LORE_TRAILER_KEYS);
-    const customKeySet = new Set<string>(customKeys);
+    const result: Record<string, string[]> = {};
 
-    let loreId: LoreId = '';
-    const arrays: Record<string, string[]> = {};
+    // Initialize core arrays and enums with empty arrays for uniformity
     for (const key of ARRAY_TRAILER_KEYS) {
-      arrays[key] = [];
+      result[key] = [];
     }
-    const enums: Record<string, string | null> = {};
     for (const key of ENUM_TRAILER_KEYS) {
-      enums[key] = null;
+      result[key] = [];
     }
-    const custom = new Map<string, string[]>();
+    result[LORE_ID_KEY] = [];
 
     for (const { key, value } of entries) {
-      if (key === 'Lore-id') {
-        loreId = value.trim();
+      const trimmedValue = value.trim();
+
+      // Authorize the key via the protocol engine
+      // If no engine is provided (fallback), we use permissive defaults.
+      const authorizedKey = this.protocol ? this.protocol.authorize(key) : (key as TrailerKey);
+      if (!authorizedKey) {
         continue;
       }
 
-      if (arrayTrailerKeySet.has(key)) {
-        arrays[key].push(value.trim());
-        continue;
-      }
-
-      if (enumTrailerKeySet.has(key)) {
-        const trimmed = value.trim();
-        if (this.isValidEnumValue(key as EnumTrailerKey, trimmed)) {
-          enums[key] = trimmed;
+      // Special handling for enums: validate value if possible
+      const def = this.protocol?.getDefinition(key);
+      if (def?.validation === 'values' && def.values) {
+        const validValues = Object.keys(def.values);
+        if (validValues.includes(trimmedValue)) {
+          result[authorizedKey] = [trimmedValue];
         }
         continue;
       }
 
-      if (!loreKeySet.has(key as TrailerKey)) {
-        if (customKeySet.has(key) || customKeys.length === 0) {
-          const existing = custom.get(key) ?? [];
-          existing.push(value.trim());
-          custom.set(key, existing);
-        }
-      }
+      // Default: Always store as array
+      const existing = result[authorizedKey] ?? [];
+      existing.push(trimmedValue);
+      result[authorizedKey] = existing;
     }
 
-    return {
-      'Lore-id': loreId,
-      Constraint: arrays['Constraint'],
-      Rejected: arrays['Rejected'],
-      Confidence: (enums['Confidence'] as ConfidenceLevel) ?? null,
-      'Scope-risk': (enums['Scope-risk'] as ScopeRiskLevel) ?? null,
-      Reversibility: (enums['Reversibility'] as ReversibilityLevel) ?? null,
-      Directive: arrays['Directive'],
-      Tested: arrays['Tested'],
-      'Not-tested': arrays['Not-tested'],
-      Supersedes: arrays['Supersedes'],
-      'Depends-on': arrays['Depends-on'],
-      Related: arrays['Related'],
-      custom: new CustomTrailerCollection(custom),
-    };
+    return result as unknown as LoreTrailers;
   }
 
   /**
    * Serialize LoreTrailers back into git trailer format (multi-line string).
-   * Order: Lore-id first, then array trailers, then enum trailers, then custom.
+   * Order: Lore-id first, then other trailers in protocol-defined order.
    * Each trailer appears as `Key: Value`, one per line.
    * Array trailers with multiple values produce multiple lines.
    */
   serialize(trailers: LoreTrailers): string {
     const lines: string[] = [];
+    const processed = new Set<string>();
 
-    if (trailers['Lore-id']) {
-      lines.push(`Lore-id: ${trailers['Lore-id']}`);
+    // 1. Lore-id always first
+    const loreIdValues = trailers[LORE_ID_KEY];
+    if (loreIdValues && loreIdValues.length > 0) {
+      lines.push(`${LORE_ID_KEY}: ${loreIdValues[0]}`);
+      processed.add(LORE_ID_KEY);
     }
 
-    for (const key of ARRAY_TRAILER_KEYS) {
-      const values = trailers[key as keyof LoreTrailers] as readonly string[];
-      for (const value of values) {
-        lines.push(`${key}: ${value}`);
+    // 2. All other trailers
+    // Use protocol authorized keys for canonical order, then add any remaining
+    const authorizedKeys = this.protocol ? this.protocol.getAuthorizedKeys() : [];
+    const allKeys = Array.from(new Set([...authorizedKeys, ...Object.keys(trailers)]));
+
+    for (const key of allKeys) {
+      if (processed.has(key)) {
+        continue;
       }
-    }
+      processed.add(key);
 
-    for (const key of ENUM_TRAILER_KEYS) {
-      const value = trailers[key as keyof LoreTrailers] as string | null;
-      if (value !== null) {
-        lines.push(`${key}: ${value}`);
+      const values = trailers[key];
+      if (!values || values.length === 0) {
+        continue;
       }
-    }
 
-    for (const [key, values] of trailers.custom) {
       for (const value of values) {
         lines.push(`${key}: ${value}`);
       }
@@ -152,7 +130,8 @@ export class TrailerParser {
       const match = TRAILER_LINE_PATTERN.exec(line);
       if (match) {
         const key = match[1];
-        if (LORE_TRAILER_KEYS.includes(key as TrailerKey)) {
+        const authorized = this.protocol ? this.protocol.authorize(key) : (key as TrailerKey);
+        if (authorized) {
           return true;
         }
       }
@@ -232,18 +211,6 @@ export class TrailerParser {
         entries.push({ key: trailerMatch[1], value: trailerMatch[2] });
       }
     }
-
     return entries;
-  }
-
-  private static readonly ENUM_VALUE_LOOKUP: Record<EnumTrailerKey, ReadonlySet<string>> = {
-    'Confidence': new Set<string>(CONFIDENCE_VALUES),
-    'Scope-risk': new Set<string>(SCOPE_RISK_VALUES),
-    'Reversibility': new Set<string>(REVERSIBILITY_VALUES),
-  };
-
-  private isValidEnumValue(key: EnumTrailerKey, value: string): boolean {
-    const validValues = TrailerParser.ENUM_VALUE_LOOKUP[key];
-    return validValues !== undefined && validValues.has(value);
   }
 }

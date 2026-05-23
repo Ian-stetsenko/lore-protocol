@@ -5,7 +5,9 @@ import type { AtomRepository } from '../../../src/services/atom-repository.js';
 import type { SupersessionResolver } from '../../../src/services/supersession-resolver.js';
 import type { IOutputFormatter } from '../../../src/interfaces/output-formatter.js';
 import type { LoreAtom } from '../../../src/types/domain.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 
 /**
  * Regression tests for issue #22: `lore log` must accept positional path
@@ -25,20 +27,19 @@ function makeAtom(overrides: Partial<LoreAtom> & { filesChanged: readonly string
     intent: 'fix: example',
     body: '',
     trailers: {
-      'Lore-id': 'abcd1234',
+      [LORE_ID_KEY]: ['abcd1234'],
       Constraint: [],
       Rejected: [],
-      Confidence: null,
-      'Scope-risk': null,
-      Reversibility: null,
+      Confidence: [],
+      'Scope-risk': [],
+      Reversibility: [],
       Directive: [],
       Tested: [],
       'Not-tested': [],
       Supersedes: [],
       'Depends-on': [],
       Related: [],
-      custom: CustomTrailerCollection.empty(),
-    },
+    } as any,
     ...overrides,
   };
 }
@@ -84,6 +85,8 @@ function buildHarness(atoms: LoreAtom[], filteredAtoms?: LoreAtom[]): Harness {
     atomRepository,
     supersessionResolver,
     getFormatter: () => formatter,
+    config: DEFAULT_CONFIG,
+    protocol: new Protocol(DEFAULT_CONFIG),
   });
 
   return { program, capturedResult, findAll, findByTarget, consoleSpy };
@@ -171,7 +174,7 @@ describe('registerLogCommand (issue #22 path arguments)', () => {
     const atom = makeAtom({ loreId: 'mc000001', filesChanged: ['src/main.ts'] });
     const h = buildHarness([], [atom]);
 
-    await h.program.parseAsync(['node', 'lore', 'log', '--max-commits', '50', 'src/main.ts']);
+    await h.program.parseAsync(['node', 'lore', 'log', 'src/main.ts', '--max-commits', '50']);
 
     const queryOptions = h.findByTarget.mock.calls[0][1];
     expect(queryOptions.maxCommits).toBe(50);

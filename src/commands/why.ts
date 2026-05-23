@@ -7,6 +7,7 @@ import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { QueryResult, QueryMeta } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { LoreError } from '../util/errors.js';
+import type { Protocol } from '../services/protocol.js';
 
 /**
  * Register the `lore why <target>` command.
@@ -23,13 +24,14 @@ export function registerWhyCommand(
     gitClient: IGitClient;
     pathResolver: PathResolver;
     getFormatter: () => IOutputFormatter;
+    protocol: Protocol;
   },
 ): void {
   program
     .command('why <target>')
     .description('Decision context for a specific line or line range')
     .action(async (target: string) => {
-      const { atomRepository, gitClient, pathResolver, getFormatter } = deps;
+      const { atomRepository, gitClient, pathResolver, getFormatter, protocol } = deps;
 
       const parsedTarget = pathResolver.parseTarget(target);
 
@@ -108,6 +110,7 @@ export function registerWhyCommand(
         result,
         supersessionMap,
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const formatter = getFormatter();

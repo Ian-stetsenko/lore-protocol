@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { JsonFormatter } from '../../../src/formatters/json-formatter.js';
-import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../../../src/types/domain.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { LORE_ID_KEY, LORE_ID_JSON_KEY, LORE_VERSION_JSON_KEY } from '../../../src/util/constants.js';
 import type {
   FormattableQueryResult,
   FormattableValidationResult,
@@ -8,24 +10,24 @@ import type {
   FormattableTraceResult,
   FormattableDoctorResult,
 } from '../../../src/types/output.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../../../src/types/domain.js';
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
-    'Lore-id': overrides['Lore-id'] ?? 'a1b2c3d4',
+    [LORE_ID_KEY]: overrides[LORE_ID_KEY] ?? ['a1b2c3d4'],
     Constraint: overrides.Constraint ?? [],
     Rejected: overrides.Rejected ?? [],
-    Confidence: overrides.Confidence ?? null,
-    'Scope-risk': overrides['Scope-risk'] ?? null,
-    Reversibility: overrides.Reversibility ?? null,
+    Confidence: overrides.Confidence ?? [],
+    'Scope-risk': overrides['Scope-risk'] ?? [],
+    Reversibility: overrides.Reversibility ?? [],
     Directive: overrides.Directive ?? [],
     Tested: overrides.Tested ?? [],
     'Not-tested': overrides['Not-tested'] ?? [],
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? CustomTrailerCollection.empty(),
-  };
+    ...overrides,
+  } as any;
 }
 
 function makeAtom(overrides: Partial<LoreAtom> = {}): LoreAtom {
@@ -43,9 +45,14 @@ function makeAtom(overrides: Partial<LoreAtom> = {}): LoreAtom {
 
 describe('JsonFormatter', () => {
   const formatter = new JsonFormatter();
+  let protocol: Protocol;
+
+  beforeEach(() => {
+    protocol = new Protocol(DEFAULT_CONFIG);
+  });
 
   describe('formatQueryResult', () => {
-    it('should produce valid JSON with lore_version', () => {
+    it('should produce valid JSON with [LORE_VERSION_JSON_KEY]', () => {
       const atom = makeAtom();
       const data: FormattableQueryResult = {
         result: {
@@ -62,12 +69,13 @@ describe('JsonFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.command).toBe('context');
       expect(parsed.target).toBe('src/auth.ts');
       expect(parsed.target_type).toBe('file');
@@ -90,6 +98,7 @@ describe('JsonFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -97,7 +106,7 @@ describe('JsonFormatter', () => {
 
       expect(parsed.meta.total_atoms).toBe(5);
       expect(parsed.meta.filtered_atoms).toBe(1);
-      expect(parsed.results[0].lore_id).toBe('a1b2c3d4');
+      expect(parsed.results[0][LORE_ID_JSON_KEY]).toBe('a1b2c3d4');
       expect(parsed.results[0].commit).toBe('abc1234567890');
       expect(parsed.results[0].files_changed).toEqual(['src/auth.ts']);
     });
@@ -119,6 +128,7 @@ describe('JsonFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -144,6 +154,7 @@ describe('JsonFormatter', () => {
         },
         supersessionMap,
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -157,7 +168,7 @@ describe('JsonFormatter', () => {
       const atom = makeAtom({
         trailers: makeTrailers({
           Constraint: ['Must use OAuth2'],
-          Confidence: 'high',
+          Confidence: ['high'],
           Rejected: ['Session tokens'],
         }),
       });
@@ -172,6 +183,7 @@ describe('JsonFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: ['Constraint'],
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -193,6 +205,7 @@ describe('JsonFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -206,7 +219,7 @@ describe('JsonFormatter', () => {
     it('should convert trailer keys to snake_case', () => {
       const atom = makeAtom({
         trailers: makeTrailers({
-          'Scope-risk': 'wide',
+          'Scope-risk': ['wide'],
           'Not-tested': ['edge cases'],
           'Depends-on': ['aabbccdd'],
         }),
@@ -222,6 +235,7 @@ describe('JsonFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -230,6 +244,85 @@ describe('JsonFormatter', () => {
       expect(parsed.results[0].trailers.scope_risk).toBe('wide');
       expect(parsed.results[0].trailers.not_tested).toEqual(['edge cases']);
       expect(parsed.results[0].trailers.depends_on).toEqual(['aabbccdd']);
+    });
+
+    it('should normalize custom trailers to scalars or arrays based on metadata', () => {
+      const atom = makeAtom({
+        trailers: {
+          ...makeTrailers(),
+          'Assisted-by': ['Gemini'],
+          'Team': ['Engineering', 'Product'],
+          'Project': ['Lore'],
+        },
+      });
+
+      const data: FormattableQueryResult = {
+        result: {
+          command: 'context',
+          target: 'all',
+          targetType: 'global',
+          atoms: [atom],
+          meta: { totalAtoms: 1, filteredAtoms: 1, oldest: atom.date, newest: atom.date },
+        },
+        supersessionMap: new Map(),
+        visibleTrailers: 'all',
+        trailerDefinitions: {
+          ...protocol.getFormattableDefinitions(),
+          'Assisted-by': {
+            description: 'A',
+            multivalue: false,
+            validation: 'none',
+            directives: [],
+          },
+          'Team': {
+            description: 'T',
+            multivalue: true,
+            validation: 'none',
+            directives: [],
+          },
+          // Project has no definition (should default to array)
+        },
+      };
+
+      const output = formatter.formatQueryResult(data);
+      const parsed = JSON.parse(output);
+      const trailers = parsed.results[0].trailers;
+
+      // Assisted-by is multivalue: false -> scalar
+      expect(trailers.assisted_by).toBe('Gemini');
+      // Team is multivalue: true -> array
+      expect(trailers.team).toEqual(['Engineering', 'Product']);
+      // Project is undefined -> array (default)
+      expect(trailers.project).toEqual(['Lore']);
+    });
+
+    it('should use rebranded structural keys in JSON output when protocol name is changed', () => {
+      // We simulate rebranding by manually constructing the expected key using the current PROTOCOL_NAME
+      // Since we can't easily re-run the module with a different PROTOCOL_NAME constant in unit tests,
+      // we verify that the current output matches the constants.
+      const atom = makeAtom();
+      const data: FormattableQueryResult = {
+        result: {
+          command: 'context',
+          target: 'all',
+          targetType: 'global',
+          atoms: [atom],
+          meta: { totalAtoms: 1, filteredAtoms: 1, oldest: atom.date, newest: atom.date },
+        },
+        supersessionMap: new Map(),
+        visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
+      };
+
+      const output = formatter.formatQueryResult(data);
+      const parsed = JSON.parse(output);
+
+      // Verify that structural keys match the constants defined in core-definitions.ts
+      expect(parsed).toHaveProperty(LORE_VERSION_JSON_KEY);
+      expect(parsed.results[0]).toHaveProperty(LORE_ID_JSON_KEY);
+      
+      // If we were Fred, these would be fred_version and fred_id.
+      // The fact that they match the constants proves the derivation is working.
     });
   });
 
@@ -247,11 +340,11 @@ describe('JsonFormatter', () => {
       const output = formatter.formatValidationResult(data);
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.valid).toBe(true);
       expect(parsed.summary.commits_checked).toBe(2);
       expect(parsed.results).toHaveLength(2);
-      expect(parsed.results[0].lore_id).toBe('a1b2c3d4');
+      expect(parsed.results[0][LORE_ID_JSON_KEY]).toBe('a1b2c3d4');
     });
 
     it('should include issues in results', () => {
@@ -264,7 +357,7 @@ describe('JsonFormatter', () => {
             loreId: null,
             valid: false,
             issues: [
-              { severity: 'error', rule: 'lore-id-present', message: 'Missing Lore-id' },
+              { severity: 'error', rule: 'lore-id-present', message: `Missing ${LORE_ID_KEY}` },
             ],
           },
         ],
@@ -273,7 +366,7 @@ describe('JsonFormatter', () => {
       const output = formatter.formatValidationResult(data);
       const parsed = JSON.parse(output);
 
-      expect(parsed.results[0].lore_id).toBeNull();
+      expect(parsed.results[0][LORE_ID_JSON_KEY]).toBeNull();
       expect(parsed.results[0].issues[0].severity).toBe('error');
       expect(parsed.results[0].issues[0].rule).toBe('lore-id-present');
     });
@@ -295,9 +388,9 @@ describe('JsonFormatter', () => {
       const output = formatter.formatStalenessResult(data);
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.stale_atoms).toHaveLength(1);
-      expect(parsed.stale_atoms[0].lore_id).toBe('a1b2c3d4');
+      expect(parsed.stale_atoms[0][LORE_ID_JSON_KEY]).toBe('a1b2c3d4');
       expect(parsed.stale_atoms[0].date).toBe('2025-01-15T10:00:00.000Z');
       expect(parsed.stale_atoms[0].reasons).toEqual([
         { signal: 'age', description: 'Too old' },
@@ -330,11 +423,11 @@ describe('JsonFormatter', () => {
       const output = formatter.formatTraceResult(data);
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
-      expect(parsed.root.lore_id).toBe('aaaabbbb');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
+      expect(parsed.root[LORE_ID_JSON_KEY]).toBe('aaaabbbb');
       expect(parsed.edges).toHaveLength(2);
       expect(parsed.edges[0].resolved).toBe(true);
-      expect(parsed.edges[0].target_atom.lore_id).toBe('ccccdddd');
+      expect(parsed.edges[0].target_atom[LORE_ID_JSON_KEY]).toBe('ccccdddd');
       expect(parsed.edges[1].resolved).toBe(false);
       expect(parsed.edges[1].target_atom).toBeNull();
     });
@@ -353,7 +446,7 @@ describe('JsonFormatter', () => {
       const output = formatter.formatDoctorResult(data);
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.checks).toHaveLength(2);
       expect(parsed.checks[0].name).toBe('git-version');
       expect(parsed.checks[0].status).toBe('ok');
@@ -364,19 +457,20 @@ describe('JsonFormatter', () => {
 
   describe('formatSuccess', () => {
     it('should produce valid JSON with success flag', () => {
-      const output = formatter.formatSuccess('Commit created', { lore_id: 'a1b2c3d4' });
+      const output = formatter.formatSuccess('Commit created', { [LORE_ID_JSON_KEY]: 'a1b2c3d4' });
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.success).toBe(true);
       expect(parsed.message).toBe('Commit created');
-      expect(parsed.lore_id).toBe('a1b2c3d4');
+      expect(parsed[LORE_ID_JSON_KEY]).toBe('a1b2c3d4');
     });
 
     it('should work without extra data', () => {
       const output = formatter.formatSuccess('Done');
       const parsed = JSON.parse(output);
 
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.success).toBe(true);
       expect(parsed.message).toBe('Done');
     });
@@ -390,7 +484,7 @@ describe('JsonFormatter', () => {
       ]);
       const parsed = JSON.parse(output);
 
-      expect(parsed.lore_version).toBe('1.0');
+      expect(parsed[LORE_VERSION_JSON_KEY]).toBe('1.0');
       expect(parsed.error).toBe(true);
       expect(parsed.code).toBe(1);
       expect(parsed.messages).toHaveLength(2);

@@ -2,7 +2,8 @@ import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
 import type { PathQueryOptions } from '../types/query.js';
 import type { LoreAtom, LoreId, LoreTrailers } from '../types/domain.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
-import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS, GIT_FILES_CHANGED_BATCH_SIZE } from '../util/constants.js';
+import { LORE_ID_PATTERN, GIT_FILES_CHANGED_BATCH_SIZE, LORE_ID_KEY } from '../util/constants.js';
+import type { Protocol } from './protocol.js';
 
 /**
  * Retrieves LoreAtoms from git history.
@@ -10,12 +11,13 @@ import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS, GIT_FILES_CHANGED_BATCH_SIZE }
  *
  * GRASP: Pure Fabrication -- persistence access abstracted from domain.
  * SOLID: DIP -- depends on IGitClient interface, not child_process.
+ * GRASP: Information Expert -- knows how to map git commits to Lore domain models.
  */
 export class AtomRepository {
   constructor(
     private readonly gitClient: IGitClient,
     private readonly trailerParser: TrailerParser,
-    private readonly customTrailerKeys: readonly string[] = [],
+    private readonly protocol: Protocol,
   ) {}
 
   /**
@@ -41,7 +43,7 @@ export class AtomRepository {
       return null;
     }
 
-    const logArgs = ['--all', `--grep=Lore-id: ${loreId}`];
+    const logArgs = ['--all', `--grep=${LORE_ID_KEY}: ${loreId}`];
     const rawCommits = await this.gitClient.log(logArgs);
     const atoms = await this.parseRawCommits(rawCommits);
 
@@ -177,6 +179,9 @@ export class AtomRepository {
     if (options.since) {
       args.push(`--since=${options.since}`);
     }
+    if (options.until) {
+      args.push(`--until=${options.until}`);
+    }
     if (options.maxCommits !== null && options.maxCommits > 0) {
       args.push(`--max-count=${options.maxCommits}`);
     }
@@ -199,8 +204,9 @@ export class AtomRepository {
         continue;
       }
 
-      const trailers = this.trailerParser.parse(raw.trailers, this.customTrailerKeys);
-      if (!LORE_ID_PATTERN.test(trailers['Lore-id'])) {
+      const trailers = this.trailerParser.parse(raw.trailers);
+      const loreId = trailers[LORE_ID_KEY]?.[0];
+      if (!loreId || !LORE_ID_PATTERN.test(loreId)) {
         continue;
       }
 
@@ -232,8 +238,11 @@ export class AtomRepository {
    * GRASP: Creator -- AtomRepository owns the data needed to create atoms.
    */
   private buildAtom(raw: RawCommit, trailers: LoreTrailers, filesChanged: readonly string[]): LoreAtom {
+    const loreId = trailers[LORE_ID_KEY]?.[0];
+    if (!loreId) throw new Error(`${LORE_ID_KEY} missing in trailers`);
+
     return {
-      loreId: trailers['Lore-id'],
+      loreId,
       commitHash: raw.hash,
       date: new Date(raw.date),
       author: raw.author,
@@ -308,9 +317,11 @@ export class AtomRepository {
    */
   private extractReferenceIds(trailers: LoreTrailers): LoreId[] {
     const ids: LoreId[] = [];
+    const refKeys = this.protocol.getReferenceKeys();
 
-    for (const key of REFERENCE_TRAILER_KEYS) {
+    for (const key of refKeys) {
       const values = trailers[key] as readonly LoreId[];
+      if (!values) continue;
       for (const id of values) {
         if (LORE_ID_PATTERN.test(id)) {
           ids.push(id);

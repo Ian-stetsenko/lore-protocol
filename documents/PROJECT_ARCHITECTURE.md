@@ -1,7 +1,7 @@
 # Lore CLI -- Project Architecture
 
 > Authoritative reference for contributors (human or AI) to the lore-cli codebase.
-> Last updated 2026-03-22. Reflects the codebase after PR #1-15 merge cycle.
+> Last updated 2026-05-22. Reflects the codebase after the "Flat & Uniform Protocol" refactor.
 
 ---
 
@@ -29,7 +29,16 @@
 
 - **Query commands** (`context`, `constraints`, `rejected`, `directives`, `tested`, `why`, `search`, `log`) that extract and display Lore atoms from git history for a given file, directory, line range, or global scope.
 - **Write commands** (`commit`, `squash`) that compose and create Lore-enriched git commits.
-- **Maintenance commands** (`validate`, `stale`, `trace`, `doctor`, `init`) that check protocol compliance, detect stale knowledge, follow decision chains, and run health checks.
+- **Maintenance commands** (`validate`, `stale`, `trace`, `doctor`, `init`, `config`) that check protocol compliance, detect stale knowledge, follow decision chains, run health checks, and inspect effective configuration.
+
+### Flat & Uniform Protocol Architecture
+
+The codebase implements a **Flat & Uniform Protocol** architecture. Key principles:
+
+1. **Unified Storage**: All trailer values (core and custom) are stored internally as `readonly string[]` for structural uniformity. Both the domain model (`LoreTrailers`) and input model (`CommitInput`) are simplified to purely dynamic Record types. Scalar coercion (e.g., for JSON output) is handled at the edge based on metadata.
+2. **Metadata-Driven**: All logic (parsing, validation, CLI flags, prompting, merging, rendering) is driven by the central `Protocol` service, which acts as the single source of truth for the entire protocol specification.
+3. **No Ghosts**: Trailing keys are normalized case-insensitively and authorized via the protocol engine, preventing "ghost trailers" or casing mismatches in the knowledge graph.
+4. **Fidelity & Logic Precision**: The system maintains 100% faithful logic for complex protocol rules (like multi-hint expiration in directives or rank-based merging in squashes) while benefiting from the simplified flat data model.
 
 ### Layered Architecture
 
@@ -99,28 +108,45 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 ### Types Layer
 
 #### `src/types/domain.ts`
-- **Contains**: `LoreId` type alias, `TrailerKey`/`ArrayTrailerKey`/`EnumTrailerKey` union types, `ConfidenceLevel`/`ScopeRiskLevel`/`ReversibilityLevel` enums, `LoreTrailers` interface, `LoreAtom` interface, `SupersessionStatus` interface.
-- **Single Responsibility**: Defines the core domain model -- what a Lore atom is, what trailers exist, and their value types.
-- **Dependencies**: None.
-- **Dependents**: Nearly every file in the project. This is the foundational type file.
+- **Contains**: `LoreId` type alias, `TrailerKey`/`ArrayTrailerKey`/`EnumTrailerKey` union types (dynamically mapped from metadata), `LoreTrailers` type alias (flat & uniform Record), `LoreAtom` interface.
+- **Single Responsibility**: Defines the core domain model.
+- **Uniformity**: Every key in `LoreTrailers` is a `readonly string[]`.
+
+#### `src/types/commit.ts`
+- **Contains**: `CommitInput` interface.
+- **Single Responsibility**: Defines the input model for the write-path.
+- **Alignment**: Reuses `LoreTrailers` for its `trailers` property, ensuring perfect symmetry with the domain model.
 
 #### `src/types/config.ts`
-- **Contains**: `LoreConfig` interface, `DEFAULT_CONFIG` constant.
-- **Single Responsibility**: Defines the configuration schema and its default values.
-- **Dependencies**: None.
-- **Dependents**: `IConfigLoader`, `ConfigLoader`, `CommitBuilder`, `StalenessDetector`, `Validator`, `main.ts`, `path-query.ts`.
+- **Contains**: `LoreConfig` interface, `CustomTrailerDefinition` interface, `ValueDefinition` interface, `DEFAULT_CONFIG` constant.
+- **Single Responsibility**: Defines the configuration schema (including rich trailer definitions).
 
-#### `src/types/query.ts`
-- **Contains**: `TargetType` type, `QueryTarget` interface, `PathQueryOptions` interface, `SearchOptions` interface, `QueryResult` interface, `QueryMeta` interface.
-- **Single Responsibility**: Defines the shape of queries (inputs) and their results (outputs) for the query pipeline.
-- **Dependencies**: `domain.ts` (for `LoreAtom`, `ConfidenceLevel`, etc.).
-- **Dependents**: `PathResolver`, `AtomRepository`, `path-query.ts`, command files, formatters.
+### Services Layer
 
-#### `src/types/output.ts`
-- **Contains**: `FormattableQueryResult`, `FormattableValidationResult`, `FormattableStalenessResult`, `FormattableTraceResult`, `FormattableDoctorResult`, plus supporting types (`CommitValidationResult`, `ValidationIssue`, `StaleReason`, `StaleAtomReport`, `TraceEdge`, `DoctorCheck`).
-- **Single Responsibility**: Defines the "view model" types that bridge services and formatters. Each formattable type bundles the data a formatter needs.
-- **Dependencies**: `domain.ts`, `query.ts`.
-- **Dependents**: `IOutputFormatter`, `TextFormatter`, `JsonFormatter`, `Validator`, `StalenessDetector`, commands.
+#### `src/services/protocol.ts`
+- **Contains**: `Protocol` class.
+- **Single Responsibility**: The master engine for the Lore protocol. Centralizes key authorization, case normalization, metadata retrieval, and semantic grouping (reference keys, list keys, etc.).
+- **Pattern**: Information Expert -- owns all protocol metadata.
+
+#### `src/services/trailer-parser.ts`
+- **Contains**: `TrailerParser` class.
+- **Single Responsibility**: Parses raw trailer text into structured `LoreTrailers` and serializes back.
+- **Uniformity**: Coerces all incoming values into string arrays. Uses `Protocol` to normalize keys.
+
+#### `src/services/commit-builder.ts`
+- **Contains**: `CommitBuilder` class.
+- **Single Responsibility**: Builds a complete git commit message string.
+- **Fidelity**: Fully metadata-driven. Sorts trailers in canonical protocol order (Lore-id -> Core -> Custom).
+
+#### `src/services/squash-merger.ts`
+- **Contains**: `SquashMerger` class.
+- **Single Responsibility**: Merges multiple `LoreAtom` objects.
+- **Strategy**: Uses metadata-driven squash strategies (`rank-min`, `rank-max`, `union`) defined in the protocol.
+
+#### `src/services/validator.ts`
+- **Contains**: `Validator` class.
+- **Single Responsibility**: Validates commits for compliance.
+- **Logic**: Enforces cardinality (for single-value trailers), enums, patterns, and requiredness via universal metadata rules.
 
 ### Interfaces Layer
 
@@ -326,6 +352,10 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows.
 - **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, types.
 - **Dependents**: `context.ts`, `constraints.ts`, `rejected.ts`, `directives.ts`, `tested.ts`.
+
+#### `src/commands/config.ts`
+- **Contains**: `registerConfigCommand()` function.
+- **Single Responsibility**: Outputs the effective configuration and trailer definitions (core and custom) for the current path. Performs runtime parsing of directives and normalization of values.
 
 #### `src/commands/init.ts`
 - **Contains**: `registerInitCommand()` function.
@@ -731,6 +761,7 @@ PathResolver()                   // no dependencies
 LoreIdGenerator()                // no dependencies
 TextFormatter({ color: boolean })
 JsonFormatter()                  // no dependencies
+CommitInputResolver(prompt: IPrompt, config: LoreConfig)
 ```
 
 ---
@@ -871,10 +902,54 @@ version = "1.0"                # Protocol version string
 [trailers]
 required = []                  # Array of trailer keys required on every commit
                                # e.g., ["Constraint", "Confidence"]
-custom = []                    # Array of custom trailer key names to recognize
-                               # e.g., ["Team", "Ticket"]
+custom = []                    # Array of custom trailer keys for Quick-Prompts (auto-interactive)
+                               # e.g., ["Team", "Project"]
+permissive = true              # When true, unknown trailers are kept. When false, they are stripped.
 
-[validation]
+# Define rich validation rules, UI hints, and CLI/Prompt behavior for custom trailers
+[trailers.definitions.Department]
+description = "The department"
+multivalue = false             # Only one value allowed (cardinality)
+validation = "values"          # Enable enum validation
+values = ["Eng", "Prod"]       # List of valid values
+required = true                # Make this trailer mandatory
+ui = { kind = "risk", color = "cyan" }
+cli = { flag = "dept", shorthand = "d" }
+prompt = { confirm = "Set Department?", choice = "Department:" }
+
+[trailers.definitions.Ticket]
+description = "Issue ID"
+multivalue = true              # Multiple values allowed
+validation = "pattern"         # Enable regex validation
+pattern = "^[A-Z]+-[0-9]+$"    # Regex pattern to match
+directives = ["[on:squash] Keep original IDs"] # Operational rules
+ui = { kind = "reference", color = "dim" }
+cli = { flag = "ticket" }
+prompt = { confirm = "Add Ticket ID?", input = "Ticket:" }
+```
+
+### Orthogonal Schema Model
+
+Lore uses an **Orthogonal Schema Model** where cardinality (`multivalue: boolean`) is decoupled from content validation (`validation: 'values' | 'pattern' | 'none'`). This allows for flexible trailer definitions like "single-value regex" or "multi-value enum."
+
+### Trigger-Action Grammar
+
+Trailers can include `directives` that follow a formalized **Trigger-Action Grammar**: `[trigger:parameter] Instruction`.
+- **Triggers**: `on:amend`, `on:commit`, `on:squash`, `on:modify`, `on:stale`.
+- **Parameters**: `until:YYYY-MM-DD`, etc.
+These rules are parseable by agents and visible in `lore config`.
+
+### Metadata-Driven CLI & UI
+
+The Lore CLI is fully metadata-driven. The `CORE_TRAILER_DEFINITIONS` (in `src/util/core-definitions.ts`) acts as the master source of truth for the entire protocol. From this single object, the system automatically derives:
+- **TypeScript Types**: `TrailerKey`, `ArrayTrailerKey`, and `EnumTrailerKey` unions are mapped from the metadata.
+- **Runtime Key Lists**: Arrays like `LORE_TRAILER_KEYS` used for iteration and parsing.
+- **Validation Rules**: Enforced by the `Validator` service.
+- **UI Styling**: Colors and semantic kinds used by `TextFormatter`.
+- **Interactive Prompts**: Sequence and text used by `TrailerCollectorRegistry`.
+- **CLI Flags**: Dynamic registration in the `commit` command.
+
+This architecture ensures that adding a new core trailer only requires updating the metadata and the `LoreTrailers` interface, eliminating manual synchronization across the codebase.
 strict = false                 # When true, missing required trailers are errors (not warnings)
 max_message_lines = 50         # Maximum total lines in a commit message
 intent_max_length = 72         # Maximum character length of the intent (subject) line
@@ -1077,18 +1152,9 @@ All 15 commands lack dedicated test files. While service tests cover business lo
 
 ---
 
-### OCP Violations in Trailer Enumeration
+### OCP Violations in Trailer Enumeration (Resolved)
 
-Multiple files contain hard-coded `switch`/`if` blocks that enumerate all trailer keys:
-
-| File | Location | Pattern |
-|------|----------|---------|
-| `search-filter.ts` | `atomHasTrailer()` | Data-driven via `ARRAY_TRAILER_KEYS`/`ENUM_TRAILER_KEYS` (resolved) |
-| `text-formatter.ts` | `formatTrailers()` | `if(shouldShow(key))` for each key |
-| `json-formatter.ts` | `serializeTrailers()` | `if(shouldShow(key))` for each key |
-| `validator.ts` | `trailerHasValue()` | `switch(key)` over all keys |
-
-Adding a new trailer type requires modifying all four locations. **Recommendation**: Create a data-driven trailer registry (e.g., `TRAILER_DEFINITIONS` array with key, kind, display color, etc.) and derive these switch/if blocks from the registry.
+The Lore CLI is now fully metadata-driven. The `CORE_TRAILER_DEFINITIONS` and user `.lore/config.toml` provide all the rules needed for iteration, parsing, validation, and display. The previous hardcoded `switch`/`if` blocks have been replaced with dynamic logic that discovers trailer properties from metadata.
 
 ---
 
@@ -1158,7 +1224,7 @@ The commit command's input resolution is refactored into a Strategy pattern:
 
 1. Create `src/commands/<command-name>.ts`.
 2. Export a `register<CommandName>Command(program: Command, deps: { ... })` function.
-3. Define the dependency bag interface inline (or use `PathQueryDeps` if it's a path-query command).
+3. Define the dependency bag interface inline (ensure it includes `config: LoreConfig` if metadata-driven logic or formatters are used).
 4. If it's a path-scoped query (like `constraints`, `rejected`), call `executePathQuery()` from `path-query.ts` with the appropriate `visibleTrailers`.
 5. If it's a unique command, implement the orchestration logic in the action callback, calling services and formatters.
 6. Register in `main.ts`: import the registration function, and call it with the appropriate dependency bag.
@@ -1187,19 +1253,26 @@ registerRisksCommand(program, pathQueryDeps);
 
 ### How to Add a New Trailer Type
 
-1. **`src/types/domain.ts`**: Add the key to the `TrailerKey` union. If it's array-valued, add to `ArrayTrailerKey`. If it's enum-valued, add to `EnumTrailerKey` and define its value type. Add the field to `LoreTrailers`.
+There are two paths for extending the Lore Protocol:
 
-2. **`src/util/constants.ts`**: Add the key to `LORE_TRAILER_KEYS`. Add to `ARRAY_TRAILER_KEYS` or `ENUM_TRAILER_KEYS` as appropriate. If enum, add its valid values array.
+#### 1. Custom Project Trailers (Configuration Workflow)
+Most trailers specific to a team or project (e.g., `Ticket-Id`, `Squad`, `Reviewer`) should be added via `.lore/config.toml`. 
+- **Quick Start**: Add the key to `trailers.custom` for basic interactive prompts.
+- **Rich Rules**: Add a block to `trailers.definitions` for validation and rich metadata.
+- **Verification**: Run `lore config` to see your new rules in action.
 
-3. **`src/services/trailer-parser.ts`**: `parse()` and `serialize()` use `ARRAY_TRAILER_KEYS` and `ENUM_TRAILER_KEYS` from constants, so they will pick up the new key automatically for parsing. Serialization order follows the iteration order of these arrays.
+#### 2. Core Protocol Trailers (Simplified 1-Step Workflow)
+Changes to the *global Lore specification* (standard trailers like `Confidence`) are now metadata-driven and only require **one step**:
 
-4. **`src/formatters/text-formatter.ts`**: Add a rendering block in `formatTrailers()` (around line 242) with the desired color.
+1. **`src/util/core-definitions.ts`**: Add the formal definition to the `CORE_TRAILER_DEFINITIONS` map.
 
-5. **`src/formatters/json-formatter.ts`**: Add a serialization block in `serializeTrailers()` (around line 193).
-
-6. **`src/services/commit-builder.ts`**: Add the field to `CommitInput.trailers` and to `buildTrailers()`.
-
-7. **(Optional)** Update `search.ts` `atomHasTrailer()` and `validator.ts` `trailerHasValue()` if the new trailer should be searchable/validatable.
+**Everything else is automatic:**
+- **Dynamic Types**: `TrailerKey`, `ArrayTrailerKey`, and `EnumTrailerKey` unions are derived automatically from the metadata. `LoreTrailers` and `CommitInput` reuse these types via a strictly flat Record model.
+- **Dynamic CLI**: The `commit` command automatically registers the flag and shorthand.
+- **Dynamic Interactive Mode**: The `InteractiveInputReader` automatically generates prompts.
+- **Dynamic Validation**: The `Validator` automatically enforces the schema (cardinality, enums, patterns).
+- **Dynamic UI**: The `TextFormatter` automatically styles the output based on the `ui` metadata.
+- **Dynamic JSON**: `JsonFormatter` applies snake_case mapping and scalar coercion based on metadata.
 
 ### How to Add a New Output Format
 

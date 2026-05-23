@@ -1,9 +1,11 @@
-import type { ITrailerCollector, TrailerCollectorResult } from '../../../interfaces/trailer-collector.js';
 import type { IPrompt } from '../../../interfaces/prompt.js';
-import type { CommitInput } from '../../commit-builder.js';
+import type {
+  ITrailerCollector,
+  TrailerCollectionResult,
+} from '../../../interfaces/trailer-collector.js';
 
 interface EnumChoiceTrailerConfig {
-  readonly key: keyof NonNullable<CommitInput['trailers']>;
+  readonly key: string;
   readonly confirmMessage: string;
   readonly choiceMessage: string;
   readonly values: readonly string[];
@@ -19,7 +21,7 @@ interface EnumChoiceTrailerConfig {
  * SOLID: SRP -- responsible only for enum-choice collection logic.
  */
 export class EnumChoiceTrailerCollector implements ITrailerCollector {
-  private readonly key: keyof NonNullable<CommitInput['trailers']>;
+  readonly key: string;
   private readonly confirmMessage: string;
   private readonly choiceMessage: string;
   private readonly values: readonly string[];
@@ -31,7 +33,7 @@ export class EnumChoiceTrailerCollector implements ITrailerCollector {
     this.values = config.values;
   }
 
-  async collect(prompt: IPrompt): Promise<TrailerCollectorResult> {
+  async collect(prompt: IPrompt): Promise<TrailerCollectionResult> {
     const wantsValue = await prompt.askConfirm(this.confirmMessage, false);
     if (!wantsValue) {
       return { key: this.key, value: undefined };

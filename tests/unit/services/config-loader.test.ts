@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConfigLoader } from '../../../src/services/config-loader.js';
-import { DEFAULT_CONFIG } from '../../../src/types/config.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -159,6 +160,68 @@ maxMessageLines = 50
       expect(config.validation.maxMessageLines).toBe(100);
     });
 
+    it('should parse permissive mode and custom definitions', async () => {
+      const configPath = await createConfigFile(tempDir, `
+[trailers]
+permissive = false
+custom = ["Team"]
+
+[trailers.definitions.Department]
+description = "The department"
+multivalue = false
+validation = "options"
+options = ["Eng", "Prod"]
+required = true
+
+[trailers.definitions.Tags]
+description = "Topic tags"
+multivalue = true
+validation = "pattern"
+pattern = "^#[a-z]+$"
+`);
+
+      const config = await loader.loadFromFile(configPath);
+
+      expect(config.trailers.permissive).toBe(false);
+      expect(config.trailers.custom).toEqual(['Team']);
+      expect(config.trailers.definitions.Department).toEqual({
+        description: 'The department',
+        multivalue: false,
+        validation: 'values',
+        values: {
+          Eng: { description: '' },
+          Prod: { description: '' },
+        },
+        pattern: undefined,
+        required: true,
+        directives: undefined,
+      });
+      expect(config.trailers.definitions.Tags).toEqual({
+        description: 'Topic tags',
+        multivalue: true,
+        validation: 'pattern',
+        options: undefined,
+        pattern: '^#[a-z]+$',
+        required: false,
+        directives: undefined,
+      });
+    });
+
+    it('should handle detailed option metadata', async () => {
+      const configPath = await createConfigFile(tempDir, `
+[trailers.definitions.Priority.options]
+P0 = "Critical"
+P1 = { description = "High" }
+`);
+
+      const config = await loader.loadFromFile(configPath);
+
+      expect(config.trailers.definitions.Priority.values).toEqual({
+        P0: { description: 'Critical' },
+        P1: { description: 'High' },
+      });
+    });
+
     it('should handle output format validation', async () => {
       const configPath = await createConfigFile(tempDir, `
 [output]
@@ -169,6 +232,51 @@ defaultFormat = "invalid"
 
       // Invalid format should fall back to default
       expect(config.output.defaultFormat).toBe('text');
+    });
+
+    it('should parse UI hints for trailer definitions', async () => {
+      const configPath = await createConfigFile(tempDir, `
+[trailers.definitions.Department]
+description = "The department"
+multivalue = false
+validation = "options"
+options = ["Eng", "Prod"]
+ui = { kind = "risk", color = "cyan" }
+
+[trailers.definitions.Ticket]
+description = "Issue ID"
+multivalue = true
+validation = "pattern"
+pattern = "^[A-Z]+-[0-9]+$"
+ui = { kind = "reference", color = "dim" }
+`);
+
+      const config = await loader.loadFromFile(configPath);
+
+      expect(config.trailers.definitions.Department).toEqual({
+        description: 'The department',
+        multivalue: false,
+        validation: 'values',
+        values: {
+          Eng: { description: '' },
+          Prod: { description: '' },
+        },
+        pattern: undefined,
+        required: false,
+        directives: undefined,
+        ui: { kind: 'risk', color: 'cyan' },
+      });
+
+      expect(config.trailers.definitions.Ticket).toEqual({
+        description: 'Issue ID',
+        multivalue: true,
+        validation: 'pattern',
+        options: undefined,
+        pattern: '^[A-Z]+-[0-9]+$',
+        required: false,
+        directives: undefined,
+        ui: { kind: 'reference', color: 'dim' },
+      });
     });
   });
 
@@ -314,14 +422,14 @@ custom = ["Team", "Sprint"]
       const childDir = join(tempDir, 'app');
       await createConfigFile(childDir, `
 [trailers]
-required = ["Lore-id"]
+required = ["${LORE_ID_KEY}"]
 custom = []
 `);
 
       const config = await loader.loadForPath(childDir);
 
       // Child replaces the entire trailers section, not individual fields
-      expect(config.trailers.required).toEqual(['Lore-id']);
+      expect(config.trailers.required).toEqual([LORE_ID_KEY]);
       expect(config.trailers.custom).toEqual([]);
     });
 

@@ -8,6 +8,7 @@ import type { TrailerKey, LoreAtom, SupersessionStatus } from '../../types/domai
 import type { PathQueryOptions, QueryResult, TargetType } from '../../types/query.js';
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
+import type { Protocol } from '../../services/protocol.js';
 
 /** Parse a CLI value as a strict positive integer; rejects non-numeric trailing chars. */
 export function parsePositiveInt(value: string): number {
@@ -27,6 +28,7 @@ export interface PathQueryDeps {
   readonly pathResolver: PathResolver;
   readonly getFormatter: () => IOutputFormatter;
   readonly config: LoreConfig;
+  readonly protocol: Protocol;
 }
 
 export interface PathQueryCommandOptions {
@@ -37,6 +39,7 @@ export interface PathQueryCommandOptions {
   readonly limit?: number;
   readonly maxCommits?: number;
   readonly since?: string;
+  readonly until?: string;
 }
 
 /**
@@ -53,7 +56,7 @@ export async function executePathQuery(
   commandName: string,
   visibleTrailers: readonly TrailerKey[] | 'all',
 ): Promise<void> {
-  const { atomRepository, supersessionResolver, pathResolver, getFormatter, config } = deps;
+  const { atomRepository, supersessionResolver, pathResolver, getFormatter, config, protocol } = deps;
 
   const queryOptions: PathQueryOptions = {
     scope: options.scope ?? null,
@@ -63,6 +66,7 @@ export async function executePathQuery(
     limit: options.limit ?? null,
     maxCommits: options.maxCommits ?? null,
     since: options.since ?? null,
+    until: options.until ?? null,
   };
 
   // Step 1: Resolve target or use --scope
@@ -71,13 +75,13 @@ export async function executePathQuery(
   let targetDisplay: string;
 
   if (queryOptions.scope) {
-    atoms = await atomRepository.findByScope(queryOptions.scope, queryOptions);
+    atoms = await atomRepository.findByScope(queryOptions.scope, { ...queryOptions, limit: null });
     targetType = 'global';
     targetDisplay = `scope:${queryOptions.scope}`;
   } else {
     const parsedTarget = pathResolver.parseTarget(target);
     const gitLogArgs = pathResolver.toGitLogArgs(parsedTarget);
-    atoms = await atomRepository.findByTarget(gitLogArgs, queryOptions);
+    atoms = await atomRepository.findByTarget(gitLogArgs, { ...queryOptions, limit: null });
     targetType = parsedTarget.type;
     targetDisplay = target;
   }
@@ -118,6 +122,7 @@ export async function executePathQuery(
     result,
     supersessionMap,
     visibleTrailers,
+    trailerDefinitions: protocol.getFormattableDefinitions(),
   };
 
   // Step 6: Format and output
@@ -136,5 +141,6 @@ export function addPathQueryOptions(cmd: Command): Command {
     .option('--author <email>', 'Filter by commit author')
     .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
-    .option('--since <ref>', 'Only consider commits since ref/date');
+    .option('--since <ref>', 'Only consider commits since ref/date')
+    .option('--until <ref>', 'Only consider commits until ref/date');
 }

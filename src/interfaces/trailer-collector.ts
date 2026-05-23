@@ -1,9 +1,8 @@
 import type { IPrompt } from './prompt.js';
-import type { CommitInput } from '../services/commit-builder.js';
 
-export interface TrailerCollectorResult {
-  readonly key: keyof NonNullable<CommitInput['trailers']>;
-  readonly value: readonly string[] | string | undefined;
+export interface TrailerCollectionResult {
+  readonly key: string;
+  readonly value: string | string[] | undefined;
 }
 
 /**
@@ -17,5 +16,6 @@ export interface TrailerCollectorResult {
  * SOLID: OCP -- new trailer types require only a new collector implementation.
  */
 export interface ITrailerCollector {
-  collect(prompt: IPrompt): Promise<TrailerCollectorResult>;
+  readonly key: string;
+  collect(prompt: IPrompt): Promise<TrailerCollectionResult>;
 }

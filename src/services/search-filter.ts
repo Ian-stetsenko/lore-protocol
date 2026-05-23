@@ -1,105 +1,95 @@
 import type { LoreAtom, TrailerKey } from '../types/domain.js';
 import type { SearchOptions } from '../types/query.js';
-import { ARRAY_TRAILER_KEYS, ENUM_TRAILER_KEYS } from '../util/constants.js';
 
 /**
- * Applies search filters to a collection of LoreAtoms.
- *
+ * Applies search filters to a collection of Lore atoms.
+ * 
  * GRASP: Information Expert -- knows how to match atoms against search criteria.
- * SRP: Only filtering logic, no git interaction or formatting.
+ * SOLID: SRP -- only responsible for filtering logic, no git interaction or formatting.
  */
 export class SearchFilter {
   /**
    * Apply all active search filters to the atom list.
    */
   applyFilters(atoms: readonly LoreAtom[], options: SearchOptions): LoreAtom[] {
-    let result = [...atoms];
+    return atoms.filter((atom) => this.matches(atom, options));
+  }
 
-    if (options.confidence !== null) {
-      result = result.filter((a) => a.trailers.Confidence === options.confidence);
+  private matches(atom: LoreAtom, options: SearchOptions): boolean {
+    // 1. Trailer presence filter (--has)
+    if (options.has && !this.atomHasTrailer(atom, options.has)) {
+      return false;
     }
 
-    if (options.scopeRisk !== null) {
-      result = result.filter((a) => a.trailers['Scope-risk'] === options.scopeRisk);
+    // 2. Exact match enum filters
+    if (options.confidence && atom.trailers.Confidence[0] !== options.confidence) {
+      return false;
+    }
+    if (options.scopeRisk && atom.trailers['Scope-risk'][0] !== options.scopeRisk) {
+      return false;
+    }
+    if (options.reversibility && atom.trailers.Reversibility[0] !== options.reversibility) {
+      return false;
     }
 
-    if (options.reversibility !== null) {
-      result = result.filter((a) => a.trailers.Reversibility === options.reversibility);
-    }
-
-    if (options.has !== null) {
-      const trailerKey = options.has;
-      result = result.filter((a) => this.atomHasTrailer(a, trailerKey));
-    }
-
-    if (options.author !== null) {
+    // 3. Author filter
+    if (options.author) {
       const authorLower = options.author.toLowerCase();
-      result = result.filter((a) => a.author.toLowerCase().includes(authorLower));
+      if (!atom.author.toLowerCase().includes(authorLower)) return false;
     }
 
-    if (options.scope !== null) {
-      const scope = options.scope.toLowerCase();
-      result = result.filter((a) => {
-        const match = a.intent.match(/^[a-zA-Z]+\(([^)]+)\)/);
-        return match !== null && match[1].toLowerCase() === scope;
-      });
+    // 4. Intent/Scope filter
+    if (options.scope) {
+      const scopeLower = options.scope.toLowerCase();
+      const extractedScope = this.extractScope(atom.intent);
+      if (!extractedScope || extractedScope.toLowerCase() !== scopeLower) return false;
     }
 
-    if (options.text !== null) {
-      const textLower = options.text.toLowerCase();
-      result = result.filter((a) => this.atomMatchesText(a, textLower));
+    // 5. Full text search
+    if (options.text && !this.atomMatchesText(atom, options.text)) {
+      return false;
     }
 
-    return result;
+    return true;
   }
 
   /**
    * Check if an atom has a non-empty value for the given trailer key.
-   * Uses data-driven lookup via ARRAY_TRAILER_KEYS and ENUM_TRAILER_KEYS
-   * instead of a per-key switch statement.
    */
   atomHasTrailer(atom: LoreAtom, trailerKey: TrailerKey): boolean {
-    if (trailerKey === 'Lore-id') {
-      return !!atom.trailers['Lore-id'];
-    }
-
-    // Array trailers: check length > 0
-    if ((ARRAY_TRAILER_KEYS as readonly string[]).includes(trailerKey)) {
-      const values = atom.trailers[trailerKey as (typeof ARRAY_TRAILER_KEYS)[number]];
-      return values.length > 0;
-    }
-
-    // Enum trailers: check not null
-    if ((ENUM_TRAILER_KEYS as readonly string[]).includes(trailerKey)) {
-      const value = atom.trailers[trailerKey as keyof typeof atom.trailers];
-      return value !== null;
-    }
-
-    return false;
+    const values = atom.trailers[trailerKey] || [];
+    return values.length > 0;
   }
 
   /**
    * Check if an atom matches a text query across intent, body, and trailer values.
    */
-  atomMatchesText(atom: LoreAtom, textLower: string): boolean {
+  private atomMatchesText(atom: LoreAtom, query: string): boolean {
+    const textLower = query.toLowerCase();
+
     if (atom.intent.toLowerCase().includes(textLower)) return true;
     if (atom.body.toLowerCase().includes(textLower)) return true;
 
-    const trailers = atom.trailers;
+    // Search all trailers uniformly
+    for (const key of Object.keys(atom.trailers)) {
+      const values = atom.trailers[key];
+      if (!values) continue;
 
-    // Check array trailers
-    for (const key of ARRAY_TRAILER_KEYS) {
-      for (const value of trailers[key]) {
+      for (const value of values) {
         if (value.toLowerCase().includes(textLower)) return true;
       }
     }
 
-    // Check enum trailers
-    for (const key of ENUM_TRAILER_KEYS) {
-      const value = trailers[key];
-      if (value?.toLowerCase().includes(textLower)) return true;
-    }
-
     return false;
+  }
+
+  /**
+   * Extract the scope from a conventional commit subject line.
+   * Pattern: `type(scope): description`
+   * Returns null if no scope is found.
+   */
+  private extractScope(subject: string): string | null {
+    const match = subject.match(/^[a-zA-Z]+\(([^)]+)\)/);
+    return match ? match[1] : null;
   }
 }

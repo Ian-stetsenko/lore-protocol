@@ -2,9 +2,20 @@ import { readFile, access, stat } from 'node:fs/promises';
 import { join, dirname, resolve, parse as parsePath } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import type { IConfigLoader } from '../interfaces/config-loader.js';
-import type { LoreConfig } from '../types/config.js';
-import { DEFAULT_CONFIG } from '../types/config.js';
-import { CONFIG_DIR, CONFIG_FILENAME } from '../util/constants.js';
+import type { 
+  LoreConfig, 
+  CustomTrailerDefinition, 
+  ValueDefinition,
+  TrailerUiKind,
+  TrailerUiColor
+} from '../types/config.js';
+import { 
+  CONFIG_DIR, 
+  CONFIG_FILENAME, 
+  TRAILER_UI_KINDS, 
+  TRAILER_UI_COLORS,
+  DEFAULT_CONFIG,
+} from '../util/constants.js';
 
 type ConfigSection = keyof LoreConfig;
 
@@ -140,6 +151,10 @@ export class ConfigLoader implements IConfigLoader {
       const built: Record<string, unknown> = {};
 
       for (const [key, defaultValue] of Object.entries(defaults)) {
+        if (section === 'trailers' && key === 'definitions') {
+          built[key] = this.resolveDefinitions(sectionData[key]);
+          continue;
+        }
         built[key] = this.resolveFieldValue(sectionData, key, aliases[key], defaultValue);
       }
 
@@ -168,6 +183,89 @@ export class ConfigLoader implements IConfigLoader {
     if (rawValue === undefined) return defaultValue;
     if (Array.isArray(defaultValue)) return Array.isArray(rawValue) ? rawValue : defaultValue;
     return typeof rawValue === typeof defaultValue ? rawValue : defaultValue;
+  }
+
+  /**
+   * Parse and validate custom trailer definitions from raw config data.
+   */
+  private resolveDefinitions(rawData: unknown): Record<string, CustomTrailerDefinition> {
+    if (!rawData || typeof rawData !== 'object') {
+      return {};
+    }
+
+    const result: Record<string, CustomTrailerDefinition> = {};
+    const entries = Object.entries(rawData as Record<string, unknown>);
+
+    for (const [key, value] of entries) {
+      if (!value || typeof value !== 'object') continue;
+
+      const def = value as Record<string, unknown>;
+      
+      let validation: 'values' | 'pattern' | 'none' = 'none';
+      if (def.validation === 'values' || def.validation === 'options') {
+        validation = 'values';
+      } else if (def.validation === 'pattern') {
+        validation = 'pattern';
+      }
+
+      const directives = Array.isArray(def.directives)
+        ? def.directives.filter((d): d is string => typeof d === 'string')
+        : undefined;
+
+      const uiRaw = typeof def.ui === 'object' && def.ui !== null ? def.ui as Record<string, unknown> : undefined;
+
+      result[key] = {
+        description: typeof def.description === 'string' ? def.description : '',
+        multivalue: typeof def.multivalue === 'boolean' ? def.multivalue : false,
+        validation,
+        values: this.resolveValues(def.values || def.options),
+        pattern: typeof def.pattern === 'string' ? def.pattern : undefined,
+        required: typeof def.required === 'boolean' ? def.required : false,
+        directives,
+        ui: uiRaw ? {
+          kind: (TRAILER_UI_KINDS as readonly string[]).includes(uiRaw.kind as string) 
+            ? uiRaw.kind as TrailerUiKind 
+            : undefined,
+          color: (TRAILER_UI_COLORS as readonly string[]).includes(uiRaw.color as string) 
+            ? uiRaw.color as TrailerUiColor 
+            : undefined,
+        } : undefined,
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * Normalize values from either a string array or a metadata record.
+   */
+  private resolveValues(valuesRaw: unknown): Record<string, ValueDefinition> | undefined {
+    if (Array.isArray(valuesRaw)) {
+      const result: Record<string, ValueDefinition> = {};
+      for (const opt of valuesRaw) {
+        if (typeof opt === 'string') {
+          result[opt] = { description: '' };
+        }
+      }
+      return result;
+    }
+
+    if (valuesRaw && typeof valuesRaw === 'object') {
+      const result: Record<string, ValueDefinition> = {};
+      for (const [key, value] of Object.entries(valuesRaw as Record<string, unknown>)) {
+        if (typeof value === 'string') {
+          result[key] = { description: value };
+        } else if (value && typeof value === 'object') {
+          const optDef = value as Record<string, unknown>;
+          result[key] = {
+            description: typeof optDef.description === 'string' ? optDef.description : '',
+          };
+        }
+      }
+      return result;
+    }
+
+    return undefined;
   }
 
   private async fileExists(filePath: string): Promise<boolean> {

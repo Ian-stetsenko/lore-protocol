@@ -1,10 +1,14 @@
-import type { LoreAtom, SupersessionStatus, TrailerKey } from './domain.js';
+import type { LoreAtom, SupersessionStatus, TrailerKey, StaleSignal } from './domain.js';
 import type { QueryResult } from './query.js';
+import type { LoreConfig, CustomTrailerDefinition, ValueDefinition, TrailerUiKind, TrailerUiColor } from './config.js';
+import type { ParsedDirective } from '../util/directive-parser.js';
 
 export interface FormattableQueryResult {
   readonly result: QueryResult;
   readonly supersessionMap: ReadonlyMap<string, SupersessionStatus>;
-  readonly visibleTrailers: readonly TrailerKey[] | 'all';
+  readonly visibleTrailers: readonly string[] | 'all';
+  /** Trailer definitions for UI rendering hints and serialization rules. */
+  readonly trailerDefinitions: Record<string, FormattableTrailerDefinition>;
 }
 
 export interface FormattableValidationResult {
@@ -23,14 +27,13 @@ export interface CommitValidationResult {
 export interface ValidationIssue {
   readonly severity: 'error' | 'warning';
   readonly rule: string;
+  readonly field?: string;
   readonly message: string;
 }
 
 export interface FormattableStalenessResult {
   readonly atoms: readonly StaleAtomReport[];
 }
-
-import type { StaleSignal } from '../util/constants.js';
 
 export interface StaleReason {
   readonly signal: StaleSignal;
@@ -64,4 +67,30 @@ export interface DoctorCheck {
   readonly status: 'ok' | 'error' | 'warning' | 'info';
   readonly message: string;
   readonly details: readonly string[];
+}
+
+/** New additive types for the config command */
+
+export interface FormattableTrailerDefinition {
+  readonly description: string;
+  readonly multivalue: boolean;
+  readonly validation: 'values' | 'pattern' | 'none';
+  readonly values?: Record<string, ValueDefinition>;
+  readonly pattern?: string;
+  readonly required?: boolean;
+  readonly directives: readonly string[];
+  readonly ui?: {
+    readonly kind?: TrailerUiKind;
+    readonly color?: TrailerUiColor;
+  };
+}
+
+export interface FormattableConfigResult {
+  readonly loreVersion: string;
+  readonly permissive: boolean;
+  readonly trailers: Record<string, FormattableTrailerDefinition>;
+  readonly filters: {
+    readonly showCore: boolean;
+    readonly showCustom: boolean;
+  };
 }

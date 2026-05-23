@@ -29,9 +29,9 @@ describe('JsonInputReader', () => {
       expect(result.body).toBe('Detailed explanation');
       expect(result.trailers?.Constraint).toEqual(['must preserve backward compat']);
       expect(result.trailers?.Rejected).toEqual(['approach A | too complex']);
-      expect(result.trailers?.Confidence).toBe('medium');
-      expect(result.trailers?.['Scope-risk']).toBe('narrow');
-      expect(result.trailers?.Reversibility).toBe('clean');
+      expect(result.trailers?.Confidence).toEqual(['medium']);
+      expect(result.trailers?.['Scope-risk']).toEqual(['narrow']);
+      expect(result.trailers?.Reversibility).toEqual(['clean']);
       expect(result.trailers?.Directive).toEqual(['use new API']);
       expect(result.trailers?.Tested).toEqual(['unit tests pass']);
       expect(result.trailers?.['Not-tested']).toEqual(['load testing']);
@@ -69,9 +69,7 @@ describe('JsonInputReader', () => {
       const result = await reader.read();
 
       expect(result.intent).toBe('with empty trailers');
-      expect(result.trailers).toBeDefined();
-      expect(result.trailers?.Constraint).toBeUndefined();
-      expect(result.trailers?.Confidence).toBeUndefined();
+      expect(result.trailers).toEqual({});
     });
 
     it('should default intent to empty string when not a string', async () => {
@@ -140,7 +138,7 @@ describe('JsonInputReader', () => {
   });
 
   describe('custom trailers', () => {
-    it('should collect unknown trailer keys as custom trailers', async () => {
+    it('should collect unknown trailer keys at the top level', async () => {
       const input = {
         intent: 'test',
         trailers: {
@@ -152,9 +150,8 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.custom?.get('Assisted-by')).toEqual(['Gemini:CLI']);
-      expect(result.trailers?.custom?.size).toBe(1);
-      expect(result.trailers?.Confidence).toBe('high');
+      expect(result.trailers?.['Assisted-by']).toEqual(['Gemini:CLI']);
+      expect(result.trailers?.Confidence).toEqual(['high']);
     });
 
     it('should collect multiple custom trailers', async () => {
@@ -170,23 +167,9 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.custom?.get('Assisted-by')).toEqual(['Gemini:CLI']);
-      expect(result.trailers?.custom?.get('Ticket')).toEqual(['PROJ-123', 'PROJ-456']);
+      expect(result.trailers?.['Assisted-by']).toEqual(['Gemini:CLI']);
+      expect(result.trailers?.Ticket).toEqual(['PROJ-123', 'PROJ-456']);
       expect(result.trailers?.Constraint).toEqual(['some constraint']);
-    });
-
-    it('should not include custom field when no unknown trailers exist', async () => {
-      const input = {
-        intent: 'test',
-        trailers: {
-          Confidence: 'high',
-        },
-      };
-
-      const reader = new JsonInputReader(JSON.stringify(input));
-      const result = await reader.read();
-
-      expect(result.trailers?.custom).toBeUndefined();
     });
 
     it('should skip custom trailers with non-string values', async () => {
@@ -201,13 +184,13 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.custom?.get('Valid-custom')).toEqual(['value']);
-      expect(result.trailers?.custom?.get('Invalid-custom')).toBeUndefined();
+      expect(result.trailers?.['Valid-custom']).toEqual(['value']);
+      expect(result.trailers?.['Invalid-custom']).toBeUndefined();
     });
   });
 
   describe('enum parsing', () => {
-    it('should return string values for enum trailers', async () => {
+    it('should return array values for enum trailers', async () => {
       const input = {
         intent: 'test',
         trailers: {
@@ -220,9 +203,9 @@ describe('JsonInputReader', () => {
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
-      expect(result.trailers?.Confidence).toBe('high');
-      expect(result.trailers?.['Scope-risk']).toBe('wide');
-      expect(result.trailers?.Reversibility).toBe('irreversible');
+      expect(result.trailers?.Confidence).toEqual(['high']);
+      expect(result.trailers?.['Scope-risk']).toEqual(['wide']);
+      expect(result.trailers?.Reversibility).toEqual(['irreversible']);
     });
 
     it('should return undefined for non-string enum values', async () => {

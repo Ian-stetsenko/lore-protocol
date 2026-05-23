@@ -1,93 +1,123 @@
-import type { TrailerKey, ArrayTrailerKey, EnumTrailerKey } from '../types/domain.js';
+import type {
+  TrailerKey,
+  ArrayTrailerKey,
+  EnumTrailerKey,
+  ConfidenceLevel,
+  ScopeRiskLevel,
+  ReversibilityLevel,
+  StaleSignal,
+} from '../types/domain.js';
+import type { LoreConfig } from '../types/config.js';
 
-export const LORE_TRAILER_KEYS: readonly TrailerKey[] = [
-  'Lore-id',
-  'Constraint',
-  'Rejected',
-  'Confidence',
-  'Scope-risk',
-  'Reversibility',
-  'Directive',
-  'Tested',
-  'Not-tested',
-  'Supersedes',
-  'Depends-on',
-  'Related',
-];
+import {
+  LORE_TRAILER_KEYS as CORE_LORE_TRAILER_KEYS,
+  ARRAY_TRAILER_KEYS as CORE_ARRAY_TRAILER_KEYS,
+  ENUM_TRAILER_KEYS as CORE_ENUM_TRAILER_KEYS,
+  REFERENCE_TRAILER_KEYS as CORE_REFERENCE_TRAILER_KEYS,
+  CONFIDENCE_VALUES as CORE_CONFIDENCE_VALUES,
+  SCOPE_RISK_VALUES as CORE_SCOPE_RISK_VALUES,
+  REVERSIBILITY_VALUES as CORE_REVERSIBILITY_VALUES,
+  LORE_ID_KEY as CORE_LORE_ID_KEY,
+  LORE_ID_JSON_KEY as CORE_LORE_ID_JSON_KEY,
+  LORE_VERSION_JSON_KEY as CORE_LORE_VERSION_JSON_KEY,
+  CORE_TRAILER_DEFINITIONS as MASTER_CORE_TRAILER_DEFINITIONS,
+  STALE_SIGNAL_METADATA as CORE_STALE_SIGNAL_METADATA,
+} from './core-definitions.js';
 
-export const ARRAY_TRAILER_KEYS: readonly ArrayTrailerKey[] = [
-  'Constraint',
-  'Rejected',
-  'Directive',
-  'Tested',
-  'Not-tested',
-  'Supersedes',
-  'Depends-on',
-  'Related',
-];
+/** The unique trailer key used for Lore atom identity */
+export const LORE_ID_KEY = CORE_LORE_ID_KEY;
 
-export const ENUM_TRAILER_KEYS: readonly EnumTrailerKey[] = [
-  'Confidence',
-  'Scope-risk',
-  'Reversibility',
-];
+/** The structural JSON key for atom identity */
+export const LORE_ID_JSON_KEY = CORE_LORE_ID_JSON_KEY;
 
-export const CONFIDENCE_VALUES = ['low', 'medium', 'high'] as const;
-export const SCOPE_RISK_VALUES = ['narrow', 'moderate', 'wide'] as const;
-export const REVERSIBILITY_VALUES = ['clean', 'migration-needed', 'irreversible'] as const;
+/** The structural JSON key for protocol version */
+export const LORE_VERSION_JSON_KEY = CORE_LORE_VERSION_JSON_KEY;
 
+/** The master specification for core protocol trailers */
+export const CORE_TRAILER_DEFINITIONS = MASTER_CORE_TRAILER_DEFINITIONS;
+
+/** Central source of truth for the Lore Protocol version */
+export const LORE_PROTOCOL_VERSION = '1.0';
+
+/** All standard Lore trailer keys */
+export const LORE_TRAILER_KEYS: readonly TrailerKey[] = CORE_LORE_TRAILER_KEYS as TrailerKey[];
+
+/** Trailer keys that contain arrays of values */
+export const ARRAY_TRAILER_KEYS: readonly ArrayTrailerKey[] = CORE_ARRAY_TRAILER_KEYS as ArrayTrailerKey[];
+
+/** Trailer keys that contain a single enum value */
+export const ENUM_TRAILER_KEYS: readonly EnumTrailerKey[] = CORE_ENUM_TRAILER_KEYS as EnumTrailerKey[];
+
+/** All trailer keys that reference other atoms by Lore-id */
+export const REFERENCE_TRAILER_KEYS = CORE_REFERENCE_TRAILER_KEYS as readonly TrailerKey[];
+
+/** Valid enum values for core trailers */
+export const CONFIDENCE_VALUES: readonly ConfidenceLevel[] = CORE_CONFIDENCE_VALUES as ConfidenceLevel[];
+export const SCOPE_RISK_VALUES: readonly ScopeRiskLevel[] = CORE_SCOPE_RISK_VALUES as ScopeRiskLevel[];
+export const REVERSIBILITY_VALUES: readonly ReversibilityLevel[] = CORE_REVERSIBILITY_VALUES as ReversibilityLevel[];
+
+/** Pattern for validating Lore-id values (8-character hex string) */
 export const LORE_ID_PATTERN = /^[0-9a-f]{8}$/;
+
+/** Length of a standard Lore-id */
 export const LORE_ID_LENGTH = 8;
 
-export const REFERENCE_TRAILER_KEYS = ['Supersedes', 'Depends-on', 'Related'] as const;
+/** Default display limit for query results */
+export const DEFAULT_QUERY_LIMIT = 20;
 
-export const DEFAULT_QUERY_LIMIT = 100;
-export const DEFAULT_STALE_OLDER_THAN = '6m';
-export const DEFAULT_STALE_DRIFT_THRESHOLD = 20;
-export const GIT_FILES_CHANGED_BATCH_SIZE = 20;
+/** Default max git commits to scan when looking for Lore atoms */
+export const DEFAULT_MAX_COMMITS = 1000;
 
-export const CONFIG_FILENAME = 'config.toml';
+/** The default configuration for the Lore protocol */
+export const DEFAULT_CONFIG: LoreConfig = {
+  protocol: { version: '1.0' },
+  trailers: { required: [], custom: [], definitions: {}, permissive: true },
+  validation: { strict: false, maxMessageLines: 50, intentMaxLength: 72 },
+  stale: { olderThan: '6m', driftThreshold: 20 },
+  output: { defaultFormat: 'text' },
+  follow: { maxDepth: 3 },
+  cli: { updateCheck: true },
+};
+
+/** Filesystem paths for Lore configuration */
 export const CONFIG_DIR = '.lore';
+export const CONFIG_FILENAME = 'config.toml';
 
-export const STALE_SIGNAL = {
-  AGE: 'age',
-  DRIFT: 'drift',
-  LOW_CONFIDENCE: 'low-confidence',
-  EXPIRED_HINT: 'expired-hint',
-  ORPHANED_DEP: 'orphaned-dep',
+/** Prompt strings for interactive mode (Intent and Body only) */
+export const PROMPT_STRINGS = {
+  INTENT: 'Intent (why the change was made):',
+  ADD_BODY: 'Add a body? (narrative context)',
+  BODY_INPUT: 'Body (press Enter on empty line to finish):',
 } as const;
 
-export type StaleSignal = typeof STALE_SIGNAL[keyof typeof STALE_SIGNAL];
+/** Staleness detection signals */
+export const STALE_SIGNAL = CORE_STALE_SIGNAL_METADATA;
 
+/** Default batch size for parallel git file-change lookups */
+export const GIT_FILES_CHANGED_BATCH_SIZE = 20;
+
+/** Exit codes for the Lore CLI */
 export const EXIT_CODE_SUCCESS = 0;
 export const EXIT_CODE_VALIDATION_ERROR = 1;
 export const EXIT_CODE_GIT_ERROR = 2;
 export const EXIT_CODE_NO_STAGED_CHANGES = 3;
 
-export const PROMPT_STRINGS = {
-  INTENT: 'Intent (why the change was made):',
-  ADD_BODY: 'Add a body? (narrative context)',
-  BODY_INPUT: 'Body (press Enter on empty line to finish):',
-  ADD_CONSTRAINT: 'Add a Constraint?',
-  CONSTRAINT_INPUT: 'Constraint:',
-  ADD_REJECTED: 'Add a Rejected alternative?',
-  REJECTED_INPUT: 'Rejected (format: alternative | reason):',
-  SET_CONFIDENCE: 'Set Confidence?',
-  CONFIDENCE_CHOICE: 'Confidence:',
-  SET_SCOPE_RISK: 'Set Scope-risk?',
-  SCOPE_RISK_CHOICE: 'Scope-risk:',
-  SET_REVERSIBILITY: 'Set Reversibility?',
-  REVERSIBILITY_CHOICE: 'Reversibility:',
-  ADD_DIRECTIVE: 'Add a Directive?',
-  DIRECTIVE_INPUT: 'Directive:',
-  ADD_TESTED: 'Add a Tested entry?',
-  TESTED_INPUT: 'Tested:',
-  ADD_NOT_TESTED: 'Add a Not-tested entry?',
-  NOT_TESTED_INPUT: 'Not-tested:',
-  ADD_SUPERSEDES: 'Add a Supersedes reference?',
-  SUPERSEDES_INPUT: 'Supersedes (8-char hex Lore-id):',
-  ADD_DEPENDS_ON: 'Add a Depends-on reference?',
-  DEPENDS_ON_INPUT: 'Depends-on (8-char hex Lore-id):',
-  ADD_RELATED: 'Add a Related reference?',
-  RELATED_INPUT: 'Related (8-char hex Lore-id):',
-} as const;
+/** Standard trailer UI semantic kinds */
+export const TRAILER_UI_KINDS = [
+  'identity',
+  'risk',
+  'decision',
+  'evidence',
+  'reference',
+  'custom',
+] as const;
+
+/** Standard trailer UI colors (chalk-compatible) */
+export const TRAILER_UI_COLORS = [
+  'cyan',
+  'magenta',
+  'yellow',
+  'green',
+  'red',
+  'dim',
+] as const;

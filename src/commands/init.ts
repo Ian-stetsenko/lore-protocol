@@ -8,8 +8,18 @@ const DEFAULT_CONFIG_CONTENT = `[protocol]
 version = "1.0"
 
 [trailers]
+# If true, all unknown trailers are preserved. If false, only defined/custom are kept.
+permissive = true
 required = []
 custom = []
+
+# Define custom trailer rules here
+# [trailers.definitions.Department]
+# description = "The department responsible"
+# multivalue = false
+# validation = "options"
+# options = ["Engineering", "Product", "Design"]
+# required = true
 
 [validation]
 strict = false

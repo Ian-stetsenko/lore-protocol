@@ -1,56 +1,34 @@
-import { CustomTrailerCollection } from './custom-trailer-collection.js';
+import { CORE_TRAILER_DEFINITIONS, STALE_SIGNALS } from '../util/core-definitions.js';
 
 /** 8-character hex string identifying a Lore atom. */
 export type LoreId = string;
 
 /** The set of recognized trailer keys. */
-export type TrailerKey =
-  | 'Lore-id'
-  | 'Constraint'
-  | 'Rejected'
-  | 'Confidence'
-  | 'Scope-risk'
-  | 'Reversibility'
-  | 'Directive'
-  | 'Tested'
-  | 'Not-tested'
-  | 'Supersedes'
-  | 'Depends-on'
-  | 'Related';
+export type TrailerKey = keyof typeof CORE_TRAILER_DEFINITIONS;
 
 /** Trailers that accept multiple values (arrays). */
-export type ArrayTrailerKey =
-  | 'Constraint'
-  | 'Rejected'
-  | 'Directive'
-  | 'Tested'
-  | 'Not-tested'
-  | 'Supersedes'
-  | 'Depends-on'
-  | 'Related';
+export type ArrayTrailerKey = {
+  [K in TrailerKey]: (typeof CORE_TRAILER_DEFINITIONS)[K]['multivalue'] extends true ? K : never;
+}[TrailerKey];
 
 /** Trailers that accept a single enum value. */
-export type EnumTrailerKey = 'Confidence' | 'Scope-risk' | 'Reversibility';
+export type EnumTrailerKey = {
+  [K in TrailerKey]: (typeof CORE_TRAILER_DEFINITIONS)[K]['multivalue'] extends false
+    ? (typeof CORE_TRAILER_DEFINITIONS)[K]['validation'] extends 'values'
+      ? K
+      : never
+    : never;
+}[TrailerKey];
 
-export type ConfidenceLevel = 'low' | 'medium' | 'high';
-export type ScopeRiskLevel = 'narrow' | 'moderate' | 'wide';
-export type ReversibilityLevel = 'clean' | 'migration-needed' | 'irreversible';
+export type ConfidenceLevel = keyof NonNullable<typeof CORE_TRAILER_DEFINITIONS.Confidence['values']>;
+export type ScopeRiskLevel = keyof NonNullable<typeof CORE_TRAILER_DEFINITIONS['Scope-risk']['values']>;
+export type ReversibilityLevel = keyof NonNullable<typeof CORE_TRAILER_DEFINITIONS.Reversibility['values']>;
 
-export interface LoreTrailers {
-  readonly 'Lore-id': LoreId;
-  readonly Constraint: readonly string[];
-  readonly Rejected: readonly string[];
-  readonly Confidence: ConfidenceLevel | null;
-  readonly 'Scope-risk': ScopeRiskLevel | null;
-  readonly Reversibility: ReversibilityLevel | null;
-  readonly Directive: readonly string[];
-  readonly Tested: readonly string[];
-  readonly 'Not-tested': readonly string[];
-  readonly Supersedes: readonly LoreId[];
-  readonly 'Depends-on': readonly LoreId[];
-  readonly Related: readonly LoreId[];
-  readonly custom: CustomTrailerCollection;
-}
+/**
+ * The structured trailer collection for a Lore atom.
+ * Strictly flat and uniform: every key maps to a readonly string array.
+ */
+export type LoreTrailers = Record<string, readonly string[]>;
 
 export interface LoreAtom {
   readonly loreId: LoreId;
@@ -67,3 +45,6 @@ export interface SupersessionStatus {
   readonly superseded: boolean;
   readonly supersededBy: LoreId | null;
 }
+
+/** The set of signals that indicate an atom may be stale. */
+export type StaleSignal = (typeof STALE_SIGNALS)[number];

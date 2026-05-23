@@ -3,15 +3,17 @@ import { AtomRepository } from '../../../src/services/atom-repository.js';
 import type { IGitClient, RawCommit } from '../../../src/interfaces/git-client.js';
 import type { PathQueryOptions } from '../../../src/types/query.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 
 /**
  * Minimal TrailerParser mock that satisfies the AtomRepository's usage.
  */
 function createMockTrailerParser() {
   return {
-    containsLoreTrailers: vi.fn((text: string) => text.includes('Lore-id')),
-    parse: vi.fn((rawTrailers: string, _customKeys: readonly string[]): LoreTrailers => {
+    containsLoreTrailers: vi.fn((text: string) => text.includes(LORE_ID_KEY)),
+    parse: vi.fn((rawTrailers: string): LoreTrailers => {
       const trailers = parseTrailersFromText(rawTrailers);
       return trailers;
     }),
@@ -26,18 +28,21 @@ function createMockTrailerParser() {
  */
 function parseTrailersFromText(raw: string): LoreTrailers {
   const lines = raw.split('\n').filter((l) => l.trim().length > 0);
-  let loreId = '';
-  const constraints: string[] = [];
-  const rejected: string[] = [];
-  let confidence: LoreTrailers['Confidence'] = null;
-  let scopeRisk: LoreTrailers['Scope-risk'] = null;
-  let reversibility: LoreTrailers['Reversibility'] = null;
-  const directives: string[] = [];
-  const tested: string[] = [];
-  const notTested: string[] = [];
-  const supersedes: string[] = [];
-  const dependsOn: string[] = [];
-  const related: string[] = [];
+  
+  const result: any = {
+    [LORE_ID_KEY]: [],
+    Constraint: [],
+    Rejected: [],
+    Confidence: [],
+    'Scope-risk': [],
+    Reversibility: [],
+    Directive: [],
+    Tested: [],
+    'Not-tested': [],
+    Supersedes: [],
+    'Depends-on': [],
+    Related: [],
+  };
 
   for (const line of lines) {
     const colonIdx = line.indexOf(':');
@@ -45,37 +50,14 @@ function parseTrailersFromText(raw: string): LoreTrailers {
     const key = line.substring(0, colonIdx).trim();
     const value = line.substring(colonIdx + 1).trim();
 
-    switch (key) {
-      case 'Lore-id': loreId = value; break;
-      case 'Constraint': constraints.push(value); break;
-      case 'Rejected': rejected.push(value); break;
-      case 'Confidence': confidence = value as LoreTrailers['Confidence']; break;
-      case 'Scope-risk': scopeRisk = value as LoreTrailers['Scope-risk']; break;
-      case 'Reversibility': reversibility = value as LoreTrailers['Reversibility']; break;
-      case 'Directive': directives.push(value); break;
-      case 'Tested': tested.push(value); break;
-      case 'Not-tested': notTested.push(value); break;
-      case 'Supersedes': supersedes.push(value); break;
-      case 'Depends-on': dependsOn.push(value); break;
-      case 'Related': related.push(value); break;
+    if (result[key]) {
+      result[key].push(value);
+    } else {
+      result[key] = [value];
     }
   }
 
-  return {
-    'Lore-id': loreId,
-    Constraint: constraints,
-    Rejected: rejected,
-    Confidence: confidence,
-    'Scope-risk': scopeRisk,
-    Reversibility: reversibility,
-    Directive: directives,
-    Tested: tested,
-    'Not-tested': notTested,
-    Supersedes: supersedes,
-    'Depends-on': dependsOn,
-    Related: related,
-    custom: CustomTrailerCollection.empty(),
-  };
+  return result;
 }
 
 function createMockGitClient(overrides: Partial<IGitClient> = {}): IGitClient {
@@ -90,7 +72,7 @@ function createMockGitClient(overrides: Partial<IGitClient> = {}): IGitClient {
     countCommitsSince: vi.fn(async () => 0),
     resolveRef: vi.fn(async () => 'abc123'),
     ...overrides,
-  };
+  } as any;
 }
 
 function makeLoreCommit(options: {
@@ -110,7 +92,7 @@ function makeLoreCommit(options: {
     author: options.author ?? 'dev@example.com',
     subject: options.subject ?? 'feat(auth): add login',
     body: options.body ?? 'Implemented login flow.',
-    trailers: `Lore-id: ${loreId}\n${extras}`.trim(),
+    trailers: `${LORE_ID_KEY}: ${loreId}\n${extras}`.trim(),
   };
 }
 
@@ -127,6 +109,7 @@ function makeQueryOptions(overrides: Partial<PathQueryOptions> = {}): PathQueryO
     limit: null,
     maxCommits: null,
     since: null,
+    until: null,
     ...overrides,
   };
 }
@@ -135,11 +118,13 @@ describe('AtomRepository', () => {
   let gitClient: IGitClient;
   let trailerParser: ReturnType<typeof createMockTrailerParser>;
   let repo: AtomRepository;
+  let protocol: Protocol;
 
   beforeEach(() => {
     gitClient = createMockGitClient();
     trailerParser = createMockTrailerParser();
-    repo = new AtomRepository(gitClient, trailerParser as any);
+    protocol = new Protocol(DEFAULT_CONFIG);
+    repo = new AtomRepository(gitClient, trailerParser as any, protocol);
   });
 
   describe('findByTarget', () => {
@@ -199,6 +184,16 @@ describe('AtomRepository', () => {
       expect(logArgs).toContain('--since=2025-01-01');
     });
 
+    it('should pass until filter to git log args', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      const options = makeQueryOptions({ until: '2025-06-01' });
+      await repo.findByTarget(makeGitLogArgs(), options);
+
+      const logArgs = vi.mocked(gitClient.log).mock.calls[0][0];
+      expect(logArgs).toContain('--until=2025-06-01');
+    });
+
     it('should pass maxCommits to git log args', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([]);
 
@@ -247,7 +242,7 @@ describe('AtomRepository', () => {
   });
 
   describe('findByLoreId', () => {
-    it('should find an atom by its Lore-id', async () => {
+    it(`should find an atom by its ${LORE_ID_KEY}`, async () => {
       const commit = makeLoreCommit({ loreId: 'deadbeef' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
       vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
@@ -258,7 +253,7 @@ describe('AtomRepository', () => {
       expect(result!.loreId).toBe('deadbeef');
     });
 
-    it('should return null if no atom matches the Lore-id', async () => {
+    it(`should return null if no atom matches the ${LORE_ID_KEY}`, async () => {
       const commit = makeLoreCommit({ loreId: 'a1b2c3d4' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
       vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
@@ -268,14 +263,14 @@ describe('AtomRepository', () => {
       expect(result).toBeNull();
     });
 
-    it('should return null for invalid Lore-id format', async () => {
+    it(`should return null for invalid ${LORE_ID_KEY} format`, async () => {
       const result = await repo.findByLoreId('not-valid');
 
       expect(result).toBeNull();
       expect(gitClient.log).not.toHaveBeenCalled();
     });
 
-    it('should return null for empty Lore-id', async () => {
+    it(`should return null for empty ${LORE_ID_KEY}`, async () => {
       const result = await repo.findByLoreId('');
 
       expect(result).toBeNull();
@@ -297,7 +292,7 @@ describe('AtomRepository', () => {
     });
 
     it('should strip trailers from body when body is exactly the trailer block', async () => {
-      const trailersRaw = 'Lore-id: aaaa1111\nDirective: keep simple';
+      const trailersRaw = `${LORE_ID_KEY}: aaaa1111\nDirective: keep simple`;
       const commit: RawCommit = {
         hash: 'aaa',
         date: '2025-01-15T10:00:00Z',
@@ -405,17 +400,17 @@ describe('AtomRepository', () => {
 
   describe('resolveFollowLinks', () => {
     it('should resolve atoms referenced by Related trailers', async () => {
-      const atom1Trailers = 'Lore-id: aaaa1111\nRelated: bbbb2222';
-      const atom2Trailers = 'Lore-id: bbbb2222';
-
       const commit1 = makeLoreCommit({ hash: 'aaa', loreId: 'aaaa1111', trailerExtras: 'Related: bbbb2222' });
       const commit2 = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' });
 
-      // First call for initial atoms, second call for findByLoreId
-      vi.mocked(gitClient.log).mockResolvedValue([commit1, commit2]);
+      // Search matches based on grep
+      vi.mocked(gitClient.log).mockImplementation(async (args) => {
+        if (args.some(a => a.includes('bbbb2222'))) return [commit2];
+        return [];
+      });
       vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
-      // Parse the initial atoms ourselves
+      // Create initial atoms manually with flat structure
       const initialAtoms = [{
         loreId: 'aaaa1111',
         commitHash: 'aaa',
@@ -424,20 +419,19 @@ describe('AtomRepository', () => {
         intent: 'feat(auth): add login',
         body: '',
         trailers: {
-          'Lore-id': 'aaaa1111',
+          [LORE_ID_KEY]: ['aaaa1111'],
           Constraint: [],
           Rejected: [],
-          Confidence: null,
-          'Scope-risk': null,
-          Reversibility: null,
+          Confidence: [],
+          'Scope-risk': [],
+          Reversibility: [],
           Directive: [],
           Tested: [],
           'Not-tested': [],
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: CustomTrailerCollection.empty(),
-        } as LoreTrailers,
+        } as any,
         filesChanged: [],
       }];
 
@@ -458,20 +452,19 @@ describe('AtomRepository', () => {
         intent: 'test',
         body: '',
         trailers: {
-          'Lore-id': 'aaaa1111',
+          [LORE_ID_KEY]: ['aaaa1111'],
           Constraint: [],
           Rejected: [],
-          Confidence: null,
-          'Scope-risk': null,
-          Reversibility: null,
+          Confidence: [],
+          'Scope-risk': [],
+          Reversibility: [],
           Directive: [],
           Tested: [],
           'Not-tested': [],
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: CustomTrailerCollection.empty(),
-        } as LoreTrailers,
+        } as any,
         filesChanged: [],
       }];
 
@@ -490,20 +483,19 @@ describe('AtomRepository', () => {
         intent: 'test',
         body: '',
         trailers: {
-          'Lore-id': 'aaaa1111',
+          [LORE_ID_KEY]: ['aaaa1111'],
           Constraint: [],
           Rejected: [],
-          Confidence: null,
-          'Scope-risk': null,
-          Reversibility: null,
+          Confidence: [],
+          'Scope-risk': [],
+          Reversibility: [],
           Directive: [],
           Tested: [],
           'Not-tested': [],
           Supersedes: [],
           'Depends-on': [],
           Related: [],
-          custom: CustomTrailerCollection.empty(),
-        } as LoreTrailers,
+        } as any,
         filesChanged: [],
       }];
 
@@ -517,7 +509,11 @@ describe('AtomRepository', () => {
       const commitA = makeLoreCommit({ hash: 'aaa', loreId: 'aaaa1111', trailerExtras: 'Related: bbbb2222' });
       const commitB = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222', trailerExtras: 'Related: aaaa1111' });
 
-      vi.mocked(gitClient.log).mockResolvedValue([commitA, commitB]);
+      vi.mocked(gitClient.log).mockImplementation(async (args) => {
+        if (args.some(a => a.includes('aaaa1111'))) return [commitA];
+        if (args.some(a => a.includes('bbbb2222'))) return [commitB];
+        return [];
+      });
       vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const atomA = {
@@ -528,20 +524,19 @@ describe('AtomRepository', () => {
         intent: 'test',
         body: '',
         trailers: {
-          'Lore-id': 'aaaa1111',
+          [LORE_ID_KEY]: ['aaaa1111'],
           Constraint: [],
           Rejected: [],
-          Confidence: null,
-          'Scope-risk': null,
-          Reversibility: null,
+          Confidence: [],
+          'Scope-risk': [],
+          Reversibility: [],
           Directive: [],
           Tested: [],
           'Not-tested': [],
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: CustomTrailerCollection.empty(),
-        } as LoreTrailers,
+        } as any,
         filesChanged: [],
       };
 
@@ -556,8 +551,12 @@ describe('AtomRepository', () => {
       const commitC = makeLoreCommit({ hash: 'ccc', loreId: 'cccc3333', trailerExtras: 'Related: dddd4444' });
       const commitD = makeLoreCommit({ hash: 'ddd', loreId: 'dddd4444' });
 
-      // findByLoreId will search all commits
-      vi.mocked(gitClient.log).mockResolvedValue([commitB, commitC, commitD]);
+      vi.mocked(gitClient.log).mockImplementation(async (args) => {
+        if (args.some(a => a.includes('bbbb2222'))) return [commitB];
+        if (args.some(a => a.includes('cccc3333'))) return [commitC];
+        if (args.some(a => a.includes('dddd4444'))) return [commitD];
+        return [];
+      });
       vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const atomA = {
@@ -568,20 +567,19 @@ describe('AtomRepository', () => {
         intent: 'test',
         body: '',
         trailers: {
-          'Lore-id': 'aaaa1111',
+          [LORE_ID_KEY]: ['aaaa1111'],
           Constraint: [],
           Rejected: [],
-          Confidence: null,
-          'Scope-risk': null,
-          Reversibility: null,
+          Confidence: [],
+          'Scope-risk': [],
+          Reversibility: [],
           Directive: [],
           Tested: [],
           'Not-tested': [],
           Supersedes: [],
           'Depends-on': [],
           Related: ['bbbb2222'],
-          custom: CustomTrailerCollection.empty(),
-        } as LoreTrailers,
+        } as any,
         filesChanged: [],
       };
 
@@ -601,13 +599,12 @@ describe('AtomRepository', () => {
   });
 
   describe('git log format', () => {
-    it('should pass args to git client log (format is applied by GitClient)', async () => {
+    it('should pass args to git client log', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([]);
 
       await repo.findAll();
 
       const logArgs = vi.mocked(gitClient.log).mock.calls[0][0];
-      // The format string is now applied by GitClient.log(), not AtomRepository
       expect(Array.isArray(logArgs)).toBe(true);
     });
 
@@ -625,7 +622,7 @@ describe('AtomRepository', () => {
 
   describe('batching behavior', () => {
     it('should call getFilesChanged only for Lore commits, not non-Lore commits', async () => {
-      const loreCommit = makeLoreCommit({ loreId: 'aaaa1111' });
+      const loreCommit = makeLoreCommit({ hash: 'abc12345', loreId: 'aaaa1111' });
       const nonLoreCommit: RawCommit = {
         hash: 'non-lore',
         date: '2025-01-16T10:00:00Z',

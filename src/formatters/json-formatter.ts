@@ -5,23 +5,31 @@ import type {
   FormattableStalenessResult,
   FormattableTraceResult,
   FormattableDoctorResult,
+  FormattableConfigResult,
 } from '../types/output.js';
-import type { LoreAtom, LoreTrailers } from '../types/domain.js';
+import type { LoreTrailers } from '../types/domain.js';
+import { LORE_ID_KEY, LORE_ID_JSON_KEY, LORE_VERSION_JSON_KEY } from '../util/constants.js';
 
+/**
+ * Strategy implementation for JSON output.
+ * Produces machine-readable structured data.
+ *
+ * SOLID: SRP -- only responsible for JSON formatting.
+ */
 export class JsonFormatter implements IOutputFormatter {
   formatQueryResult(data: FormattableQueryResult): string {
-    const { result, supersessionMap, visibleTrailers } = data;
+    const { result, supersessionMap, visibleTrailers, trailerDefinitions } = data;
 
     const results = result.atoms.map((atom) => {
       const supersession = supersessionMap.get(atom.loreId);
       return {
-        lore_id: atom.loreId,
+        [LORE_ID_JSON_KEY]: atom.loreId,
         commit: atom.commitHash,
         date: atom.date.toISOString(),
         author: atom.author,
         intent: atom.intent,
         body: atom.body,
-        trailers: this.serializeTrailers(atom.trailers, visibleTrailers),
+        trailers: this.serializeTrailers(atom.trailers, visibleTrailers, trailerDefinitions),
         files_changed: [...atom.filesChanged],
         superseded: supersession?.superseded ?? false,
         superseded_by: supersession?.supersededBy ?? null,
@@ -30,7 +38,7 @@ export class JsonFormatter implements IOutputFormatter {
 
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         command: result.command,
         target: result.target,
         target_type: result.targetType,
@@ -50,7 +58,7 @@ export class JsonFormatter implements IOutputFormatter {
   formatValidationResult(data: FormattableValidationResult): string {
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         valid: data.valid,
         summary: {
           errors: data.summary.errors,
@@ -59,7 +67,7 @@ export class JsonFormatter implements IOutputFormatter {
         },
         results: data.results.map((r) => ({
           commit: r.commit,
-          lore_id: r.loreId,
+          [LORE_ID_JSON_KEY]: r.loreId,
           valid: r.valid,
           issues: r.issues.map((issue) => ({
             severity: issue.severity,
@@ -76,9 +84,9 @@ export class JsonFormatter implements IOutputFormatter {
   formatStalenessResult(data: FormattableStalenessResult): string {
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         stale_atoms: data.atoms.map((report) => ({
-          lore_id: report.atom.loreId,
+          [LORE_ID_JSON_KEY]: report.atom.loreId,
           commit: report.atom.commitHash,
           date: report.atom.date.toISOString(),
           author: report.atom.author,
@@ -97,9 +105,9 @@ export class JsonFormatter implements IOutputFormatter {
   formatTraceResult(data: FormattableTraceResult): string {
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         root: {
-          lore_id: data.root.loreId,
+          [LORE_ID_JSON_KEY]: data.root.loreId,
           commit: data.root.commitHash,
           date: data.root.date.toISOString(),
           author: data.root.author,
@@ -112,7 +120,7 @@ export class JsonFormatter implements IOutputFormatter {
           resolved: edge.targetAtom !== null,
           target_atom: edge.targetAtom
             ? {
-                lore_id: edge.targetAtom.loreId,
+                [LORE_ID_JSON_KEY]: edge.targetAtom.loreId,
                 commit: edge.targetAtom.commitHash,
                 date: edge.targetAtom.date.toISOString(),
                 author: edge.targetAtom.author,
@@ -129,7 +137,7 @@ export class JsonFormatter implements IOutputFormatter {
   formatDoctorResult(data: FormattableDoctorResult): string {
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         checks: data.checks.map((check) => ({
           name: check.name,
           status: check.status,
@@ -150,7 +158,7 @@ export class JsonFormatter implements IOutputFormatter {
   formatSuccess(message: string, data?: Record<string, unknown>): string {
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         success: true,
         message,
         ...(data ?? {}),
@@ -163,7 +171,7 @@ export class JsonFormatter implements IOutputFormatter {
   formatError(code: number, messages: readonly ErrorMessage[]): string {
     return JSON.stringify(
       {
-        lore_version: '1.0',
+        [LORE_VERSION_JSON_KEY]: '1.0',
         error: true,
         code,
         messages: messages.map((msg) => ({
@@ -177,9 +185,38 @@ export class JsonFormatter implements IOutputFormatter {
     );
   }
 
+  formatConfig(data: FormattableConfigResult): string {
+    const cleanTrailers: Record<string, any> = {};
+
+    for (const [key, def] of Object.entries(data.trailers)) {
+      // In JSON config output, we show what's requested via filters
+      // (The filters are applied at the command layer before calling formatter)
+      
+      const { ui, ...clean } = def;
+      const stripped: any = { ...clean };
+      
+      // Strip empty/default fields to reduce programmatic noise
+      if (stripped.directives && stripped.directives.length === 0) delete stripped.directives;
+      if (stripped.required === false) delete stripped.required;
+      if (stripped.validation === 'none') delete stripped.validation;
+
+      cleanTrailers[key] = stripped;
+    }
+
+    return JSON.stringify({
+      [LORE_VERSION_JSON_KEY]: data.loreVersion,
+      permissive: data.permissive,
+      trailers: cleanTrailers
+    }, null, 2);
+  }
+
+  /**
+   * Transforms trailers into a flat JSON-friendly record.
+   */
   private serializeTrailers(
     trailers: LoreTrailers,
     visibleTrailers: readonly string[] | 'all',
+    trailerDefinitions: Record<string, any>,
   ): Record<string, unknown> {
     const result: Record<string, unknown> = {};
 
@@ -188,47 +225,24 @@ export class JsonFormatter implements IOutputFormatter {
       return visibleTrailers.includes(key);
     };
 
-    result['lore_id'] = trailers['Lore-id'];
+    // Special case: LORE_ID_KEY is ALWAYS included in JSON, matching 'main'
+    result[LORE_ID_JSON_KEY] = trailers[LORE_ID_KEY]?.[0] ?? null;
 
-    if (shouldShow('Constraint') && trailers.Constraint.length > 0) {
-      result['constraint'] = [...trailers.Constraint];
-    }
-    if (shouldShow('Rejected') && trailers.Rejected.length > 0) {
-      result['rejected'] = [...trailers.Rejected];
-    }
-    if (shouldShow('Confidence') && trailers.Confidence !== null) {
-      result['confidence'] = trailers.Confidence;
-    }
-    if (shouldShow('Scope-risk') && trailers['Scope-risk'] !== null) {
-      result['scope_risk'] = trailers['Scope-risk'];
-    }
-    if (shouldShow('Reversibility') && trailers.Reversibility !== null) {
-      result['reversibility'] = trailers.Reversibility;
-    }
-    if (shouldShow('Directive') && trailers.Directive.length > 0) {
-      result['directive'] = [...trailers.Directive];
-    }
-    if (shouldShow('Tested') && trailers.Tested.length > 0) {
-      result['tested'] = [...trailers.Tested];
-    }
-    if (shouldShow('Not-tested') && trailers['Not-tested'].length > 0) {
-      result['not_tested'] = [...trailers['Not-tested']];
-    }
-    if (shouldShow('Supersedes') && trailers.Supersedes.length > 0) {
-      result['supersedes'] = [...trailers.Supersedes];
-    }
-    if (shouldShow('Depends-on') && trailers['Depends-on'].length > 0) {
-      result['depends_on'] = [...trailers['Depends-on']];
-    }
-    if (shouldShow('Related') && trailers.Related.length > 0) {
-      result['related'] = [...trailers.Related];
-    }
+    for (const key of Object.keys(trailers)) {
+      if (key === LORE_ID_KEY) continue;
+      if (!shouldShow(key)) continue;
 
-    // Include custom trailers
-    for (const [key, values] of trailers.custom) {
-      if (values.length > 0) {
-        result[key.toLowerCase().replace(/-/g, '_')] = [...values];
-      }
+      const values = trailers[key];
+      if (!values || values.length === 0) continue;
+
+      const jsonKey = key.toLowerCase().replace(/-/g, '_');
+      
+      // Scalar vs Array normalization based on INJECTED metadata
+      // This achieves commonality: custom trailers with multivalue: false are now coerced.
+      const def = trailerDefinitions[key];
+      const isScalar = def && !def.multivalue;
+      
+      result[jsonKey] = isScalar ? values[0] : [...values];
     }
 
     return result;

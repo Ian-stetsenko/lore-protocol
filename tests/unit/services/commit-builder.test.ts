@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CommitBuilder } from '../../../src/services/commit-builder.js';
-import type { CommitInput } from '../../../src/services/commit-builder.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import type { CommitInput } from '../../../src/types/commit.js';
 import type { LoreConfig } from '../../../src/types/config.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
-import { DEFAULT_CONFIG } from '../../../src/types/config.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 
 // Mock TrailerParser
 function createMockTrailerParser() {
@@ -12,18 +13,29 @@ function createMockTrailerParser() {
     parse: vi.fn(),
     serialize: vi.fn((trailers: LoreTrailers) => {
       const lines: string[] = [];
-      lines.push(`Lore-id: ${trailers['Lore-id']}`);
+      if (trailers[LORE_ID_KEY] && trailers[LORE_ID_KEY].length > 0) {
+        lines.push(`${LORE_ID_KEY}: ${trailers[LORE_ID_KEY][0]}`);
+      }
       for (const v of trailers.Constraint) lines.push(`Constraint: ${v}`);
       for (const v of trailers.Rejected) lines.push(`Rejected: ${v}`);
-      if (trailers.Confidence) lines.push(`Confidence: ${trailers.Confidence}`);
-      if (trailers['Scope-risk']) lines.push(`Scope-risk: ${trailers['Scope-risk']}`);
-      if (trailers.Reversibility) lines.push(`Reversibility: ${trailers.Reversibility}`);
+      if (trailers.Confidence && trailers.Confidence.length > 0) lines.push(`Confidence: ${trailers.Confidence[0]}`);
+      if (trailers['Scope-risk'] && trailers['Scope-risk'].length > 0) lines.push(`Scope-risk: ${trailers['Scope-risk'][0]}`);
+      if (trailers.Reversibility && trailers.Reversibility.length > 0) lines.push(`Reversibility: ${trailers.Reversibility[0]}`);
       for (const v of trailers.Directive) lines.push(`Directive: ${v}`);
       for (const v of trailers.Tested) lines.push(`Tested: ${v}`);
       for (const v of trailers['Not-tested']) lines.push(`Not-tested: ${v}`);
       for (const v of trailers.Supersedes) lines.push(`Supersedes: ${v}`);
       for (const v of trailers['Depends-on']) lines.push(`Depends-on: ${v}`);
       for (const v of trailers.Related) lines.push(`Related: ${v}`);
+
+      // Custom trailers
+      const coreKeys = [[LORE_ID_KEY], 'Constraint', 'Rejected', 'Confidence', 'Scope-risk', 'Reversibility', 'Directive', 'Tested', 'Not-tested', 'Supersedes', 'Depends-on', 'Related'];
+      for (const key of Object.keys(trailers)) {
+        if (!coreKeys.includes(key)) {
+          for (const v of trailers[key]) lines.push(`${key}: ${v}`);
+        }
+      }
+
       return lines.join('\n');
     }),
     containsLoreTrailers: vi.fn(),
@@ -43,20 +55,23 @@ describe('CommitBuilder', () => {
   let mockParser: ReturnType<typeof createMockTrailerParser>;
   let mockIdGen: ReturnType<typeof createMockIdGenerator>;
   let config: LoreConfig;
+  let protocol: Protocol;
 
   beforeEach(() => {
     mockParser = createMockTrailerParser();
     mockIdGen = createMockIdGenerator();
     config = { ...DEFAULT_CONFIG };
+    protocol = new Protocol(config);
     builder = new CommitBuilder(
       mockParser as any,
       mockIdGen as any,
       config,
+      protocol,
     );
   });
 
   describe('build', () => {
-    it('should build a minimal commit with intent and Lore-id', () => {
+    it(`should build a minimal commit with intent and ${LORE_ID_KEY}`, () => {
       const input: CommitInput = {
         intent: 'feat(auth): add login flow',
       };
@@ -66,7 +81,7 @@ describe('CommitBuilder', () => {
       expect(mockIdGen.generate).toHaveBeenCalledOnce();
       expect(mockParser.serialize).toHaveBeenCalledOnce();
       expect(result).toContain('feat(auth): add login flow');
-      expect(result).toContain('Lore-id: a1b2c3d4');
+      expect(result).toContain(`${LORE_ID_KEY}: a1b2c3d4`);
     });
 
     it('should include body separated by blank lines', () => {
@@ -87,9 +102,9 @@ describe('CommitBuilder', () => {
         trailers: {
           Constraint: ['Must use HTTPS', 'No external deps'],
           Rejected: ['Polling approach'],
-          Confidence: 'high',
-          'Scope-risk': 'narrow',
-          Reversibility: 'clean',
+          Confidence: ['high'],
+          'Scope-risk': ['narrow'],
+          Reversibility: ['clean'],
           Directive: ['Review in 3 months'],
           Tested: ['Unit tests for auth module'],
           'Not-tested': ['Edge case with expired tokens'],
@@ -115,13 +130,13 @@ describe('CommitBuilder', () => {
       expect(result).toContain('Related: aabbccdd');
     });
 
-    it('should auto-generate Lore-id', () => {
+    it(`should auto-generate ${LORE_ID_KEY}`, () => {
       mockIdGen.generate.mockReturnValue('deadbeef');
       const input: CommitInput = { intent: 'test' };
 
       const result = builder.build(input);
 
-      expect(result).toContain('Lore-id: deadbeef');
+      expect(result).toContain(`${LORE_ID_KEY}: deadbeef`);
     });
 
     it('should use provided existingLoreId instead of generating one', () => {
@@ -129,11 +144,11 @@ describe('CommitBuilder', () => {
 
       const result = builder.build(input, 'cafebabe');
 
-      expect(result).toContain('Lore-id: cafebabe');
+      expect(result).toContain(`${LORE_ID_KEY}: cafebabe`);
       expect(mockIdGen.generate).not.toHaveBeenCalled();
     });
 
-    it('should generate new Lore-id when no existingLoreId is provided', () => {
+    it(`should generate new ${LORE_ID_KEY} when no existingLoreId is provided`, () => {
       const input: CommitInput = { intent: 'new commit' };
 
       builder.build(input);
@@ -144,46 +159,45 @@ describe('CommitBuilder', () => {
     it('should pass correct trailers to serialize', () => {
       const input: CommitInput = {
         intent: 'test',
-        trailers: { Confidence: 'medium' },
+        trailers: { Confidence: ['medium'] },
       };
 
       builder.build(input);
 
       const passedTrailers = mockParser.serialize.mock.calls[0][0] as LoreTrailers;
-      expect(passedTrailers['Lore-id']).toBe('a1b2c3d4');
-      expect(passedTrailers.Confidence).toBe('medium');
+      expect(passedTrailers[LORE_ID_KEY]).toEqual(['a1b2c3d4']);
+      expect(passedTrailers.Confidence).toEqual(['medium']);
       expect(passedTrailers.Constraint).toEqual([]);
     });
 
-    it('should pass custom trailers through to LoreTrailers.custom map', () => {
-      const customMap = new Map<string, readonly string[]>();
-      customMap.set('Assisted-by', ['Gemini:CLI']);
-      customMap.set('Ticket', ['PROJ-123']);
+    it('should pass custom trailers through to LoreTrailers as arrays', () => {
       const input: CommitInput = {
         intent: 'feat: with custom trailers',
         trailers: {
-          Confidence: 'high' as const,
-          custom: new CustomTrailerCollection(customMap),
+          Confidence: ['high'],
+          'Assisted-by': ['Gemini:CLI'],
+          'Ticket': ['PROJ-123'],
         },
       };
 
       builder.build(input);
 
       const passedTrailers = vi.mocked(mockParser.serialize).mock.calls[0][0] as LoreTrailers;
-      expect(passedTrailers.custom.get('Assisted-by')).toEqual(['Gemini:CLI']);
-      expect(passedTrailers.custom.get('Ticket')).toEqual(['PROJ-123']);
+      expect(passedTrailers['Assisted-by']).toEqual(['Gemini:CLI']);
+      expect(passedTrailers['Ticket']).toEqual(['PROJ-123']);
     });
 
-    it('should produce empty custom map when no custom trailers provided', () => {
+    it('should produce empty object when no custom trailers provided', () => {
       const input: CommitInput = {
         intent: 'feat: no custom',
-        trailers: { Confidence: 'high' as const },
+        trailers: { Confidence: ['high'] },
       };
 
       builder.build(input);
 
       const passedTrailers = vi.mocked(mockParser.serialize).mock.calls[0][0] as LoreTrailers;
-      expect(passedTrailers.custom.size).toBe(0);
+      // Core keys are present as empty arrays
+      expect(passedTrailers.Constraint).toEqual([]);
     });
   });
 
@@ -192,7 +206,7 @@ describe('CommitBuilder', () => {
       const input: CommitInput = {
         intent: 'feat: valid commit message',
         trailers: {
-          Confidence: 'medium',
+          Confidence: ['medium'],
         },
       };
 
@@ -226,7 +240,7 @@ describe('CommitBuilder', () => {
     it('should error on invalid Confidence enum', () => {
       const input: CommitInput = {
         intent: 'test',
-        trailers: { Confidence: 'super-high' as any },
+        trailers: { Confidence: ['super-high'] as any },
       };
 
       const issues = builder.validate(input);
@@ -240,7 +254,7 @@ describe('CommitBuilder', () => {
     it('should error on invalid Scope-risk enum', () => {
       const input: CommitInput = {
         intent: 'test',
-        trailers: { 'Scope-risk': 'huge' as any },
+        trailers: { 'Scope-risk': ['huge'] as any },
       };
 
       const issues = builder.validate(input);
@@ -253,7 +267,7 @@ describe('CommitBuilder', () => {
     it('should error on invalid Reversibility enum', () => {
       const input: CommitInput = {
         intent: 'test',
-        trailers: { Reversibility: 'maybe' as any },
+        trailers: { Reversibility: ['maybe'] as any },
       };
 
       const issues = builder.validate(input);
@@ -295,10 +309,16 @@ describe('CommitBuilder', () => {
     it('should check required trailers from config', () => {
       const strictConfig: LoreConfig = {
         ...DEFAULT_CONFIG,
-        trailers: { required: ['Confidence', 'Constraint'], custom: [] },
+        trailers: { 
+          required: ['Confidence', 'Constraint'], 
+          custom: [], 
+          definitions: {}, 
+          permissive: false 
+        },
         validation: { ...DEFAULT_CONFIG.validation, strict: false },
       };
-      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+      const strictProtocol = new Protocol(strictConfig);
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig, strictProtocol);
 
       const input: CommitInput = {
         intent: 'test',
@@ -313,10 +333,16 @@ describe('CommitBuilder', () => {
     it('should error on missing required trailers in strict mode', () => {
       const strictConfig: LoreConfig = {
         ...DEFAULT_CONFIG,
-        trailers: { required: ['Confidence'], custom: [] },
+        trailers: { 
+          required: ['Confidence'], 
+          custom: [], 
+          definitions: {}, 
+          permissive: false 
+        },
         validation: { ...DEFAULT_CONFIG.validation, strict: true },
       };
-      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+      const strictProtocol = new Protocol(strictConfig);
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig, strictProtocol);
 
       const input: CommitInput = {
         intent: 'test',
@@ -354,13 +380,19 @@ describe('CommitBuilder', () => {
     it('should pass with valid required trailer present', () => {
       const strictConfig: LoreConfig = {
         ...DEFAULT_CONFIG,
-        trailers: { required: ['Confidence'], custom: [] },
+        trailers: { 
+          required: ['Confidence'], 
+          custom: [], 
+          definitions: {}, 
+          permissive: false 
+        },
       };
-      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+      const strictProtocol = new Protocol(strictConfig);
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig, strictProtocol);
 
       const input: CommitInput = {
         intent: 'test',
-        trailers: { Confidence: 'medium' },
+        trailers: { Confidence: ['medium'] },
       };
 
       const issues = strictBuilder.validate(input);
@@ -371,14 +403,20 @@ describe('CommitBuilder', () => {
     it('should report missing required custom trailer', () => {
       const strictConfig: LoreConfig = {
         ...DEFAULT_CONFIG,
-        trailers: { ...DEFAULT_CONFIG.trailers, required: ['Assisted-by'] },
+        trailers: { 
+          required: ['Assisted-by'], 
+          custom: [], 
+          definitions: {}, 
+          permissive: false 
+        },
         validation: { ...DEFAULT_CONFIG.validation, strict: true },
       };
-      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+      const strictProtocol = new Protocol(strictConfig);
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig, strictProtocol);
 
       const input: CommitInput = {
         intent: 'test',
-        trailers: { Confidence: 'high' as const },
+        trailers: { Confidence: ['high'] },
       };
 
       const issues = strictBuilder.validate(input);
@@ -391,16 +429,22 @@ describe('CommitBuilder', () => {
     it('should not report missing required trailer when custom trailer is present', () => {
       const strictConfig: LoreConfig = {
         ...DEFAULT_CONFIG,
-        trailers: { ...DEFAULT_CONFIG.trailers, required: ['Assisted-by'] },
+        trailers: { 
+          required: ['Assisted-by'], 
+          custom: [], 
+          definitions: {}, 
+          permissive: false 
+        },
         validation: { ...DEFAULT_CONFIG.validation, strict: true },
       };
-      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig);
+      const strictProtocol = new Protocol(strictConfig);
+      const strictBuilder = new CommitBuilder(mockParser as any, mockIdGen as any, strictConfig, strictProtocol);
 
       const input: CommitInput = {
         intent: 'test',
         trailers: {
-          Confidence: 'high' as const,
-          custom: new CustomTrailerCollection(new Map([['Assisted-by', ['Gemini:CLI']]])),
+          Confidence: ['high'],
+          'Assisted-by': ['Gemini:CLI'],
         },
       };
 

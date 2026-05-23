@@ -3,12 +3,15 @@ import type { AtomRepository } from '../services/atom-repository.js';
 import type { SupersessionResolver } from '../services/supersession-resolver.js';
 import type { SearchFilter } from '../services/search-filter.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
+import type { LoreConfig } from '../types/config.js';
 import type { TrailerKey, LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { SearchOptions, QueryResult } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
 import { parsePositiveInt } from './helpers/path-query.js';
+import { LoreError } from '../util/errors.js';
+import type { Protocol } from '../services/protocol.js';
 
 interface SearchCommandOptions {
   readonly confidence?: string;
@@ -36,6 +39,8 @@ export function registerSearchCommand(
     supersessionResolver: SupersessionResolver;
     searchFilter: SearchFilter;
     getFormatter: () => IOutputFormatter;
+    config: LoreConfig;
+    protocol: Protocol;
   },
 ): void {
   program
@@ -55,13 +60,25 @@ export function registerSearchCommand(
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
     .action(async (_options: SearchCommandOptions, command: Command) => {
       const options = mergeOptions<SearchCommandOptions>(command);
-      const { atomRepository, supersessionResolver, searchFilter, getFormatter } = deps;
+      const { atomRepository, supersessionResolver, searchFilter, getFormatter, config, protocol } = deps;
+
+      // Validate 'has' trailer key against protocol
+      let authorizedHas: TrailerKey | null = null;
+      if (options.has) {
+        authorizedHas = protocol.authorize(options.has) as TrailerKey | null;
+        if (!authorizedHas) {
+          throw new LoreError(
+            `'${options.has}' is not a valid Lore trailer. In strict mode, only core or explicitly configured trailers can be searched.`,
+            1,
+          );
+        }
+      }
 
       const searchOptions: SearchOptions = {
         confidence: (options.confidence as SearchOptions['confidence']) ?? null,
         scopeRisk: (options.scopeRisk as SearchOptions['scopeRisk']) ?? null,
         reversibility: (options.reversibility as SearchOptions['reversibility']) ?? null,
-        has: (options.has as TrailerKey) ?? null,
+        has: authorizedHas,
         author: options.author ?? null,
         scope: options.scope ?? null,
         text: options.text ?? null,
@@ -111,6 +128,7 @@ export function registerSearchCommand(
         result,
         supersessionMap,
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const formatter = getFormatter();
@@ -121,9 +139,9 @@ export function registerSearchCommand(
 function buildSearchTargetDescription(options: SearchOptions): string {
   const parts: string[] = [];
 
-  if (options.confidence) parts.push(`confidence=${options.confidence}`);
-  if (options.scopeRisk) parts.push(`scope-risk=${options.scopeRisk}`);
-  if (options.reversibility) parts.push(`reversibility=${options.reversibility}`);
+  if (options.confidence) parts.push(`confidence=${String(options.confidence)}`);
+  if (options.scopeRisk) parts.push(`scope-risk=${String(options.scopeRisk)}`);
+  if (options.reversibility) parts.push(`reversibility=${String(options.reversibility)}`);
   if (options.has) parts.push(`has=${options.has}`);
   if (options.author) parts.push(`author=${options.author}`);
   if (options.scope) parts.push(`scope=${options.scope}`);

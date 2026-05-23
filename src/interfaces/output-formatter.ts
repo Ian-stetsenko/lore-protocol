@@ -4,6 +4,7 @@ import type {
   FormattableStalenessResult,
   FormattableTraceResult,
   FormattableDoctorResult,
+  FormattableConfigResult,
 } from '../types/output.js';
 
 export interface ErrorMessage {
@@ -18,6 +19,7 @@ export interface IOutputFormatter {
   formatStalenessResult(data: FormattableStalenessResult): string;
   formatTraceResult(data: FormattableTraceResult): string;
   formatDoctorResult(data: FormattableDoctorResult): string;
+  formatConfig(data: FormattableConfigResult): string;
   formatSuccess(message: string, data?: Record<string, unknown>): string;
   formatError(code: number, messages: readonly ErrorMessage[]): string;
 }

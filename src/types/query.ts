@@ -19,6 +19,7 @@ export interface PathQueryOptions {
   readonly limit: number | null;
   readonly maxCommits: number | null;
   readonly since: string | null;
+  readonly until: string | null;
 }
 
 export interface SearchOptions {

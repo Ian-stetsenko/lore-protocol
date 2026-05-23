@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { TextFormatter } from '../../../src/formatters/text-formatter.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../../../src/types/domain.js';
 import type {
   FormattableQueryResult,
@@ -8,24 +11,23 @@ import type {
   FormattableTraceResult,
   FormattableDoctorResult,
 } from '../../../src/types/output.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
-    'Lore-id': overrides['Lore-id'] ?? 'a1b2c3d4',
+    [LORE_ID_KEY]: overrides[LORE_ID_KEY] ?? ['a1b2c3d4'],
     Constraint: overrides.Constraint ?? [],
     Rejected: overrides.Rejected ?? [],
-    Confidence: overrides.Confidence ?? null,
-    'Scope-risk': overrides['Scope-risk'] ?? null,
-    Reversibility: overrides.Reversibility ?? null,
+    Confidence: overrides.Confidence ?? [],
+    'Scope-risk': overrides['Scope-risk'] ?? [],
+    Reversibility: overrides.Reversibility ?? [],
     Directive: overrides.Directive ?? [],
     Tested: overrides.Tested ?? [],
     'Not-tested': overrides['Not-tested'] ?? [],
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? CustomTrailerCollection.empty(),
-  };
+    ...overrides,
+  } as any;
 }
 
 function makeAtom(overrides: Partial<LoreAtom> = {}): LoreAtom {
@@ -43,6 +45,11 @@ function makeAtom(overrides: Partial<LoreAtom> = {}): LoreAtom {
 
 describe('TextFormatter', () => {
   const formatter = new TextFormatter({ color: false });
+  let protocol: Protocol;
+
+  beforeEach(() => {
+    protocol = new Protocol(DEFAULT_CONFIG);
+  });
 
   describe('formatQueryResult', () => {
     it('should show "No lore atoms found" when empty', () => {
@@ -56,6 +63,7 @@ describe('TextFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -66,7 +74,7 @@ describe('TextFormatter', () => {
       const atom = makeAtom({
         trailers: makeTrailers({
           Constraint: ['Must use OAuth2'],
-          Confidence: 'high',
+          Confidence: ['high'],
         }),
       });
       const data: FormattableQueryResult = {
@@ -84,6 +92,7 @@ describe('TextFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -112,6 +121,7 @@ describe('TextFormatter', () => {
         },
         supersessionMap,
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -122,7 +132,7 @@ describe('TextFormatter', () => {
       const atom = makeAtom({
         trailers: makeTrailers({
           Constraint: ['Must use OAuth2'],
-          Confidence: 'high',
+          Confidence: ['high'],
           Rejected: ['Session tokens'],
         }),
       });
@@ -136,6 +146,7 @@ describe('TextFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: ['Constraint'],
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -157,6 +168,7 @@ describe('TextFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -175,6 +187,7 @@ describe('TextFormatter', () => {
         },
         supersessionMap: new Map(),
         visibleTrailers: 'all',
+        trailerDefinitions: protocol.getFormattableDefinitions(),
       };
 
       const output = formatter.formatQueryResult(data);
@@ -213,7 +226,7 @@ describe('TextFormatter', () => {
             loreId: null,
             valid: false,
             issues: [
-              { severity: 'error', rule: 'lore-id-present', message: 'Lore-id trailer is missing' },
+              { severity: 'error', rule: 'lore-id-present', message: `${LORE_ID_KEY} trailer is missing` },
               { severity: 'warning', rule: 'intent-length', message: 'Intent too long' },
             ],
           },
@@ -223,14 +236,14 @@ describe('TextFormatter', () => {
       const output = formatter.formatValidationResult(data);
       expect(output).toContain('\u2717');
       expect(output).toContain('lore-id-present');
-      expect(output).toContain('Lore-id trailer is missing');
+      expect(output).toContain(`${LORE_ID_KEY} trailer is missing`);
       expect(output).toContain('\u26A0');
       expect(output).toContain('Intent too long');
       expect(output).toContain('1 errors');
       expect(output).toContain('1 warnings');
     });
 
-    it('should use commit hash prefix when no lore-id', () => {
+    it(`should use commit hash prefix when no ${LORE_ID_KEY}`, () => {
       const data: FormattableValidationResult = {
         valid: false,
         summary: { errors: 1, warnings: 0, commitsChecked: 1 },
@@ -240,7 +253,7 @@ describe('TextFormatter', () => {
             loreId: null,
             valid: false,
             issues: [
-              { severity: 'error', rule: 'lore-id-present', message: 'Missing Lore-id' },
+              { severity: 'error', rule: 'lore-id-present', message: `Missing ${LORE_ID_KEY}` },
             ],
           },
         ],
@@ -326,7 +339,7 @@ describe('TextFormatter', () => {
         checks: [
           { name: 'git-version', status: 'ok', message: 'Git 2.40+ detected', details: [] },
           { name: 'config', status: 'warning', message: 'No config found', details: ['Using defaults'] },
-          { name: 'duplicates', status: 'error', message: '2 duplicate Lore-ids', details: ['a1b2c3d4', 'e5f6a7b8'] },
+          { name: 'duplicates', status: 'error', message: `2 duplicate ${LORE_ID_KEY}s`, details: ['a1b2c3d4', 'e5f6a7b8'] },
         ],
         summary: { errors: 1, warnings: 1, info: 0 },
       };
@@ -338,7 +351,7 @@ describe('TextFormatter', () => {
       expect(output).toContain('No config found');
       expect(output).toContain('Using defaults');
       expect(output).toContain('ERROR');
-      expect(output).toContain('2 duplicate Lore-ids');
+      expect(output).toContain(`2 duplicate ${LORE_ID_KEY}s`);
       expect(output).toContain('1 errors');
       expect(output).toContain('1 warnings');
     });

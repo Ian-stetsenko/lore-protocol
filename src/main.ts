@@ -25,6 +25,7 @@ import { TerminalPrompt } from './services/terminal-prompt.js';
 import { CommitInputResolver } from './services/commit-input-resolver.js';
 import { HeadLoreIdReader } from './services/head-lore-id-reader.js';
 import { SearchFilter } from './services/search-filter.js';
+import { Protocol } from './services/protocol.js';
 
 import { TextFormatter } from './formatters/text-formatter.js';
 import { JsonFormatter } from './formatters/json-formatter.js';
@@ -44,6 +45,7 @@ import { registerCommitCommand } from './commands/commit.js';
 import { registerValidateCommand } from './commands/validate.js';
 import { registerSquashCommand } from './commands/squash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
+import { registerConfigCommand } from './commands/config.js';
 
 import { LoreError, ValidationError } from './util/errors.js';
 import { shouldCheckForUpdate } from './util/update-check.js';
@@ -72,7 +74,6 @@ async function main(): Promise<void> {
 
   // 1. Create concrete implementations
   const gitClient: IGitClient = new GitClient();
-  const trailerParser = new TrailerParser();
   const pathResolver = new PathResolver();
   const loreIdGenerator = new LoreIdGenerator();
   const configLoader: IConfigLoader = new ConfigLoader();
@@ -83,7 +84,7 @@ async function main(): Promise<void> {
     config = await configLoader.loadForPath(process.cwd());
   } catch {
     // Fall back to defaults if config can't be loaded
-    const { DEFAULT_CONFIG } = await import('./types/config.js');
+    const { DEFAULT_CONFIG } = await import('./util/constants.js');
     config = DEFAULT_CONFIG;
   }
 
@@ -93,15 +94,17 @@ async function main(): Promise<void> {
   }
 
   // 4. Create services that depend on others
-  const atomRepository = new AtomRepository(gitClient, trailerParser, config.trailers.custom);
+  const protocol = new Protocol(config);
+  const trailerParser = new TrailerParser(protocol);
+  const atomRepository = new AtomRepository(gitClient, trailerParser, protocol);
   const supersessionResolver = new SupersessionResolver();
   const stalenessDetector = new StalenessDetector(gitClient, config);
-  const commitBuilder = new CommitBuilder(trailerParser, loreIdGenerator, config);
-  const squashMerger = new SquashMerger(loreIdGenerator);
-  const validator = new Validator(trailerParser, atomRepository, config);
+  const commitBuilder = new CommitBuilder(trailerParser, loreIdGenerator, config, protocol);
+  const squashMerger = new SquashMerger(loreIdGenerator, protocol);
+  const validator = new Validator(trailerParser, atomRepository, config, protocol);
   const searchFilter = new SearchFilter();
   const prompt = new TerminalPrompt();
-  const commitInputResolver = new CommitInputResolver(prompt);
+  const commitInputResolver = new CommitInputResolver(prompt, protocol);
   const headLoreIdReader = new HeadLoreIdReader(gitClient, trailerParser);
 
   // 5. Formatter factory (reads --format/--json from program options at call time)
@@ -130,6 +133,7 @@ async function main(): Promise<void> {
     pathResolver,
     getFormatter,
     config,
+    protocol,
   };
 
   registerContextCommand(program, pathQueryDeps);
@@ -143,6 +147,7 @@ async function main(): Promise<void> {
     gitClient,
     pathResolver,
     getFormatter,
+    protocol,
   });
 
   registerSearchCommand(program, {
@@ -150,12 +155,16 @@ async function main(): Promise<void> {
     supersessionResolver,
     searchFilter,
     getFormatter,
+    config,
+    protocol,
   });
 
   registerLogCommand(program, {
     atomRepository,
     supersessionResolver,
     getFormatter,
+    config,
+    protocol,
   });
 
   registerStaleCommand(program, {
@@ -169,6 +178,7 @@ async function main(): Promise<void> {
   registerTraceCommand(program, {
     atomRepository,
     getFormatter,
+    protocol,
   });
 
   registerCommitCommand(program, {
@@ -177,6 +187,8 @@ async function main(): Promise<void> {
     getFormatter,
     commitInputResolver,
     headLoreIdReader,
+    config,
+    protocol,
   });
 
   registerValidateCommand(program, {
@@ -195,6 +207,13 @@ async function main(): Promise<void> {
     atomRepository,
     configLoader,
     getFormatter,
+    protocol,
+  });
+
+  registerConfigCommand(program, {
+    configLoader,
+    getFormatter,
+    protocol,
   });
 
   // 7. Parse and run
@@ -214,6 +233,7 @@ main().catch((error: unknown) => {
   if (error instanceof ValidationError) {
     const messages = error.issues.map((issue) => ({
       severity: issue.severity,
+      field: issue.field,
       message: issue.message,
     }));
     const output = formatter.formatError(error.exitCode, messages);

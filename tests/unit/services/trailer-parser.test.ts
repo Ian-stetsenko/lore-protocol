@@ -1,24 +1,33 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { TrailerParser } from '../../../src/services/trailer-parser.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import type { LoreTrailers } from '../../../src/types/domain.js';
 
 describe('TrailerParser', () => {
-  const parser = new TrailerParser();
+  let parser: TrailerParser;
+  let protocol: Protocol;
+
+  beforeEach(() => {
+    protocol = new Protocol(DEFAULT_CONFIG);
+    parser = new TrailerParser(protocol);
+  });
 
   describe('parse', () => {
-    it('should parse a Lore-id trailer', () => {
-      const raw = 'Lore-id: a1b2c3d4';
-      const result = parser.parse(raw, []);
-      expect(result['Lore-id']).toBe('a1b2c3d4');
+    it('should parse a ${LORE_ID_KEY} trailer', () => {
+      const raw = `${LORE_ID_KEY}: a1b2c3d4`;
+      const result = parser.parse(raw);
+      expect(result[LORE_ID_KEY]).toEqual(['a1b2c3d4']);
     });
 
     it('should parse array trailers into arrays', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: Must use UTF-8 encoding',
         'Constraint: Max 1000 records per batch',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual([
         'Must use UTF-8 encoding',
         'Max 1000 records per batch',
@@ -27,7 +36,7 @@ describe('TrailerParser', () => {
 
     it('should parse all array trailer types', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: constraint value',
         'Rejected: rejected value',
         'Directive: directive value',
@@ -37,7 +46,7 @@ describe('TrailerParser', () => {
         'Depends-on: 33334444',
         'Related: 55556666',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual(['constraint value']);
       expect(result.Rejected).toEqual(['rejected value']);
       expect(result.Directive).toEqual(['directive value']);
@@ -50,65 +59,65 @@ describe('TrailerParser', () => {
 
     it('should parse enum trailers', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Confidence: high',
         'Scope-risk: narrow',
         'Reversibility: clean',
       ].join('\n');
-      const result = parser.parse(raw, []);
-      expect(result.Confidence).toBe('high');
-      expect(result['Scope-risk']).toBe('narrow');
-      expect(result.Reversibility).toBe('clean');
+      const result = parser.parse(raw);
+      expect(result.Confidence).toEqual(['high']);
+      expect(result['Scope-risk']).toEqual(['narrow']);
+      expect(result.Reversibility).toEqual(['clean']);
     });
 
     it('should accept all valid Confidence values', () => {
       for (const val of ['low', 'medium', 'high']) {
-        const raw = `Lore-id: abcd1234\nConfidence: ${val}`;
-        const result = parser.parse(raw, []);
-        expect(result.Confidence).toBe(val);
+        const raw = `${LORE_ID_KEY}: abcd1234\nConfidence: ${val}`;
+        const result = parser.parse(raw);
+        expect(result.Confidence).toEqual([val]);
       }
     });
 
     it('should accept all valid Scope-risk values', () => {
       for (const val of ['narrow', 'moderate', 'wide']) {
-        const raw = `Lore-id: abcd1234\nScope-risk: ${val}`;
-        const result = parser.parse(raw, []);
-        expect(result['Scope-risk']).toBe(val);
+        const raw = `${LORE_ID_KEY}: abcd1234\nScope-risk: ${val}`;
+        const result = parser.parse(raw);
+        expect(result['Scope-risk']).toEqual([val]);
       }
     });
 
     it('should accept all valid Reversibility values', () => {
       for (const val of ['clean', 'migration-needed', 'irreversible']) {
-        const raw = `Lore-id: abcd1234\nReversibility: ${val}`;
-        const result = parser.parse(raw, []);
-        expect(result.Reversibility).toBe(val);
+        const raw = `${LORE_ID_KEY}: abcd1234\nReversibility: ${val}`;
+        const result = parser.parse(raw);
+        expect(result.Reversibility).toEqual([val]);
       }
     });
 
     it('should ignore invalid enum values', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Confidence: INVALID',
         'Scope-risk: bogus',
         'Reversibility: nope',
       ].join('\n');
-      const result = parser.parse(raw, []);
-      expect(result.Confidence).toBeNull();
-      expect(result['Scope-risk']).toBeNull();
-      expect(result.Reversibility).toBeNull();
+      const result = parser.parse(raw);
+      expect(result.Confidence).toEqual([]);
+      expect(result['Scope-risk']).toEqual([]);
+      expect(result.Reversibility).toEqual([]);
     });
 
-    it('should return null for missing enum trailers', () => {
-      const raw = 'Lore-id: abcd1234';
-      const result = parser.parse(raw, []);
-      expect(result.Confidence).toBeNull();
-      expect(result['Scope-risk']).toBeNull();
-      expect(result.Reversibility).toBeNull();
+    it('should return empty arrays for missing enum trailers', () => {
+      const raw = `${LORE_ID_KEY}: abcd1234`;
+      const result = parser.parse(raw);
+      expect(result.Confidence).toEqual([]);
+      expect(result['Scope-risk']).toEqual([]);
+      expect(result.Reversibility).toEqual([]);
     });
 
     it('should return empty arrays for missing array trailers', () => {
-      const raw = 'Lore-id: abcd1234';
-      const result = parser.parse(raw, []);
+      const raw = `${LORE_ID_KEY}: abcd1234`;
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual([]);
       expect(result.Rejected).toEqual([]);
       expect(result.Directive).toEqual([]);
@@ -121,11 +130,11 @@ describe('TrailerParser', () => {
 
     it('should handle continuation lines', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: This is a long constraint that',
         '  continues on the next line',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual([
         'This is a long constraint that continues on the next line',
       ]);
@@ -133,103 +142,84 @@ describe('TrailerParser', () => {
 
     it('should handle continuation lines with tabs', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: First part',
         '\tsecond part',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual(['First part second part']);
     });
 
     it('should handle multiple continuation lines', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: Line 1',
         '  Line 2',
         '  Line 3',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual(['Line 1 Line 2 Line 3']);
     });
 
-    it('should parse custom trailers when customKeys is provided', () => {
+    it('should parse custom trailers in permissive mode (default)', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'My-custom: value1',
         'My-custom: value2',
       ].join('\n');
-      const result = parser.parse(raw, ['My-custom']);
-      expect(result.custom.get('My-custom')).toEqual(['value1', 'value2']);
-    });
-
-    it('should not parse custom trailers when they are not in customKeys', () => {
-      const raw = [
-        'Lore-id: abcd1234',
-        'Unknown-key: value1',
-      ].join('\n');
-      const result = parser.parse(raw, ['Other-key']);
-      expect(result.custom.has('Unknown-key')).toBe(false);
-    });
-
-    it('should accept any non-lore trailer when customKeys is empty', () => {
-      const raw = [
-        'Lore-id: abcd1234',
-        'Whatever: value1',
-      ].join('\n');
-      const result = parser.parse(raw, []);
-      expect(result.custom.get('Whatever')).toEqual(['value1']);
+      const result = parser.parse(raw);
+      expect(result['My-custom']).toEqual(['value1', 'value2']);
     });
 
     it('should handle empty input', () => {
-      const result = parser.parse('', []);
-      expect(result['Lore-id']).toBe('');
+      const result = parser.parse('');
+      expect(result[LORE_ID_KEY]).toEqual([]);
       expect(result.Constraint).toEqual([]);
-      expect(result.custom.size).toBe(0);
     });
 
     it('should handle whitespace-only input', () => {
-      const result = parser.parse('   \n  \n  ', []);
-      expect(result['Lore-id']).toBe('');
+      const result = parser.parse('   \n  \n  ');
+      expect(result[LORE_ID_KEY]).toEqual([]);
     });
 
     it('should trim trailer values', () => {
-      const raw = 'Lore-id:   abcd1234   ';
-      const result = parser.parse(raw, []);
-      expect(result['Lore-id']).toBe('abcd1234');
+      const raw = `${LORE_ID_KEY}:   abcd1234   `;
+      const result = parser.parse(raw);
+      expect(result[LORE_ID_KEY]).toEqual(['abcd1234']);
     });
 
     it('should handle unicode in trailer values', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: Must support emoji \u{1F680} and CJK \u4E16\u754C',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual(['Must support emoji \u{1F680} and CJK \u4E16\u754C']);
     });
 
     it('should handle trailers with colons in the value', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'Constraint: Time format: HH:MM:SS',
       ].join('\n');
-      const result = parser.parse(raw, []);
+      const result = parser.parse(raw);
       expect(result.Constraint).toEqual(['Time format: HH:MM:SS']);
     });
 
     it('should skip blank lines between trailers', () => {
       const raw = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         '',
         'Constraint: value',
       ].join('\n');
-      const result = parser.parse(raw, []);
-      expect(result['Lore-id']).toBe('abcd1234');
+      const result = parser.parse(raw);
+      expect(result[LORE_ID_KEY]).toEqual(['abcd1234']);
       expect(result.Constraint).toEqual(['value']);
     });
 
     it('should handle a full realistic trailer block', () => {
       const raw = [
-        'Lore-id: a7f3b2c1',
+        `${LORE_ID_KEY}: a7f3b2c1`,
         'Constraint: PostgreSQL >= 14 required for JSONB subscript syntax',
         'Constraint: All timestamps must be stored as UTC',
         'Rejected: MongoDB -- lacks transactional guarantees across collections',
@@ -242,13 +232,13 @@ describe('TrailerParser', () => {
         'Depends-on: c1d2e3f4',
         'Related: d4e5f6a7',
       ].join('\n');
-      const result = parser.parse(raw, []);
-      expect(result['Lore-id']).toBe('a7f3b2c1');
+      const result = parser.parse(raw);
+      expect(result[LORE_ID_KEY]).toEqual(['a7f3b2c1']);
       expect(result.Constraint).toHaveLength(2);
       expect(result.Rejected).toHaveLength(1);
-      expect(result.Confidence).toBe('high');
-      expect(result['Scope-risk']).toBe('moderate');
-      expect(result.Reversibility).toBe('migration-needed');
+      expect(result.Confidence).toEqual(['high']);
+      expect(result['Scope-risk']).toEqual(['moderate']);
+      expect(result.Reversibility).toEqual(['migration-needed']);
       expect(result.Directive).toHaveLength(1);
       expect(result.Tested).toHaveLength(1);
       expect(result.Supersedes).toEqual(['b3e4f5a6']);
@@ -258,10 +248,10 @@ describe('TrailerParser', () => {
   });
 
   describe('serialize', () => {
-    it('should serialize Lore-id', () => {
-      const trailers = makeTrailers({ 'Lore-id': 'abcd1234' });
+    it('should serialize ${LORE_ID_KEY}', () => {
+      const trailers = makeTrailers({ [LORE_ID_KEY]: ['abcd1234'] });
       const result = parser.serialize(trailers);
-      expect(result).toContain('Lore-id: abcd1234');
+      expect(result).toContain(`${LORE_ID_KEY}: abcd1234`);
     });
 
     it('should serialize array trailers', () => {
@@ -275,9 +265,9 @@ describe('TrailerParser', () => {
 
     it('should serialize enum trailers', () => {
       const trailers = makeTrailers({
-        Confidence: 'high',
-        'Scope-risk': 'wide',
-        Reversibility: 'irreversible',
+        Confidence: ['high'],
+        'Scope-risk': ['wide'],
+        Reversibility: ['irreversible'],
       });
       const result = parser.serialize(trailers);
       expect(result).toContain('Confidence: high');
@@ -285,50 +275,42 @@ describe('TrailerParser', () => {
       expect(result).toContain('Reversibility: irreversible');
     });
 
-    it('should not serialize null enum trailers', () => {
-      const trailers = makeTrailers({ Confidence: null });
+    it('should not serialize empty trailers', () => {
+      const trailers = makeTrailers({ Confidence: [] });
       const result = parser.serialize(trailers);
       expect(result).not.toContain('Confidence:');
     });
 
-    it('should not serialize empty array trailers', () => {
-      const trailers = makeTrailers({});
-      const result = parser.serialize(trailers);
-      expect(result).not.toContain('Constraint:');
-      expect(result).not.toContain('Rejected:');
-    });
-
     it('should serialize custom trailers', () => {
-      const customMap = new Map<string, readonly string[]>();
-      customMap.set('Team', ['platform']);
-      customMap.set('Ticket', ['PROJ-123', 'PROJ-456']);
-      const custom = new CustomTrailerCollection(customMap);
-      const trailers = makeTrailers({ custom });
+      const trailers = makeTrailers({
+        'Team': ['platform'],
+        'Ticket': ['PROJ-123', 'PROJ-456'],
+      });
       const result = parser.serialize(trailers);
       expect(result).toContain('Team: platform');
       expect(result).toContain('Ticket: PROJ-123');
       expect(result).toContain('Ticket: PROJ-456');
     });
 
-    it('should not serialize empty Lore-id', () => {
-      const trailers = makeTrailers({ 'Lore-id': '' });
+    it('should not serialize empty ${LORE_ID_KEY}', () => {
+      const trailers = makeTrailers({ [LORE_ID_KEY]: [] });
       const result = parser.serialize(trailers);
-      expect(result).not.toContain('Lore-id:');
+      expect(result).not.toContain(`${LORE_ID_KEY}:`);
     });
 
-    it('should output Lore-id first', () => {
+    it('should output ${LORE_ID_KEY} first', () => {
       const trailers = makeTrailers({
-        'Lore-id': 'abcd1234',
+        [LORE_ID_KEY]: ['abcd1234'],
         Constraint: ['a constraint'],
       });
       const result = parser.serialize(trailers);
       const lines = result.split('\n');
-      expect(lines[0]).toBe('Lore-id: abcd1234');
+      expect(lines[0]).toBe(`${LORE_ID_KEY}: abcd1234`);
     });
 
     it('should produce one line per array entry', () => {
       const trailers = makeTrailers({
-        'Lore-id': 'abcd1234',
+        [LORE_ID_KEY]: ['abcd1234'],
         Rejected: ['Option A', 'Option B', 'Option C'],
       });
       const result = parser.serialize(trailers);
@@ -338,35 +320,35 @@ describe('TrailerParser', () => {
   });
 
   describe('parse/serialize roundtrip', () => {
-    it('should roundtrip a full trailer block', () => {
+    it('should roundtrip a full trailer block in canonical order', () => {
       const original = [
-        'Lore-id: a7f3b2c1',
+        `${LORE_ID_KEY}: a7f3b2c1`,
         'Constraint: PostgreSQL >= 14 required',
         'Constraint: All timestamps UTC',
         'Rejected: MongoDB -- no transactions',
+        'Confidence: high',
+        'Scope-risk: moderate',
+        'Reversibility: clean',
         'Directive: Review in Q3',
         'Tested: integration test suite',
         'Not-tested: performance under load',
         'Supersedes: b3e4f5a6',
         'Depends-on: c1d2e3f4',
         'Related: d4e5f6a7',
-        'Confidence: high',
-        'Scope-risk: moderate',
-        'Reversibility: clean',
       ].join('\n');
 
-      const parsed = parser.parse(original, []);
+      const parsed = parser.parse(original);
       const serialized = parser.serialize(parsed);
 
       // Re-parse the serialized output
-      const reparsed = parser.parse(serialized, []);
+      const reparsed = parser.parse(serialized);
 
-      expect(reparsed['Lore-id']).toBe(parsed['Lore-id']);
+      expect(reparsed[LORE_ID_KEY]).toEqual(parsed[LORE_ID_KEY]);
       expect(reparsed.Constraint).toEqual(parsed.Constraint);
       expect(reparsed.Rejected).toEqual(parsed.Rejected);
-      expect(reparsed.Confidence).toBe(parsed.Confidence);
-      expect(reparsed['Scope-risk']).toBe(parsed['Scope-risk']);
-      expect(reparsed.Reversibility).toBe(parsed.Reversibility);
+      expect(reparsed.Confidence).toEqual(parsed.Confidence);
+      expect(reparsed['Scope-risk']).toEqual(parsed['Scope-risk']);
+      expect(reparsed.Reversibility).toEqual(parsed.Reversibility);
       expect(reparsed.Directive).toEqual(parsed.Directive);
       expect(reparsed.Tested).toEqual(parsed.Tested);
       expect(reparsed['Not-tested']).toEqual(parsed['Not-tested']);
@@ -377,21 +359,21 @@ describe('TrailerParser', () => {
 
     it('should roundtrip with custom trailers', () => {
       const original = [
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
         'My-trailer: custom value',
       ].join('\n');
 
-      const parsed = parser.parse(original, []);
+      const parsed = parser.parse(original);
       const serialized = parser.serialize(parsed);
-      const reparsed = parser.parse(serialized, []);
+      const reparsed = parser.parse(serialized);
 
-      expect(reparsed.custom.get('My-trailer')).toEqual(['custom value']);
+      expect(reparsed['My-trailer']).toEqual(['custom value']);
     });
   });
 
   describe('containsLoreTrailers', () => {
-    it('should return true when text contains Lore-id', () => {
-      expect(parser.containsLoreTrailers('Lore-id: abcd1234')).toBe(true);
+    it('should return true when text contains ${LORE_ID_KEY}', () => {
+      expect(parser.containsLoreTrailers(`${LORE_ID_KEY}: abcd1234`)).toBe(true);
     });
 
     it('should return true when text contains a Constraint trailer', () => {
@@ -410,14 +392,20 @@ describe('TrailerParser', () => {
       expect(parser.containsLoreTrailers('')).toBe(false);
     });
 
-    it('should return false for non-Lore trailers', () => {
-      expect(parser.containsLoreTrailers('Signed-off-by: Someone')).toBe(false);
+    it('should return false for non-Lore trailers in strict mode', () => {
+       const strictConfig = {
+        ...DEFAULT_CONFIG,
+        trailers: { ...DEFAULT_CONFIG.trailers, permissive: false, definitions: {}, custom: [] }
+      };
+      const strictProtocol = new Protocol(strictConfig);
+      const strictParser = new TrailerParser(strictProtocol);
+      expect(strictParser.containsLoreTrailers('Signed-off-by: Someone')).toBe(false);
     });
 
     it('should return true when Lore trailers are mixed with non-Lore', () => {
       const text = [
         'Signed-off-by: Someone',
-        'Lore-id: abcd1234',
+        `${LORE_ID_KEY}: abcd1234`,
       ].join('\n');
       expect(parser.containsLoreTrailers(text)).toBe(true);
     });
@@ -428,7 +416,7 @@ describe('TrailerParser', () => {
         '',
         'Added PgBouncer-based connection pooling.',
         '',
-        'Lore-id: a1b2c3d4',
+        `${LORE_ID_KEY}: a1b2c3d4`,
         'Confidence: high',
       ].join('\n');
       expect(parser.containsLoreTrailers(text)).toBe(true);
@@ -442,11 +430,11 @@ describe('TrailerParser', () => {
         '',
         'Added PgBouncer-based connection pooling.',
         '',
-        'Lore-id: a1b2c3d4',
+        `${LORE_ID_KEY}: a1b2c3d4`,
         'Constraint: PostgreSQL >= 14',
       ].join('\n');
       const result = parser.extractTrailerBlock(message);
-      expect(result).toBe('Lore-id: a1b2c3d4\nConstraint: PostgreSQL >= 14');
+      expect(result).toBe(`${LORE_ID_KEY}: a1b2c3d4\nConstraint: PostgreSQL >= 14`);
     });
 
     it('should return empty string when there are no trailers', () => {
@@ -466,23 +454,22 @@ describe('TrailerParser', () => {
       const message = [
         'feat(db): add connection pooling',
         '',
-        'Lore-id: a1b2c3d4',
+        `${LORE_ID_KEY}: a1b2c3d4`,
         'Confidence: high',
       ].join('\n');
       const result = parser.extractTrailerBlock(message);
-      expect(result).toBe('Lore-id: a1b2c3d4\nConfidence: high');
+      expect(result).toBe(`${LORE_ID_KEY}: a1b2c3d4\nConfidence: high`);
     });
 
     it('should handle trailing whitespace', () => {
       const message = [
         'feat: something',
         '',
-        'Lore-id: a1b2c3d4',
+        `${LORE_ID_KEY}: a1b2c3d4`,
         '  ',
       ].join('\n');
-      // After trimEnd, the trailing whitespace paragraph disappears
       const result = parser.extractTrailerBlock(message);
-      expect(result).toContain('Lore-id: a1b2c3d4');
+      expect(result).toContain(`${LORE_ID_KEY}: a1b2c3d4`);
     });
 
     it('should handle multiple blank line separators', () => {
@@ -493,10 +480,10 @@ describe('TrailerParser', () => {
         'Body text here.',
         '',
         '',
-        'Lore-id: a1b2c3d4',
+        `${LORE_ID_KEY}: a1b2c3d4`,
       ].join('\n');
       const result = parser.extractTrailerBlock(message);
-      expect(result).toBe('Lore-id: a1b2c3d4');
+      expect(result).toBe(`${LORE_ID_KEY}: a1b2c3d4`);
     });
 
     it('should return empty if last paragraph is not all trailers', () => {
@@ -513,12 +500,12 @@ describe('TrailerParser', () => {
       const message = [
         'feat: something',
         '',
-        'Lore-id: a1b2c3d4',
+        `${LORE_ID_KEY}: a1b2c3d4`,
         'Constraint: A long constraint',
         '  that continues here',
       ].join('\n');
       const result = parser.extractTrailerBlock(message);
-      expect(result).toContain('Lore-id: a1b2c3d4');
+      expect(result).toContain(`${LORE_ID_KEY}: a1b2c3d4`);
       expect(result).toContain('Constraint: A long constraint');
       expect(result).toContain('  that continues here');
     });
@@ -528,34 +515,20 @@ describe('TrailerParser', () => {
 /**
  * Helper to create a LoreTrailers object with defaults and overrides.
  */
-function makeTrailers(overrides: Partial<{
-  'Lore-id': string;
-  Constraint: readonly string[];
-  Rejected: readonly string[];
-  Confidence: 'low' | 'medium' | 'high' | null;
-  'Scope-risk': 'narrow' | 'moderate' | 'wide' | null;
-  Reversibility: 'clean' | 'migration-needed' | 'irreversible' | null;
-  Directive: readonly string[];
-  Tested: readonly string[];
-  'Not-tested': readonly string[];
-  Supersedes: readonly string[];
-  'Depends-on': readonly string[];
-  Related: readonly string[];
-  custom: CustomTrailerCollection;
-}>) {
+function makeTrailers(overrides: Partial<LoreTrailers>): LoreTrailers {
   return {
-    'Lore-id': overrides['Lore-id'] ?? '',
-    Constraint: overrides.Constraint ?? [],
-    Rejected: overrides.Rejected ?? [],
-    Confidence: overrides.Confidence ?? null,
-    'Scope-risk': overrides['Scope-risk'] ?? null,
-    Reversibility: overrides.Reversibility ?? null,
-    Directive: overrides.Directive ?? [],
-    Tested: overrides.Tested ?? [],
-    'Not-tested': overrides['Not-tested'] ?? [],
-    Supersedes: overrides.Supersedes ?? [],
-    'Depends-on': overrides['Depends-on'] ?? [],
-    Related: overrides.Related ?? [],
-    custom: overrides.custom ?? CustomTrailerCollection.empty(),
-  };
+    [LORE_ID_KEY]: [],
+    Constraint: [],
+    Rejected: [],
+    Confidence: [],
+    'Scope-risk': [],
+    Reversibility: [],
+    Directive: [],
+    Tested: [],
+    'Not-tested': [],
+    Supersedes: [],
+    'Depends-on': [],
+    Related: [],
+    ...overrides,
+  } as any;
 }

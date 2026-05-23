@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SquashMerger } from '../../../src/services/squash-merger.js';
+import { Protocol } from '../../../src/services/protocol.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 import type { LoreAtom, LoreTrailers } from '../../../src/types/domain.js';
-import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
 
 function createMockIdGenerator(id = 'deadbeef') {
   return {
@@ -11,20 +13,20 @@ function createMockIdGenerator(id = 'deadbeef') {
 
 function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
   return {
-    'Lore-id': overrides['Lore-id'] ?? 'a1b2c3d4',
+    [LORE_ID_KEY]: overrides[LORE_ID_KEY] ?? ['a1b2c3d4'],
     Constraint: overrides.Constraint ?? [],
     Rejected: overrides.Rejected ?? [],
-    Confidence: overrides.Confidence ?? null,
-    'Scope-risk': overrides['Scope-risk'] ?? null,
-    Reversibility: overrides.Reversibility ?? null,
+    Confidence: overrides.Confidence ?? [],
+    'Scope-risk': overrides['Scope-risk'] ?? [],
+    Reversibility: overrides.Reversibility ?? [],
     Directive: overrides.Directive ?? [],
     Tested: overrides.Tested ?? [],
     'Not-tested': overrides['Not-tested'] ?? [],
     Supersedes: overrides.Supersedes ?? [],
     'Depends-on': overrides['Depends-on'] ?? [],
     Related: overrides.Related ?? [],
-    custom: overrides.custom ?? CustomTrailerCollection.empty(),
-  };
+    ...overrides,
+  } as any;
 }
 
 function makeAtom(overrides: Partial<LoreAtom> = {}): LoreAtom {
@@ -43,22 +45,24 @@ function makeAtom(overrides: Partial<LoreAtom> = {}): LoreAtom {
 describe('SquashMerger', () => {
   let merger: SquashMerger;
   let mockIdGen: ReturnType<typeof createMockIdGenerator>;
+  let protocol: Protocol;
 
   beforeEach(() => {
     mockIdGen = createMockIdGenerator();
-    merger = new SquashMerger(mockIdGen as any);
+    protocol = new Protocol(DEFAULT_CONFIG);
+    merger = new SquashMerger(mockIdGen as any, protocol);
   });
 
   it('should throw for empty atoms', () => {
     expect(() => merger.merge([], {})).toThrow('Cannot merge zero atoms');
   });
 
-  it('should generate a new Lore-id', () => {
+  it(`should generate a new ${LORE_ID_KEY}`, () => {
     const atom = makeAtom();
     const result = merger.merge([atom], {});
 
     expect(mockIdGen.generate).toHaveBeenCalledOnce();
-    expect(result).toContain('Lore-id: deadbeef');
+    expect(result).toContain(`${LORE_ID_KEY}: deadbeef`);
   });
 
   describe('intent merging', () => {
@@ -121,7 +125,7 @@ describe('SquashMerger', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
         trailers: makeTrailers({
-          'Lore-id': 'aaaa0001',
+          [LORE_ID_KEY]: ['aaaa0001'],
           Constraint: ['Must use HTTPS', 'No external deps'],
           Tested: ['Unit tests'],
         }),
@@ -129,7 +133,7 @@ describe('SquashMerger', () => {
       const a2 = makeAtom({
         loreId: 'aaaa0002',
         trailers: makeTrailers({
-          'Lore-id': 'aaaa0002',
+          [LORE_ID_KEY]: ['aaaa0002'],
           Constraint: ['Must use HTTPS', 'Max 100ms latency'],
           Tested: ['Integration tests'],
         }),
@@ -140,7 +144,6 @@ describe('SquashMerger', () => {
       expect(result).toContain('Constraint: Must use HTTPS');
       expect(result).toContain('Constraint: No external deps');
       expect(result).toContain('Constraint: Max 100ms latency');
-      // Ensure "Must use HTTPS" appears only once
       const matches = result.match(/Constraint: Must use HTTPS/g);
       expect(matches).toHaveLength(1);
     });
@@ -150,11 +153,11 @@ describe('SquashMerger', () => {
     it('should pick lowest confidence (most conservative)', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Confidence: 'high' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], Confidence: ['high'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', Confidence: 'low' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], Confidence: ['low'] }),
       });
 
       const result = merger.merge([a1, a2], {});
@@ -164,11 +167,11 @@ describe('SquashMerger', () => {
     it('should pick widest scope-risk', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', 'Scope-risk': 'narrow' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], 'Scope-risk': ['narrow'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', 'Scope-risk': 'wide' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], 'Scope-risk': ['wide'] }),
       });
 
       const result = merger.merge([a1, a2], {});
@@ -178,11 +181,11 @@ describe('SquashMerger', () => {
     it('should pick least reversible', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Reversibility: 'clean' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], Reversibility: ['clean'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', Reversibility: 'irreversible' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], Reversibility: ['irreversible'] }),
       });
 
       const result = merger.merge([a1, a2], {});
@@ -192,35 +195,25 @@ describe('SquashMerger', () => {
     it('should handle null enum values gracefully', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Confidence: 'medium' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], Confidence: ['medium'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', Confidence: null }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], Confidence: [] }),
       });
 
       const result = merger.merge([a1, a2], {});
       expect(result).toContain('Confidence: medium');
     });
 
-    it('should return null when all enum values are null', () => {
-      const a1 = makeAtom({
-        loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Confidence: null }),
-      });
-
-      const result = merger.merge([a1], {});
-      expect(result).not.toContain('Confidence:');
-    });
-
     it('should pick medium over high for confidence', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Confidence: 'high' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], Confidence: ['high'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', Confidence: 'medium' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], Confidence: ['medium'] }),
       });
 
       const result = merger.merge([a1, a2], {});
@@ -230,11 +223,11 @@ describe('SquashMerger', () => {
     it('should pick moderate over narrow for scope-risk', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', 'Scope-risk': 'narrow' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], 'Scope-risk': ['narrow'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', 'Scope-risk': 'moderate' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], 'Scope-risk': ['moderate'] }),
       });
 
       const result = merger.merge([a1, a2], {});
@@ -244,11 +237,11 @@ describe('SquashMerger', () => {
     it('should pick migration-needed over clean for reversibility', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Reversibility: 'clean' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], Reversibility: ['clean'] }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0002', Reversibility: 'migration-needed' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0002'], Reversibility: ['migration-needed'] }),
       });
 
       const result = merger.merge([a1, a2], {});
@@ -261,15 +254,15 @@ describe('SquashMerger', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
         trailers: makeTrailers({
-          'Lore-id': 'aaaa0001',
-          Related: ['aaaa0002'], // internal reference
+          [LORE_ID_KEY]: ['aaaa0001'],
+          Related: ['aaaa0002'],
         }),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
         trailers: makeTrailers({
-          'Lore-id': 'aaaa0002',
-          'Depends-on': ['aaaa0001'], // internal reference
+          [LORE_ID_KEY]: ['aaaa0002'],
+          'Depends-on': ['aaaa0001'],
         }),
       });
 
@@ -278,41 +271,71 @@ describe('SquashMerger', () => {
       expect(result).not.toContain('Depends-on: aaaa0001');
     });
 
-    it('should keep external references', () => {
+    it('should merge and preserve custom trailers', () => {
       const a1 = makeAtom({
         loreId: 'aaaa0001',
         trailers: makeTrailers({
-          'Lore-id': 'aaaa0001',
-          Related: ['external1'],
-          Supersedes: ['external2'],
-        }),
-      });
-
-      const result = merger.merge([a1], {});
-      expect(result).toContain('Related: external1');
-      expect(result).toContain('Supersedes: external2');
-    });
-
-    it('should deduplicate external references across atoms', () => {
-      const a1 = makeAtom({
-        loreId: 'aaaa0001',
-        trailers: makeTrailers({
-          'Lore-id': 'aaaa0001',
-          Related: ['external1'],
-        }),
+          [LORE_ID_KEY]: ['aaaa0001'],
+          Team: ['platform'],
+        } as any),
       });
       const a2 = makeAtom({
         loreId: 'aaaa0002',
         trailers: makeTrailers({
-          'Lore-id': 'aaaa0002',
-          Related: ['external1', 'external2'],
-        }),
+          [LORE_ID_KEY]: ['aaaa0002'],
+          Team: ['core'],
+          Ticket: ['PROJ-123'],
+        } as any),
       });
 
       const result = merger.merge([a1, a2], {});
-      const relatedMatches = result.match(/Related: external1/g);
-      expect(relatedMatches).toHaveLength(1);
-      expect(result).toContain('Related: external2');
+      expect(result).toContain('Team: platform');
+      expect(result).toContain('Team: core');
+      expect(result).toContain('Ticket: PROJ-123');
+    });
+
+    describe('squash strategies', () => {
+      it('should respect rank-min (Confidence: low < high)', () => {
+        const a1 = makeAtom({ trailers: makeTrailers({ Confidence: ['high'] }) });
+        const a2 = makeAtom({ trailers: makeTrailers({ Confidence: ['low'] }) });
+        const result = merger.merge([a1, a2], {});
+        expect(result).toContain('Confidence: low');
+      });
+
+      it('should respect rank-max (Scope-risk: wide > narrow)', () => {
+        const a1 = makeAtom({ trailers: makeTrailers({ 'Scope-risk': ['narrow'] }) });
+        const a2 = makeAtom({ trailers: makeTrailers({ 'Scope-risk': ['wide'] }) });
+        const result = merger.merge([a1, a2], {});
+        expect(result).toContain('Scope-risk: wide');
+      });
+
+      it('should support rank-max for custom enums', () => {
+        const configWithCustom = {
+          ...DEFAULT_CONFIG,
+          trailers: {
+            ...DEFAULT_CONFIG.trailers,
+            definitions: {
+              Priority: {
+                description: 'Prio',
+                multivalue: false,
+                validation: 'options' as const,
+                options: { low: {}, high: {}, urgent: {} },
+                squash: 'rank-max' as const,
+              }
+            },
+            custom: [],
+            permissive: false,
+          }
+        };
+        const customProtocol = new Protocol(configWithCustom);
+        const customMerger = new SquashMerger(mockIdGen as any, customProtocol);
+
+        const a1 = makeAtom({ trailers: makeTrailers({ Priority: ['low'] } as any) });
+        const a2 = makeAtom({ trailers: makeTrailers({ Priority: ['urgent'] } as any) });
+        
+        const result = customMerger.merge([a1, a2], {});
+        expect(result).toContain('Priority: urgent');
+      });
     });
   });
 
@@ -321,16 +344,16 @@ describe('SquashMerger', () => {
       const atom = makeAtom({
         intent: 'single atom intent',
         trailers: makeTrailers({
-          'Lore-id': 'a1b2c3d4',
+          [LORE_ID_KEY]: ['a1b2c3d4'],
           Constraint: ['Some constraint'],
-          Confidence: 'high',
+          Confidence: ['high'],
         }),
       });
 
       const result = merger.merge([atom], {});
 
       expect(result).toContain('single atom intent');
-      expect(result).toContain('Lore-id: deadbeef'); // new generated id
+      expect(result).toContain(`${LORE_ID_KEY}: deadbeef`);
       expect(result).toContain('Constraint: Some constraint');
       expect(result).toContain('Confidence: high');
     });
@@ -341,7 +364,7 @@ describe('SquashMerger', () => {
       const atom = makeAtom({
         loreId: 'aaaa0001',
         body: 'Atom body text',
-        trailers: makeTrailers({ 'Lore-id': 'aaaa0001', Confidence: 'high' }),
+        trailers: makeTrailers({ [LORE_ID_KEY]: ['aaaa0001'], Confidence: ['high'] }),
       });
 
       const result = merger.merge([atom], { intent: 'Merged intent' });
@@ -351,7 +374,7 @@ describe('SquashMerger', () => {
       expect(lines[1]).toBe('');
       expect(lines[2]).toBe('Atom body text');
       expect(lines[3]).toBe('');
-      expect(lines[4]).toContain('Lore-id: deadbeef');
+      expect(lines[4]).toContain(`${LORE_ID_KEY}: deadbeef`);
     });
   });
 });

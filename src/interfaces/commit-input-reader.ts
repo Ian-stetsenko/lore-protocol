@@ -1,4 +1,4 @@
-import type { CommitInput } from '../services/commit-builder.js';
+import type { CommitInput } from '../types/commit.js';
 
 /**
  * Strategy interface for reading commit input from different sources.

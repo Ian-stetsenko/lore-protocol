@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { InteractiveInputReader } from '../../../../src/services/readers/interactive-input-reader.js';
 import { createTrailerCollectors } from '../../../../src/services/readers/collectors/trailer-collector-registry.js';
 import type { IPrompt } from '../../../../src/interfaces/prompt.js';
+import { DEFAULT_CONFIG } from '../../../../src/util/constants.js';
 
 /**
  * Creates a mock IPrompt for testing.
@@ -80,16 +81,16 @@ describe('InteractiveInputReader', () => {
         close: vi.fn(),
       });
 
-      const reader = new InteractiveInputReader(prompt, createTrailerCollectors());
+      const reader = new InteractiveInputReader(prompt, createTrailerCollectors(DEFAULT_CONFIG));
       const result = await reader.read();
 
       expect(result.intent).toBe('refactor auth module');
       expect(result.body).toBe('This is the body text.');
       expect(result.trailers?.Constraint).toEqual(['must be fast']);
       expect(result.trailers?.Rejected).toEqual(['approach A | too slow']);
-      expect(result.trailers?.Confidence).toBe('high');
-      expect(result.trailers?.['Scope-risk']).toBe('wide');
-      expect(result.trailers?.Reversibility).toBe('clean');
+      expect(result.trailers?.Confidence).toEqual(['high']);
+      expect(result.trailers?.['Scope-risk']).toEqual(['wide']);
+      expect(result.trailers?.Reversibility).toEqual(['clean']);
       expect(result.trailers?.Directive).toEqual(['use new API']);
       expect(result.trailers?.Tested).toEqual(['unit tests pass']);
       expect(result.trailers?.['Not-tested']).toEqual(['load testing']);
@@ -108,22 +109,12 @@ describe('InteractiveInputReader', () => {
         close: vi.fn(),
       });
 
-      const reader = new InteractiveInputReader(prompt, createTrailerCollectors());
+      const reader = new InteractiveInputReader(prompt, createTrailerCollectors(DEFAULT_CONFIG));
       const result = await reader.read();
 
       expect(result.intent).toBe('minimal intent');
       expect(result.body).toBeUndefined();
-      expect(result.trailers?.Constraint).toBeUndefined();
-      expect(result.trailers?.Rejected).toBeUndefined();
-      expect(result.trailers?.Confidence).toBeUndefined();
-      expect(result.trailers?.['Scope-risk']).toBeUndefined();
-      expect(result.trailers?.Reversibility).toBeUndefined();
-      expect(result.trailers?.Directive).toBeUndefined();
-      expect(result.trailers?.Tested).toBeUndefined();
-      expect(result.trailers?.['Not-tested']).toBeUndefined();
-      expect(result.trailers?.Supersedes).toBeUndefined();
-      expect(result.trailers?.['Depends-on']).toBeUndefined();
-      expect(result.trailers?.Related).toBeUndefined();
+      expect(result.trailers).toEqual({});
       expect(prompt.close).toHaveBeenCalled();
     });
   });
@@ -171,7 +162,7 @@ describe('InteractiveInputReader', () => {
         close: vi.fn(),
       });
 
-      const reader = new InteractiveInputReader(prompt, createTrailerCollectors());
+      const reader = new InteractiveInputReader(prompt, createTrailerCollectors(DEFAULT_CONFIG));
       const result = await reader.read();
 
       expect(result.trailers?.Constraint).toEqual([
@@ -221,7 +212,7 @@ describe('InteractiveInputReader', () => {
         close: vi.fn(),
       });
 
-      const reader = new InteractiveInputReader(prompt, createTrailerCollectors());
+      const reader = new InteractiveInputReader(prompt, createTrailerCollectors(DEFAULT_CONFIG));
       const result = await reader.read();
 
       expect(result.trailers?.Constraint).toEqual(['valid value']);
@@ -235,7 +226,7 @@ describe('InteractiveInputReader', () => {
         close: vi.fn(),
       });
 
-      const reader = new InteractiveInputReader(prompt, createTrailerCollectors());
+      const reader = new InteractiveInputReader(prompt, createTrailerCollectors(DEFAULT_CONFIG));
 
       await expect(reader.read()).rejects.toThrow('prompt error');
       expect(prompt.close).toHaveBeenCalled();
@@ -248,7 +239,7 @@ describe('InteractiveInputReader', () => {
         close: vi.fn(),
       });
 
-      const reader = new InteractiveInputReader(prompt, createTrailerCollectors());
+      const reader = new InteractiveInputReader(prompt, createTrailerCollectors(DEFAULT_CONFIG));
 
       await expect(reader.read()).rejects.toThrow('confirm error');
       expect(prompt.close).toHaveBeenCalled();

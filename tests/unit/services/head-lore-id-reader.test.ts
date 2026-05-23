@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HeadLoreIdReader } from '../../../src/services/head-lore-id-reader.js';
+import { LORE_ID_KEY } from '../../../src/util/constants.js';
 import { TrailerParser } from '../../../src/services/trailer-parser.js';
 import type { IGitClient } from '../../../src/interfaces/git-client.js';
 
@@ -25,11 +26,11 @@ describe('HeadLoreIdReader', () => {
     trailerParser = new TrailerParser();
   });
 
-  it('should return Lore-id when HEAD has Lore trailers', async () => {
+  it(`should return ${LORE_ID_KEY} when HEAD has Lore trailers`, async () => {
     const message = [
       'feat: add login flow',
       '',
-      'Lore-id: a1b2c3d4',
+      `${LORE_ID_KEY}: a1b2c3d4`,
       'Confidence: high',
     ].join('\n');
 
@@ -41,7 +42,7 @@ describe('HeadLoreIdReader', () => {
     expect(result).toBe('a1b2c3d4');
   });
 
-  it('should return null when HEAD has no trailers', async () => {
+  it('should return null when HEAD has no `trailers', async () => {
     const message = 'feat: simple commit with no trailers';
 
     const gitClient = createMockGitClient(message);
@@ -52,7 +53,7 @@ describe('HeadLoreIdReader', () => {
     expect(result).toBeNull();
   });
 
-  it('should return null when HEAD has trailers but no Lore-id', async () => {
+  it(`should return null when HEAD has trailers but no ${LORE_ID_KEY}`, async () => {
     const message = [
       'feat: add feature',
       '',
@@ -76,14 +77,14 @@ describe('HeadLoreIdReader', () => {
     expect(result).toBeNull();
   });
 
-  it('should return Lore-id from a full commit message with body', async () => {
+  it(`should return ${LORE_ID_KEY} from a full commit message with body`, async () => {
     const message = [
       'feat: add authentication module',
       '',
       'This implements OAuth2 flow with PKCE.',
       'Includes refresh token rotation.',
       '',
-      'Lore-id: deadbeef',
+      `${LORE_ID_KEY}: deadbeef`,
       'Constraint: Must use HTTPS',
       'Confidence: medium',
       'Scope-risk: moderate',
@@ -107,11 +108,11 @@ describe('HeadLoreIdReader', () => {
     expect(result).toBeNull();
   });
 
-  it('should return null when Lore-id is not valid hex format', async () => {
+  it(`should return null when ${LORE_ID_KEY} is not valid hex format`, async () => {
     const message = [
       'feat: broken lore-id',
       '',
-      'Lore-id: not-valid',
+      `${LORE_ID_KEY}: not-valid`,
       'Confidence: high',
     ].join('\n');
 

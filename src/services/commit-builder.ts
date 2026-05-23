@@ -1,72 +1,59 @@
 import type { TrailerParser } from './trailer-parser.js';
 import type { LoreIdGenerator } from './lore-id-generator.js';
 import type { LoreConfig } from '../types/config.js';
-import type { LoreTrailers, ConfidenceLevel, ScopeRiskLevel, ReversibilityLevel, LoreId } from '../types/domain.js';
+import type { LoreTrailers, LoreId } from '../types/domain.js';
+import type { CommitInput } from '../types/commit.js';
 import type { ValidationIssue } from '../types/output.js';
-import { CustomTrailerCollection } from '../types/custom-trailer-collection.js';
-import {
-  CONFIDENCE_VALUES,
-  SCOPE_RISK_VALUES,
-  REVERSIBILITY_VALUES,
-  LORE_ID_PATTERN,
-} from '../util/constants.js';
+import { ARRAY_TRAILER_KEYS, ENUM_TRAILER_KEYS, LORE_ID_KEY } from '../util/constants.js';
+import type { Protocol } from './protocol.js';
 
-export interface CommitInput {
-  readonly intent: string;
-  readonly body?: string;
-  readonly trailers?: {
-    readonly Constraint?: readonly string[];
-    readonly Rejected?: readonly string[];
-    readonly Confidence?: ConfidenceLevel;
-    readonly 'Scope-risk'?: ScopeRiskLevel;
-    readonly Reversibility?: ReversibilityLevel;
-    readonly Directive?: readonly string[];
-    readonly Tested?: readonly string[];
-    readonly 'Not-tested'?: readonly string[];
-    readonly Supersedes?: readonly string[];
-    readonly 'Depends-on'?: readonly string[];
-    readonly Related?: readonly string[];
-    readonly custom?: CustomTrailerCollection;
-  };
-}
-
+/**
+ * Builds and validates git commit messages enriched with Lore decision context.
+ *
+ * SOLID: SRP -- responsible only for commit message construction.
+ * SOLID: OCP -- fully metadata-driven; no hardcoded trailer names in construction.
+ */
 export class CommitBuilder {
-  private readonly trailerParser: TrailerParser;
-  private readonly loreIdGenerator: LoreIdGenerator;
-  private readonly config: LoreConfig;
-
   constructor(
-    trailerParser: TrailerParser,
-    loreIdGenerator: LoreIdGenerator,
-    config: LoreConfig,
-  ) {
-    this.trailerParser = trailerParser;
-    this.loreIdGenerator = loreIdGenerator;
-    this.config = config;
-  }
+    private readonly trailerParser: TrailerParser,
+    private readonly loreIdGenerator: LoreIdGenerator,
+    private readonly config: LoreConfig,
+    private readonly protocol: Protocol,
+  ) {}
 
+  /**
+   * Builds a full git commit message with subject, body, and Lore trailer block.
+   */
   build(input: CommitInput, existingLoreId?: LoreId): string {
-    const loreId = existingLoreId ?? this.loreIdGenerator.generate();
+    const loreId = existingLoreId || this.loreIdGenerator.generate();
     const trailers = this.buildTrailers(loreId, input);
-    const serialized = this.trailerParser.serialize(trailers);
+    const trailerBlock = this.trailerParser.serialize(trailers);
 
-    const parts: string[] = [input.intent];
-
-    if (input.body) {
-      parts.push('');
-      parts.push(input.body);
+    let message = input.intent;
+    if (input.body && input.body.trim()) {
+      message += `\n\n${input.body.trim()}`;
     }
+    message += `\n\n${trailerBlock}`;
 
-    parts.push('');
-    parts.push(serialized);
-
-    return parts.join('\n');
+    return message;
   }
 
+  /**
+   * Performs validation on the commit input.
+   */
   validate(input: CommitInput): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
 
-    // 1. Intent length
+    // 1. Intent presence
+    if (!input.intent.trim()) {
+      issues.push({
+        severity: 'error',
+        rule: 'intent-required',
+        message: 'Commit intent (subject line) is required',
+      });
+    }
+
+    // 2. Intent length
     if (input.intent.length > this.config.validation.intentMaxLength) {
       issues.push({
         severity: 'warning',
@@ -75,88 +62,64 @@ export class CommitBuilder {
       });
     }
 
-    // 2. Intent must not be empty
-    if (input.intent.trim().length === 0) {
-      issues.push({
-        severity: 'error',
-        rule: 'intent-required',
-        message: 'Intent must not be empty',
-      });
-    }
+    // 3. Metadata-driven schema validation
+    if (input.trailers) {
+      const authorizedKeys = this.protocol.getAuthorizedKeys();
+      for (const key of authorizedKeys) {
+        const def = this.protocol.getDefinition(key);
+        if (!def) continue;
 
-    // 3. Validate enum values
-    if (input.trailers?.Confidence !== undefined) {
-      if (
-        !(CONFIDENCE_VALUES as readonly string[]).includes(
-          input.trailers.Confidence,
-        )
-      ) {
-        issues.push({
-          severity: 'error',
-          rule: 'invalid-enum',
-          message: `Invalid Confidence value: "${input.trailers.Confidence}". Expected one of: ${CONFIDENCE_VALUES.join(', ')}`,
-        });
-      }
-    }
+        const values = input.trailers[key];
+        if (!values || values.length === 0) continue;
 
-    if (input.trailers?.['Scope-risk'] !== undefined) {
-      if (
-        !(SCOPE_RISK_VALUES as readonly string[]).includes(
-          input.trailers['Scope-risk'],
-        )
-      ) {
-        issues.push({
-          severity: 'error',
-          rule: 'invalid-enum',
-          message: `Invalid Scope-risk value: "${input.trailers['Scope-risk']}". Expected one of: ${SCOPE_RISK_VALUES.join(', ')}`,
-        });
-      }
-    }
+        if (def.validation === 'values' && def.values) {
+          const allowedValues = Object.keys(def.values);
+          for (const v of values) {
+            if (!allowedValues.includes(v)) {
+              issues.push({
+                severity: 'error',
+                rule: 'invalid-enum',
+                field: key,
+                message: `Invalid value for "${key}": "${v}". Expected one of: ${allowedValues.join(', ')}`,
+              });
+            }
+          }
+        } else if (def.validation === 'pattern' && def.pattern) {
+          const regex = new RegExp(def.pattern);
+          for (const v of values) {
+            if (!regex.test(v)) {
+              // Map pattern failures to specific rules for backward compatibility with tests
+              let rule = 'invalid-format';
+              if (def.ui?.kind === 'reference') {
+                rule = 'invalid-lore-id-ref';
+              }
 
-    if (input.trailers?.Reversibility !== undefined) {
-      if (
-        !(REVERSIBILITY_VALUES as readonly string[]).includes(
-          input.trailers.Reversibility,
-        )
-      ) {
-        issues.push({
-          severity: 'error',
-          rule: 'invalid-enum',
-          message: `Invalid Reversibility value: "${input.trailers.Reversibility}". Expected one of: ${REVERSIBILITY_VALUES.join(', ')}`,
-        });
-      }
-    }
-
-    // 4. Validate lore-id format in reference trailers
-    const referenceKeys = ['Supersedes', 'Depends-on', 'Related'] as const;
-    for (const key of referenceKeys) {
-      const values = input.trailers?.[key];
-      if (values) {
-        for (const value of values) {
-          if (!LORE_ID_PATTERN.test(value)) {
-            issues.push({
-              severity: 'error',
-              rule: 'invalid-lore-id-ref',
-              message: `Invalid Lore-id reference in ${key}: "${value}". Must be 8-character hex.`,
-            });
+              issues.push({
+                severity: 'error',
+                rule,
+                field: key,
+                message: `Value for "${key}" does not match pattern: ${def.pattern}`,
+              });
+            }
           }
         }
       }
     }
 
-    // 5. Required trailers from config
-    const requiredTrailers = this.config.trailers.required;
-    for (const required of requiredTrailers) {
-      if (!this.hasTrailer(input, required)) {
+    // 4. Required trailers
+    const requiredKeys = new Set(this.config.trailers.required);
+    for (const key of requiredKeys) {
+      if (!this.hasTrailer(input, key)) {
         issues.push({
           severity: this.config.validation.strict ? 'error' : 'warning',
           rule: 'required-trailer',
-          message: `Required trailer "${required}" is missing`,
+          field: key,
+          message: `Required trailer "${key}" is missing`,
         });
       }
     }
 
-    // 6. Total message line count
+    // 5. Total message line count
     const lineCount = this.estimateLineCount(input);
     if (lineCount > this.config.validation.maxMessageLines) {
       issues.push({
@@ -169,68 +132,48 @@ export class CommitBuilder {
     return issues;
   }
 
+  /**
+   * Dynamically constructs a LoreTrailers object from input metadata.
+   */
   private buildTrailers(loreId: LoreId, input: CommitInput): LoreTrailers {
-    return {
-      'Lore-id': loreId,
-      Constraint: input.trailers?.Constraint ? [...input.trailers.Constraint] : [],
-      Rejected: input.trailers?.Rejected ? [...input.trailers.Rejected] : [],
-      Confidence: input.trailers?.Confidence ?? null,
-      'Scope-risk': input.trailers?.['Scope-risk'] ?? null,
-      Reversibility: input.trailers?.Reversibility ?? null,
-      Directive: input.trailers?.Directive ? [...input.trailers.Directive] : [],
-      Tested: input.trailers?.Tested ? [...input.trailers.Tested] : [],
-      'Not-tested': input.trailers?.['Not-tested'] ? [...input.trailers['Not-tested']] : [],
-      Supersedes: input.trailers?.Supersedes ? [...input.trailers.Supersedes] : [],
-      'Depends-on': input.trailers?.['Depends-on'] ? [...input.trailers['Depends-on']] : [],
-      Related: input.trailers?.Related ? [...input.trailers.Related] : [],
-      custom: input.trailers?.custom ?? CustomTrailerCollection.empty(),
+    // Start with a record that is strictly string[]
+    const result: Record<string, string[]> = {
+      [LORE_ID_KEY]: [loreId],
     };
+
+    // Pre-initialize core keys for uniformity
+    for (const key of ARRAY_TRAILER_KEYS) result[key] = [];
+    for (const key of ENUM_TRAILER_KEYS) result[key] = [];
+
+    if (input.trailers) {
+      for (const [key, values] of Object.entries(input.trailers)) {
+        if (key === LORE_ID_KEY) continue;
+        if (values) {
+          result[key] = [...values];
+        }
+      }
+    }
+
+    return result as unknown as LoreTrailers;
   }
 
   private hasTrailer(input: CommitInput, key: string): boolean {
-    if (!input.trailers) return false;
-
-    const value = (input.trailers as Record<string, unknown>)[key];
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === 'string') return value.length > 0;
-
-    return input.trailers.custom?.has(key) ?? false;
+    const val = input.trailers?.[key];
+    return !!val && val.length > 0;
   }
 
   private estimateLineCount(input: CommitInput): number {
-    let count = 1; // intent line
+    let count = 1; // intent
     if (input.body) {
-      count += 1; // blank line
+      count += 2; // blank line + body
       count += input.body.split('\n').length;
     }
-    count += 1; // blank line before trailers
-    // Count trailer lines
     if (input.trailers) {
-      count += 1; // Lore-id
-      const arrayKeys = [
-        'Constraint',
-        'Rejected',
-        'Directive',
-        'Tested',
-        'Not-tested',
-        'Supersedes',
-        'Depends-on',
-        'Related',
-      ] as const;
-      for (const key of arrayKeys) {
-        const values = input.trailers[key];
+      count += 2; // blank line + LORE_ID_KEY
+      for (const values of Object.values(input.trailers)) {
         if (values) {
           count += values.length;
         }
-      }
-      const enumKeys = ['Confidence', 'Scope-risk', 'Reversibility'] as const;
-      for (const key of enumKeys) {
-        if (input.trailers[key] !== undefined) {
-          count += 1;
-        }
-      }
-      if (input.trailers.custom) {
-        count += input.trailers.custom.lineCount;
       }
     }
     return count;

@@ -1,5 +1,5 @@
 import type { ICommitInputReader } from '../../interfaces/commit-input-reader.js';
-import type { CommitInput } from '../commit-builder.js';
+import type { CommitInput } from '../../types/commit.js';
 import type { IPrompt } from '../../interfaces/prompt.js';
 import type { ITrailerCollector } from '../../interfaces/trailer-collector.js';
 import { PROMPT_STRINGS } from '../../util/constants.js';
@@ -51,11 +51,18 @@ export class InteractiveInputReader implements ICommitInputReader {
   }
 
   private async collectTrailers(): Promise<CommitInput['trailers']> {
-    const trailers: Record<string, readonly string[] | string | undefined> = {};
+    const trailers: Record<string, string[]> = {};
+
     for (const collector of this.collectors) {
       const result = await collector.collect(this.prompt);
-      trailers[result.key] = result.value;
+      if (result.value !== undefined) {
+        const values = Array.isArray(result.value) ? result.value : [result.value as string];
+        if (values.length > 0) {
+          trailers[result.key] = values;
+        }
+      }
     }
+
     return trailers as CommitInput['trailers'];
   }
 }

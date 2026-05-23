@@ -1,9 +1,11 @@
-import type { ITrailerCollector, TrailerCollectorResult } from '../../../interfaces/trailer-collector.js';
 import type { IPrompt } from '../../../interfaces/prompt.js';
-import type { CommitInput } from '../../commit-builder.js';
+import type {
+  ITrailerCollector,
+  TrailerCollectionResult,
+} from '../../../interfaces/trailer-collector.js';
 
 interface MultiValueTrailerConfig {
-  readonly key: keyof NonNullable<CommitInput['trailers']>;
+  readonly key: string;
   readonly confirmMessage: string;
   readonly inputMessage: string;
 }
@@ -18,7 +20,7 @@ interface MultiValueTrailerConfig {
  * SOLID: SRP -- responsible only for multi-value collection logic.
  */
 export class MultiValueTrailerCollector implements ITrailerCollector {
-  private readonly key: keyof NonNullable<CommitInput['trailers']>;
+  readonly key: string;
   private readonly confirmMessage: string;
   private readonly inputMessage: string;
 
@@ -28,9 +30,10 @@ export class MultiValueTrailerCollector implements ITrailerCollector {
     this.inputMessage = config.inputMessage;
   }
 
-  async collect(prompt: IPrompt): Promise<TrailerCollectorResult> {
+  async collect(prompt: IPrompt): Promise<TrailerCollectionResult> {
     const values: string[] = [];
 
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const wantsMore = await prompt.askConfirm(this.confirmMessage, false);
       if (!wantsMore) break;

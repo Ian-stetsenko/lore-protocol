@@ -1,21 +1,24 @@
 import type { IGitClient } from '../interfaces/git-client.js';
 import type { LoreConfig } from '../types/config.js';
-import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
-import type { StaleAtomReport, StaleReason } from '../types/output.js';
-import { LORE_ID_PATTERN, STALE_SIGNAL } from '../util/constants.js';
+import type { LoreAtom, LoreTrailers, SupersessionStatus } from '../types/domain.js';
+import { STALE_SIGNAL } from '../util/constants.js';
+import type { StaleSignal } from '../types/domain.js';
+
+export interface StaleReason {
+  readonly signal: StaleSignal;
+  readonly description: string;
+}
+
+export interface StaleAtomReport {
+  readonly atom: LoreAtom;
+  readonly reasons: readonly StaleReason[];
+}
 
 /**
- * Multi-signal staleness detection for Lore atoms.
- *
- * GRASP: Information Expert -- knows staleness rules.
- * SOLID: DIP -- depends on IGitClient for drift calculation.
- *
- * Staleness signals:
- * 1. Age: atom date older than configured threshold
- * 2. Drift: file has had too many commits since the atom
- * 3. Low confidence: atom has Confidence: low
- * 4. Expired hints: Directive values with [until:YYYY-MM] or [until:YYYY-MM-DD] past due
- * 5. Orphaned dependency: Depends-on references a superseded atom
+ * Analyzes LoreAtoms to detect "staleness" signals.
+ * 
+ * SOLID: SRP -- only responsible for staleness analysis.
+ * GRASP: Information Expert -- knows how to interpret time, drift, and directives.
  */
 export class StalenessDetector {
   constructor(
@@ -24,8 +27,14 @@ export class StalenessDetector {
   ) {}
 
   /**
-   * Analyze atoms for staleness. Returns reports only for atoms
-   * that have at least one staleness signal.
+   * Performs analysis on a set of atoms and returns reports for those that are stale.
+   * 
+   * Analyzes signals:
+   * 1. Age: atom is older than the configured threshold.
+   * 2. Drift: files changed by the atom have had many commits since.
+   * 3. Low Confidence: atom is marked as Confidence: low.
+   * 4. Expired Hints: [until:...] directive hint is in the past.
+   * 5. Orphaned Dependency: atom depends on a superseded atom.
    */
   async analyze(
     atoms: readonly LoreAtom[],
@@ -33,25 +42,24 @@ export class StalenessDetector {
   ): Promise<StaleAtomReport[]> {
     const reports: StaleAtomReport[] = [];
     const now = new Date();
-    const maxAge = this.parseDuration(this.config.stale.olderThan);
 
     for (const atom of atoms) {
       const reasons: StaleReason[] = [];
 
-      // Signal 1: Age
-      this.checkAge(atom, now, maxAge, reasons);
+      // 1. Age Signal
+      this.checkAge(atom, now, reasons);
 
-      // Signal 2: Drift
+      // 2. Drift Signal (requires git calls)
       await this.checkDrift(atom, reasons);
 
-      // Signal 3: Low confidence
+      // 3. Low Confidence Signal
       this.checkLowConfidence(atom, reasons);
 
-      // Signal 4: Expired hints
+      // 4. Expired Hints Signal
       this.checkExpiredHints(atom, now, reasons);
 
-      // Signal 5: Orphaned dependency
-      this.checkOrphanedDependency(atom, supersessionMap, reasons);
+      // 5. Orphaned Dependency Signal
+      this.checkOrphanedDependencies(atom, reasons, supersessionMap);
 
       if (reasons.length > 0) {
         reports.push({ atom, reasons });
@@ -62,47 +70,43 @@ export class StalenessDetector {
   }
 
   /**
-   * Check if an atom is older than the configured age threshold.
+   * Check if an atom's absolute age exceeds the threshold.
    */
-  private checkAge(
-    atom: LoreAtom,
-    now: Date,
-    maxAgeMs: number,
-    reasons: StaleReason[],
-  ): void {
-    const ageMs = now.getTime() - atom.date.getTime();
-    if (ageMs > maxAgeMs) {
-      const ageDescription = this.formatAge(ageMs);
+  private checkAge(atom: LoreAtom, now: Date, reasons: StaleReason[]): void {
+    const thresholdMs = this.parseDuration(this.config.stale.olderThan);
+    if (thresholdMs === null) return;
+
+    if (now.getTime() - atom.date.getTime() > thresholdMs) {
       reasons.push({
         signal: STALE_SIGNAL.AGE,
-        description: `Atom is ${ageDescription} old (threshold: ${this.config.stale.olderThan})`,
+        description: `Atom is older than ${this.config.stale.olderThan} (${this.formatAge(now.getTime() - atom.date.getTime())})`,
       });
     }
   }
 
   /**
-   * Check if files touched by the atom have drifted beyond the configured threshold.
-   * Drift is measured as the number of commits to a file since the atom's commit.
+   * Check if the files associated with the atom have changed significantly.
    */
-  private async checkDrift(
-    atom: LoreAtom,
-    reasons: StaleReason[],
-  ): Promise<void> {
-    for (const filePath of atom.filesChanged) {
+  private async checkDrift(atom: LoreAtom, reasons: StaleReason[]): Promise<void> {
+    const threshold = this.config.stale.driftThreshold;
+    const driftedFiles: string[] = [];
+
+    for (const file of atom.filesChanged) {
       try {
-        const commitsSince = await this.gitClient.countCommitsSince(
-          filePath,
-          atom.commitHash,
-        );
-        if (commitsSince > this.config.stale.driftThreshold) {
-          reasons.push({
-            signal: STALE_SIGNAL.DRIFT,
-            description: `${filePath} has ${commitsSince} commits since this atom (threshold: ${this.config.stale.driftThreshold})`,
-          });
+        const count = await this.gitClient.countCommitsSince(file, atom.commitHash);
+        if (count > threshold) {
+          driftedFiles.push(file);
         }
       } catch {
-        // File may have been deleted or renamed; skip drift check for it
+        // Skip files that cannot be blamed (e.g. deleted)
       }
+    }
+
+    if (driftedFiles.length > 0) {
+      reasons.push({
+        signal: STALE_SIGNAL.DRIFT,
+        description: `Source files have drifted (${driftedFiles.length} files with >${threshold} commits)`,
+      });
     }
   }
 
@@ -110,7 +114,8 @@ export class StalenessDetector {
    * Check if the atom has low confidence.
    */
   private checkLowConfidence(atom: LoreAtom, reasons: StaleReason[]): void {
-    if (atom.trailers.Confidence === 'low') {
+    const confidence = atom.trailers.Confidence[0];
+    if (confidence === 'low') {
       reasons.push({
         signal: STALE_SIGNAL.LOW_CONFIDENCE,
         description: 'Atom is marked as Confidence: low',
@@ -119,18 +124,13 @@ export class StalenessDetector {
   }
 
   /**
-   * Check if any Directive values contain expired [until:...] hints.
-   * Supports formats: [until:YYYY-MM] and [until:YYYY-MM-DD]
+   * Check for expired behavioral hints in directives.
    */
-  private checkExpiredHints(
-    atom: LoreAtom,
-    now: Date,
-    reasons: StaleReason[],
-  ): void {
-    const untilPattern = /\[until:(\d{4}-\d{2}(?:-\d{2})?)\]/g;
+  private checkExpiredHints(atom: LoreAtom, now: Date, reasons: StaleReason[]): void {
+    const untilPattern = /\[until:([^\]]+)\]/g;
+    let match: RegExpExecArray | null;
 
     for (const directive of atom.trailers.Directive) {
-      let match: RegExpExecArray | null;
       // Reset lastIndex for each directive
       untilPattern.lastIndex = 0;
 
@@ -149,38 +149,31 @@ export class StalenessDetector {
   }
 
   /**
-   * Check if the atom depends on a superseded atom.
+   * Check if any dependencies of the atom are superseded.
    */
-  private checkOrphanedDependency(
+  private checkOrphanedDependencies(
     atom: LoreAtom,
-    supersessionMap: Map<string, SupersessionStatus>,
     reasons: StaleReason[],
+    supersessionMap: Map<string, SupersessionStatus>,
   ): void {
-    for (const depId of atom.trailers['Depends-on']) {
-      if (!LORE_ID_PATTERN.test(depId)) {
-        continue;
-      }
-
-      const depStatus = supersessionMap.get(depId);
-      if (depStatus && depStatus.superseded) {
+    const dependsOn = atom.trailers['Depends-on'];
+    for (const id of dependsOn) {
+      const status = supersessionMap.get(id);
+      if (status?.superseded) {
         reasons.push({
           signal: STALE_SIGNAL.ORPHANED_DEP,
-          description: `Depends on ${depId} which is superseded by ${depStatus.supersededBy}`,
+          description: `Dependency "${id}" has been superseded by ${status.supersededBy}`,
         });
       }
     }
   }
 
   /**
-   * Parse a duration string like "6m", "1y", "30d" into milliseconds.
-   * Supports: d (days), w (weeks), m (months), y (years).
+   * Parse a duration string (e.g. '6m', '1y') into milliseconds.
    */
-  private parseDuration(duration: string): number {
-    const match = duration.match(/^(\d+)(d|w|m|y)$/);
-    if (!match) {
-      // Default to 6 months if unparseable
-      return 6 * 30 * 24 * 60 * 60 * 1000;
-    }
+  private parseDuration(duration: string): number | null {
+    const match = duration.match(/^(\d+)([dwmy])$/);
+    if (!match) return null;
 
     const value = parseInt(match[1], 10);
     const unit = match[2];
@@ -226,30 +219,23 @@ export class StalenessDetector {
    * Supports YYYY-MM (treated as end of month) and YYYY-MM-DD.
    */
   private parseUntilDate(dateStr: string): Date | null {
-    // YYYY-MM format: treat as end of that month
+    // 1. YYYY-MM format: treat as end of that month (start of next)
     const monthMatch = dateStr.match(/^(\d{4})-(\d{2})$/);
     if (monthMatch) {
       const year = parseInt(monthMatch[1], 10);
       const month = parseInt(monthMatch[2], 10);
-      // Create date at start of next month (end of specified month)
-      const date = new Date(year, month, 1);
-      if (isNaN(date.getTime())) {
-        return null;
-      }
-      return date;
+      const d = new Date(year, month, 1);
+      return isNaN(d.getTime()) ? null : d;
     }
 
-    // YYYY-MM-DD format
+    // 2. YYYY-MM-DD format: treat as end of that day
     const dayMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (dayMatch) {
       const year = parseInt(dayMatch[1], 10);
       const month = parseInt(dayMatch[2], 10) - 1;
       const day = parseInt(dayMatch[3], 10);
-      const date = new Date(year, month, day, 23, 59, 59, 999);
-      if (isNaN(date.getTime())) {
-        return null;
-      }
-      return date;
+      const d = new Date(year, month, day, 23, 59, 59, 999);
+      return isNaN(d.getTime()) ? null : d;
     }
 
     return null;

@@ -1,7 +1,7 @@
 import type { IGitClient } from '../interfaces/git-client.js';
 import type { TrailerParser } from './trailer-parser.js';
 import type { LoreId } from '../types/domain.js';
-import { LORE_ID_PATTERN } from '../util/constants.js';
+import { LORE_ID_PATTERN, LORE_ID_KEY } from '../util/constants.js';
 
 /**
  * Reads the Lore-id from the HEAD commit message.
@@ -29,8 +29,9 @@ export class HeadLoreIdReader {
     const trailerBlock = this.trailerParser.extractTrailerBlock(message);
     if (!trailerBlock) return null;
 
-    const trailers = this.trailerParser.parse(trailerBlock, []);
-    const loreId = trailers['Lore-id'];
+    const trailers = this.trailerParser.parse(trailerBlock);
+    const loreIdArray = trailers[LORE_ID_KEY];
+    const loreId = loreIdArray && loreIdArray.length > 0 ? loreIdArray[0] : null;
     return loreId && LORE_ID_PATTERN.test(loreId) ? loreId : null;
   }
 }

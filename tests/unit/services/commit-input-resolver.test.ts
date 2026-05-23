@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CommitInputResolver } from '../../../src/services/commit-input-resolver.js';
 import type { IPrompt } from '../../../src/interfaces/prompt.js';
 import type { CommitCommandOptions } from '../../../src/services/commit-input-resolver.js';
+import { DEFAULT_CONFIG } from '../../../src/util/constants.js';
+import { Protocol } from '../../../src/services/protocol.js';
 
 /**
  * Creates a mock IPrompt for testing.
@@ -26,9 +28,11 @@ function emptyOptions(overrides: Partial<CommitCommandOptions> = {}): CommitComm
 
 describe('CommitInputResolver', () => {
   let originalIsTTY: boolean | undefined;
+  let protocol: Protocol;
 
   beforeEach(() => {
     originalIsTTY = process.stdin.isTTY;
+    protocol = new Protocol(DEFAULT_CONFIG);
   });
 
   afterEach(() => {
@@ -45,7 +49,7 @@ describe('CommitInputResolver', () => {
         askText: vi.fn().mockResolvedValue('test intent'),
         askConfirm: vi.fn().mockResolvedValue(false),
       });
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const result = await resolver.resolve(emptyOptions({ interactive: true }));
 
@@ -55,7 +59,7 @@ describe('CommitInputResolver', () => {
 
     it('should dispatch to file/JSON reader when --file is set', async () => {
       const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const tmpPath = '/tmp/test-lore-input.json';
       const { writeFileSync } = await import('node:fs');
@@ -73,7 +77,7 @@ describe('CommitInputResolver', () => {
 
     it('should dispatch to flags reader when --intent is set', async () => {
       const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const result = await resolver.resolve(emptyOptions({
         intent: 'from flags',
@@ -81,7 +85,7 @@ describe('CommitInputResolver', () => {
       }));
 
       expect(result.intent).toBe('from flags');
-      expect(result.trailers?.Confidence).toBe('high');
+      expect(result.trailers?.Confidence).toEqual(['high']);
       expect(prompt.askText).not.toHaveBeenCalled();
     });
 
@@ -96,7 +100,7 @@ describe('CommitInputResolver', () => {
         askText: vi.fn().mockResolvedValue('tty interactive intent'),
         askConfirm: vi.fn().mockResolvedValue(false),
       });
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const result = await resolver.resolve(emptyOptions());
 
@@ -112,7 +116,7 @@ describe('CommitInputResolver', () => {
       });
 
       const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       // Mock stdin to emit data then end
       const jsonInput = JSON.stringify({ intent: 'from stdin' });
@@ -139,7 +143,7 @@ describe('CommitInputResolver', () => {
         askText: vi.fn().mockResolvedValue('interactive wins'),
         askConfirm: vi.fn().mockResolvedValue(false),
       });
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const result = await resolver.resolve(emptyOptions({
         interactive: true,
@@ -152,7 +156,7 @@ describe('CommitInputResolver', () => {
 
     it('should prefer file over flags when both are set', async () => {
       const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const tmpPath = '/tmp/test-lore-file-over-flags.json';
       const { writeFileSync } = await import('node:fs');
@@ -178,7 +182,7 @@ describe('CommitInputResolver', () => {
       });
 
       const prompt = createMockPrompt();
-      const resolver = new CommitInputResolver(prompt);
+      const resolver = new CommitInputResolver(prompt, protocol);
 
       const result = await resolver.resolve(emptyOptions({
         intent: 'flags win',

@@ -1,17 +1,32 @@
 import type { LoreIdGenerator } from './lore-id-generator.js';
-import type { LoreAtom, ConfidenceLevel, ScopeRiskLevel, ReversibilityLevel, LoreId } from '../types/domain.js';
+import type { LoreAtom, LoreId } from '../types/domain.js';
+import type { Protocol } from './protocol.js';
+import { LORE_ID_KEY } from '../util/constants.js';
 
-const CONFIDENCE_ORDER: readonly ConfidenceLevel[] = ['low', 'medium', 'high'];
-const SCOPE_RISK_ORDER: readonly ScopeRiskLevel[] = ['narrow', 'moderate', 'wide'];
-const REVERSIBILITY_ORDER: readonly ReversibilityLevel[] = ['clean', 'migration-needed', 'irreversible'];
-
+/**
+ * Orchestrates the merging of multiple Lore atoms during a git squash.
+ * 
+ * SOLID: SRP -- responsible only for combining atom data into a single message.
+ * SOLID: OCP -- metadata-driven merging logic for all protocol trailers.
+ * GRASP: Creator -- knows how to synthesize Lore context from multiple lineage atoms.
+ */
 export class SquashMerger {
-  private readonly loreIdGenerator: LoreIdGenerator;
+  constructor(
+    private readonly loreIdGenerator: LoreIdGenerator,
+    private readonly protocol: Protocol,
+  ) {}
 
-  constructor(loreIdGenerator: LoreIdGenerator) {
-    this.loreIdGenerator = loreIdGenerator;
-  }
-
+  /**
+   * Merge a collection of atoms into a single Lore-enriched commit message.
+   *
+   * Synthesizes a new atom by:
+   * 1. Generating a new unique Lore-id.
+   * 2. Picking the newest intent as the new subject (unless overridden).
+   * 3. Concatenating all unique body summaries.
+   * 4. Applying metadata-driven squash strategies (union, rank-min, rank-max)
+   *    to merge trailers across all atoms.
+   * 5. Dropping internal references (those pointing to atoms within the squash set).
+   */
   merge(
     atoms: readonly LoreAtom[],
     options: { intent?: string; body?: string },
@@ -35,68 +50,57 @@ export class SquashMerger {
     // Body: use option or concatenate body summaries
     const body = options.body ?? this.mergeBodySummaries(sorted);
 
-    // Merge array trailers (deduplicated)
-    const constraints = this.unionDedup(atoms.map((a) => a.trailers.Constraint));
-    const rejected = this.unionDedup(atoms.map((a) => a.trailers.Rejected));
-    const directives = this.unionDedup(atoms.map((a) => a.trailers.Directive));
-    const tested = this.unionDedup(atoms.map((a) => a.trailers.Tested));
-    const notTested = this.unionDedup(atoms.map((a) => a.trailers['Not-tested']));
-
-    // Merge reference trailers: keep only external references
-    const supersedes = this.filterExternal(
-      this.unionDedup(atoms.map((a) => a.trailers.Supersedes)),
-      internalIds,
-    );
-    const dependsOn = this.filterExternal(
-      this.unionDedup(atoms.map((a) => a.trailers['Depends-on'])),
-      internalIds,
-    );
-    const related = this.filterExternal(
-      this.unionDedup(atoms.map((a) => a.trailers.Related)),
-      internalIds,
-    );
-
-    // Merge enum trailers: most conservative
-    const confidence = this.mergeConfidence(atoms);
-    const scopeRisk = this.mergeScopeRisk(atoms);
-    const reversibility = this.mergeReversibility(atoms);
-
-    // Build trailer lines
     const trailerLines: string[] = [];
-    trailerLines.push(`Lore-id: ${newLoreId}`);
+    trailerLines.push(`${LORE_ID_KEY}: ${newLoreId}`);
 
-    for (const v of constraints) {
-      trailerLines.push(`Constraint: ${v}`);
+    // 1. Process All Trailers uniformly
+    // Flatten all present keys across all atoms
+    const allKeys = new Set<string>();
+    for (const atom of atoms) {
+      for (const key of Object.keys(atom.trailers)) {
+        if (key !== LORE_ID_KEY) { 
+          allKeys.add(key);
+        }
+      }
     }
-    for (const v of rejected) {
-      trailerLines.push(`Rejected: ${v}`);
-    }
-    if (confidence !== null) {
-      trailerLines.push(`Confidence: ${confidence}`);
-    }
-    if (scopeRisk !== null) {
-      trailerLines.push(`Scope-risk: ${scopeRisk}`);
-    }
-    if (reversibility !== null) {
-      trailerLines.push(`Reversibility: ${reversibility}`);
-    }
-    for (const v of directives) {
-      trailerLines.push(`Directive: ${v}`);
-    }
-    for (const v of tested) {
-      trailerLines.push(`Tested: ${v}`);
-    }
-    for (const v of notTested) {
-      trailerLines.push(`Not-tested: ${v}`);
-    }
-    for (const v of supersedes) {
-      trailerLines.push(`Supersedes: ${v}`);
-    }
-    for (const v of dependsOn) {
-      trailerLines.push(`Depends-on: ${v}`);
-    }
-    for (const v of related) {
-      trailerLines.push(`Related: ${v}`);
+
+    const sortedKeys = Array.from(allKeys).sort((a, b) => {
+      const defA = this.protocol.getDefinition(a);
+      const defB = this.protocol.getDefinition(b);
+      const orderA = defA?.prompt?.order ?? 1000;
+      const orderB = defB?.prompt?.order ?? 1000;
+      return orderA - orderB;
+    });
+
+    for (const key of sortedKeys) {
+      const def = this.protocol.getDefinition(key);
+      const strategy = def?.squash || 'union';
+      
+      // Values are always arrays in the new flat structure
+      const allValues = atoms.map(a => a.trailers[key] || []);
+
+      if (strategy === 'rank-min' && def?.values) {
+        const valueKeys = Object.keys(def.values);
+        const scalars = allValues.map(v => v[0] || null);
+        const merged = this.pickMinRank(scalars, valueKeys);
+        if (merged !== null) trailerLines.push(`${key}: ${merged}`);
+      } else if (strategy === 'rank-max' && def?.values) {
+        const valueKeys = Object.keys(def.values);
+        const scalars = allValues.map(v => v[0] || null);
+        const merged = this.pickMaxRank(scalars, valueKeys);
+        if (merged !== null) trailerLines.push(`${key}: ${merged}`);
+      } else {
+        // Default: Union + Dedup
+        let merged = this.unionDedup(allValues);
+        
+        if (def?.ui?.kind === 'reference') {
+          merged = this.filterExternal(merged, internalIds);
+        }
+
+        for (const v of merged) {
+          trailerLines.push(`${key}: ${v}`);
+        }
+      }
     }
 
     // Assemble message
@@ -113,6 +117,9 @@ export class SquashMerger {
     return parts.join('\n');
   }
 
+  /**
+   * Combine body summaries from multiple atoms into a single narrative block.
+   */
   private mergeBodySummaries(sortedAtoms: readonly LoreAtom[]): string {
     const summaries: string[] = [];
     for (const atom of sortedAtoms) {
@@ -123,6 +130,9 @@ export class SquashMerger {
     return summaries.join('\n\n');
   }
 
+  /**
+   * Deduplicate and merge multiple trailer value arrays into one.
+   */
   private unionDedup(arrays: readonly (readonly string[])[]): string[] {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -137,6 +147,9 @@ export class SquashMerger {
     return result;
   }
 
+  /**
+   * Remove internal references to atoms that are being merged into the same squash.
+   */
   private filterExternal(
     values: string[],
     internalIds: Set<LoreId>,
@@ -144,38 +157,10 @@ export class SquashMerger {
     return values.filter((v) => !internalIds.has(v));
   }
 
-  private mergeConfidence(
-    atoms: readonly LoreAtom[],
-  ): ConfidenceLevel | null {
-    return this.pickMostConservative(
-      atoms.map((a) => a.trailers.Confidence),
-      CONFIDENCE_ORDER,
-    );
-  }
-
-  private mergeScopeRisk(
-    atoms: readonly LoreAtom[],
-  ): ScopeRiskLevel | null {
-    return this.pickLeastConservative(
-      atoms.map((a) => a.trailers['Scope-risk']),
-      SCOPE_RISK_ORDER,
-    );
-  }
-
-  private mergeReversibility(
-    atoms: readonly LoreAtom[],
-  ): ReversibilityLevel | null {
-    return this.pickLeastConservative(
-      atoms.map((a) => a.trailers.Reversibility),
-      REVERSIBILITY_ORDER,
-    );
-  }
-
   /**
-   * Pick the lowest value in the order (most conservative / least confident).
-   * For Confidence: low < medium < high, so pick lowest index.
+   * Pick the value with the lowest index in the order.
    */
-  private pickMostConservative<T extends string>(
+  private pickMinRank<T extends string>(
     values: readonly (T | null)[],
     order: readonly T[],
   ): T | null {
@@ -183,7 +168,7 @@ export class SquashMerger {
     let result: T | null = null;
 
     for (const val of values) {
-      if (val === null) continue;
+      if (val === null || val === undefined) continue;
       const idx = order.indexOf(val);
       if (idx === -1) continue;
       if (result === null || idx < lowestIndex) {
@@ -196,11 +181,9 @@ export class SquashMerger {
   }
 
   /**
-   * Pick the highest value in the order (least conservative / widest scope).
-   * For Scope-risk: narrow < moderate < wide, so pick highest index.
-   * For Reversibility: clean < migration-needed < irreversible, so pick highest index.
+   * Pick the value with the highest index in the order.
    */
-  private pickLeastConservative<T extends string>(
+  private pickMaxRank<T extends string>(
     values: readonly (T | null)[],
     order: readonly T[],
   ): T | null {
@@ -208,7 +191,7 @@ export class SquashMerger {
     let result: T | null = null;
 
     for (const val of values) {
-      if (val === null) continue;
+      if (val === null || val === undefined) continue;
       const idx = order.indexOf(val);
       if (idx === -1) continue;
       if (result === null || idx > highestIndex) {

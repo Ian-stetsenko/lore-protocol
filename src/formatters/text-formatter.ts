@@ -7,9 +7,18 @@ import type {
   FormattableStalenessResult,
   FormattableTraceResult,
   FormattableDoctorResult,
+  FormattableConfigResult,
+  FormattableTrailerDefinition,
 } from '../types/output.js';
-import type { LoreAtom, TrailerKey } from '../types/domain.js';
+import type { LoreAtom, LoreTrailers } from '../types/domain.js';
+import { LORE_ID_KEY, LORE_TRAILER_KEYS } from '../util/constants.js';
 
+/**
+ * Strategy implementation for human-readable terminal output.
+ * Uses chalk for semantic coloring and box-drawing characters for structure.
+ *
+ * SOLID: SRP -- only responsible for human-readable text formatting.
+ */
 export class TextFormatter implements IOutputFormatter {
   private readonly c: ChalkInstance;
 
@@ -18,7 +27,7 @@ export class TextFormatter implements IOutputFormatter {
   }
 
   formatQueryResult(data: FormattableQueryResult): string {
-    const { result, supersessionMap, visibleTrailers } = data;
+    const { result, supersessionMap, visibleTrailers, trailerDefinitions } = data;
     const lines: string[] = [];
 
     if (result.atoms.length === 0) {
@@ -41,7 +50,7 @@ export class TextFormatter implements IOutputFormatter {
         lines.push(`  ${this.c.dim(atom.body)}`);
       }
 
-      const trailerLines = this.formatTrailers(atom, visibleTrailers);
+      const trailerLines = this.formatTrailers(atom, visibleTrailers, trailerDefinitions);
       for (const tl of trailerLines) {
         lines.push(`  ${tl}`);
       }
@@ -132,7 +141,7 @@ export class TextFormatter implements IOutputFormatter {
       const isLast = i === edgeCount - 1;
       const connector = isLast ? '\u2514\u2500\u2500' : '\u251C\u2500\u2500';
       const relLabel = this.c.dim(`[${edge.relationship}]`);
-
+      
       if (edge.targetAtom) {
         lines.push(
           `${connector} ${relLabel} ${this.c.bold(edge.to)} ${this.c.dim(edge.targetAtom.intent)}`,
@@ -192,6 +201,40 @@ export class TextFormatter implements IOutputFormatter {
     return lines.join('\n');
   }
 
+  formatConfig(data: FormattableConfigResult): string {
+    const lines: string[] = [];
+    lines.push(this.c.bold(`Lore Protocol v${data.loreVersion}`));
+    lines.push(this.c.dim(`Permissive mode: ${data.permissive ? 'on' : 'off'}`));
+    lines.push('');
+    lines.push(this.c.bold('--- Trailer Schema ---'));
+    lines.push('');
+
+    const sortedKeys = Object.keys(data.trailers).sort();
+
+    if (data.filters.showCore) {
+      lines.push(this.c.bold('Standard Trailers'));
+      for (const key of sortedKeys) {
+        if (this.isCoreKey(key)) {
+          lines.push(this.formatTrailerDefinition(key, data.trailers[key]));
+        }
+      }
+      lines.push('');
+    }
+
+    if (data.filters.showCustom) {
+      const customKeys = sortedKeys.filter(k => !this.isCoreKey(k));
+      if (customKeys.length > 0) {
+        lines.push(this.c.bold('Custom Trailers'));
+        for (const key of customKeys) {
+          lines.push(this.formatTrailerDefinition(key, data.trailers[key]));
+        }
+        lines.push('');
+      }
+    }
+
+    return lines.join('\n').trimEnd();
+  }
+
   formatSuccess(message: string, _data?: Record<string, unknown>): string {
     return this.c.green(message);
   }
@@ -215,6 +258,12 @@ export class TextFormatter implements IOutputFormatter {
     return lines.join('\n');
   }
 
+  private isCoreKey(key: string): boolean {
+    // This is a minimal heuristic for the UI to group trailers.
+    // In a fully dynamic world, we might add an 'isCore' property to FormattableTrailerDefinition.
+    return (LORE_TRAILER_KEYS as readonly string[]).includes(key);
+  }
+
   private formatAtomHeader(atom: LoreAtom, superseded: boolean): string {
     const dateStr = this.formatDate(atom.date);
     const header = `\u2500\u2500 ${atom.loreId} (${dateStr}, ${atom.author}) `;
@@ -229,69 +278,61 @@ export class TextFormatter implements IOutputFormatter {
 
   private formatTrailers(
     atom: LoreAtom,
-    visibleTrailers: readonly TrailerKey[] | 'all',
+    visibleTrailers: readonly string[] | 'all',
+    trailerDefinitions: Record<string, FormattableTrailerDefinition>,
   ): string[] {
     const lines: string[] = [];
     const trailers = atom.trailers;
 
-    const shouldShow = (key: TrailerKey): boolean => {
+    const shouldShow = (key: string): boolean => {
       if (visibleTrailers === 'all') return true;
       return visibleTrailers.includes(key);
     };
 
-    if (shouldShow('Constraint') && trailers.Constraint.length > 0) {
-      for (const v of trailers.Constraint) {
-        lines.push(`${this.c.cyan('Constraint:')} ${v}`);
-      }
-    }
-    if (shouldShow('Rejected') && trailers.Rejected.length > 0) {
-      for (const v of trailers.Rejected) {
-        lines.push(`${this.c.magenta('Rejected:')} ${v}`);
-      }
-    }
-    if (shouldShow('Confidence') && trailers.Confidence !== null) {
-      lines.push(`${this.c.cyan('Confidence:')} ${trailers.Confidence}`);
-    }
-    if (shouldShow('Scope-risk') && trailers['Scope-risk'] !== null) {
-      lines.push(`${this.c.cyan('Scope-risk:')} ${trailers['Scope-risk']}`);
-    }
-    if (shouldShow('Reversibility') && trailers.Reversibility !== null) {
-      lines.push(
-        `${this.c.cyan('Reversibility:')} ${trailers.Reversibility}`,
-      );
-    }
-    if (shouldShow('Directive') && trailers.Directive.length > 0) {
-      for (const v of trailers.Directive) {
-        lines.push(`${this.c.yellow('Directive:')} ${v}`);
-      }
-    }
-    if (shouldShow('Tested') && trailers.Tested.length > 0) {
-      for (const v of trailers.Tested) {
-        lines.push(`${this.c.green('Tested:')} ${v}`);
-      }
-    }
-    if (shouldShow('Not-tested') && trailers['Not-tested'].length > 0) {
-      for (const v of trailers['Not-tested']) {
-        lines.push(`${this.c.red('Not-tested:')} ${v}`);
-      }
-    }
-    if (shouldShow('Supersedes') && trailers.Supersedes.length > 0) {
-      for (const v of trailers.Supersedes) {
-        lines.push(`${this.c.dim('Supersedes:')} ${v}`);
-      }
-    }
-    if (shouldShow('Depends-on') && trailers['Depends-on'].length > 0) {
-      for (const v of trailers['Depends-on']) {
-        lines.push(`${this.c.dim('Depends-on:')} ${v}`);
-      }
-    }
-    if (shouldShow('Related') && trailers.Related.length > 0) {
-      for (const v of trailers.Related) {
-        lines.push(`${this.c.dim('Related:')} ${v}`);
+    // Process all trailers uniformly from the flat object
+    for (const key of Object.keys(trailers)) {
+      if (key === LORE_ID_KEY) continue;
+      if (!shouldShow(key)) continue;
+
+      const values = trailers[key];
+      if (!values || values.length === 0) continue;
+
+      // Determine color from injected metadata
+      const def = trailerDefinitions[key];
+      const colorName = def?.ui?.color || 'cyan';
+      const color = (this.c as any)[colorName] || this.c.cyan;
+
+      for (const v of values) {
+        lines.push(`${color(`${key}:`)} ${v}`);
       }
     }
 
     return lines;
+  }
+
+  private formatTrailerDefinition(key: string, def: FormattableTrailerDefinition): string {
+    const lines: string[] = [];
+    const label = def.required ? this.c.bold(key) : key;
+    const type = def.multivalue ? 'array' : 'string';
+    const validation = def.validation !== 'none' ? ` (${def.validation})` : '';
+
+    lines.push(`- ${this.c.cyan(label)} [${type}]${validation}`);
+    lines.push(`  ${this.c.dim(def.description)}`);
+
+    if (def.validation === 'values' && def.values) {
+      const valueLabels = Object.entries(def.values).map(([k, v]) => (v.description ? `${k}: ${v.description}` : k));
+      lines.push(`  Values: ${valueLabels.join(', ')}`);
+    } else if (def.validation === 'pattern' && def.pattern) {
+      lines.push(`  Pattern: ${def.pattern}`);
+    }
+
+    if (def.directives && def.directives.length > 0) {
+      for (const d of def.directives) {
+        lines.push(`  ${this.c.yellow('\u26A0')} ${d}`);
+      }
+    }
+
+    return lines.join('\n');
   }
 
   private formatDate(date: Date): string {

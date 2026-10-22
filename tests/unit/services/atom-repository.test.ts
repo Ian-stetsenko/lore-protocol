@@ -101,6 +101,7 @@ function makeLoreCommit(options: {
   body?: string;
   loreId?: string;
   trailerExtras?: string;
+  filesChanged?: readonly string[];
 }): RawCommit {
   const loreId = options.loreId ?? 'a1b2c3d4';
   const extras = options.trailerExtras ?? '';
@@ -111,6 +112,7 @@ function makeLoreCommit(options: {
     subject: options.subject ?? 'feat(auth): add login',
     body: options.body ?? 'Implemented login flow.',
     trailers: `Lore-id: ${loreId}\n${extras}`.trim(),
+    filesChanged: options.filesChanged ?? ['src/auth.ts'],
   };
 }
 
@@ -146,7 +148,6 @@ describe('AtomRepository', () => {
     it('should return atoms for a file target', async () => {
       const commit = makeLoreCommit({ loreId: 'a1b2c3d4' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
 
       const gitLogArgs = makeGitLogArgs();
       const options = makeQueryOptions();
@@ -168,10 +169,10 @@ describe('AtomRepository', () => {
         subject: 'chore: update deps',
         body: '',
         trailers: '',
+        filesChanged: [],
       };
 
       vi.mocked(gitClient.log).mockResolvedValue([loreCommit, nonLoreCommit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
 
       const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
 
@@ -221,7 +222,6 @@ describe('AtomRepository', () => {
       const commit1 = makeLoreCommit({ hash: 'aaa', author: 'alice@example.com', loreId: 'aaaa1111' });
       const commit2 = makeLoreCommit({ hash: 'bbb', author: 'bob@example.com', loreId: 'bbbb2222' });
       vi.mocked(gitClient.log).mockResolvedValue([commit1, commit2]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
 
       const options = makeQueryOptions({ author: 'alice' });
       const result = await repo.findByTarget(makeGitLogArgs(), options);
@@ -237,7 +237,6 @@ describe('AtomRepository', () => {
         makeLoreCommit({ hash: 'ccc', loreId: 'cccc3333' }),
       ];
       vi.mocked(gitClient.log).mockResolvedValue(commits);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
 
       const options = makeQueryOptions({ limit: 2 });
       const result = await repo.findByTarget(makeGitLogArgs(), options);
@@ -250,7 +249,6 @@ describe('AtomRepository', () => {
     it('should find an atom by its Lore-id', async () => {
       const commit = makeLoreCommit({ loreId: 'deadbeef' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
 
       const result = await repo.findByLoreId('deadbeef');
 
@@ -261,7 +259,6 @@ describe('AtomRepository', () => {
     it('should return null if no atom matches the Lore-id', async () => {
       const commit = makeLoreCommit({ loreId: 'a1b2c3d4' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findByLoreId('deadbeef');
 
@@ -289,7 +286,6 @@ describe('AtomRepository', () => {
         makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' }),
       ];
       vi.mocked(gitClient.log).mockResolvedValue(commits);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findAll();
 
@@ -305,9 +301,9 @@ describe('AtomRepository', () => {
         subject: 'feat: no body',
         body: trailersRaw,
         trailers: trailersRaw,
+        filesChanged: [],
       };
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findAll();
 
@@ -350,6 +346,7 @@ describe('AtomRepository', () => {
         subject: 'chore: update deps',
         body: '',
         trailers: '',
+        filesChanged: [],
       };
       vi.mocked(gitClient.log).mockResolvedValue([nonLoreCommit]);
 
@@ -364,7 +361,6 @@ describe('AtomRepository', () => {
       const authCommit = makeLoreCommit({ subject: 'feat(auth): add login', loreId: 'aaaa1111' });
       const dbCommit = makeLoreCommit({ subject: 'fix(database): fix query', loreId: 'bbbb2222' });
       vi.mocked(gitClient.log).mockResolvedValue([authCommit, dbCommit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findByScope('auth', makeQueryOptions());
 
@@ -375,7 +371,6 @@ describe('AtomRepository', () => {
     it('should match scope case-insensitively', async () => {
       const commit = makeLoreCommit({ subject: 'feat(Auth): add login', loreId: 'aaaa1111' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findByScope('auth', makeQueryOptions());
 
@@ -385,7 +380,6 @@ describe('AtomRepository', () => {
     it('should return empty array when no scope matches', async () => {
       const commit = makeLoreCommit({ subject: 'feat(auth): add login', loreId: 'aaaa1111' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findByScope('payments', makeQueryOptions());
 
@@ -395,7 +389,6 @@ describe('AtomRepository', () => {
     it('should handle commits without scope in subject', async () => {
       const commit = makeLoreCommit({ subject: 'fix: typo', loreId: 'aaaa1111' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const result = await repo.findByScope('auth', makeQueryOptions());
 
@@ -413,7 +406,6 @@ describe('AtomRepository', () => {
 
       // First call for initial atoms, second call for findByLoreId
       vi.mocked(gitClient.log).mockResolvedValue([commit1, commit2]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       // Parse the initial atoms ourselves
       const initialAtoms = [{
@@ -518,7 +510,6 @@ describe('AtomRepository', () => {
       const commitB = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222', trailerExtras: 'Related: aaaa1111' });
 
       vi.mocked(gitClient.log).mockResolvedValue([commitA, commitB]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const atomA = {
         loreId: 'aaaa1111',
@@ -558,7 +549,6 @@ describe('AtomRepository', () => {
 
       // findByLoreId will search all commits
       vi.mocked(gitClient.log).mockResolvedValue([commitB, commitC, commitD]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue([]);
 
       const atomA = {
         loreId: 'aaaa1111',
@@ -623,9 +613,9 @@ describe('AtomRepository', () => {
     });
   });
 
-  describe('batching behavior', () => {
-    it('should call getFilesChanged only for Lore commits, not non-Lore commits', async () => {
-      const loreCommit = makeLoreCommit({ loreId: 'aaaa1111' });
+  describe('bulk files', () => {
+    it('should take changed files from the raw commit without per-commit git calls', async () => {
+      const loreCommit = makeLoreCommit({ loreId: 'aaaa1111', filesChanged: ['src/auth.ts'] });
       const nonLoreCommit: RawCommit = {
         hash: 'non-lore',
         date: '2025-01-16T10:00:00Z',
@@ -633,37 +623,27 @@ describe('AtomRepository', () => {
         subject: 'chore: deps',
         body: '',
         trailers: '',
+        filesChanged: [],
       };
       vi.mocked(gitClient.log).mockResolvedValue([loreCommit, nonLoreCommit]);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['src/auth.ts']);
 
-      await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
+      const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
 
-      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(1);
-      expect(gitClient.getFilesChanged).toHaveBeenCalledWith('abc12345');
+      expect(result).toHaveLength(1);
+      expect(result[0].filesChanged).toEqual(['src/auth.ts']);
+      expect(gitClient.getFilesChanged).not.toHaveBeenCalled();
     });
 
-    it('should handle more commits than batch size', async () => {
+    it('should handle many commits without per-commit git calls', async () => {
       const commits = Array.from({ length: 25 }, (_, i) =>
         makeLoreCommit({ hash: `hash${i}`, loreId: `${String(i).padStart(8, '0')}` }),
       );
       vi.mocked(gitClient.log).mockResolvedValue(commits);
-      vi.mocked(gitClient.getFilesChanged).mockResolvedValue(['file.ts']);
 
       const result = await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
 
       expect(result).toHaveLength(25);
-      expect(gitClient.getFilesChanged).toHaveBeenCalledTimes(25);
-    });
-
-    it('should propagate getFilesChanged errors', async () => {
-      const commit = makeLoreCommit({ loreId: 'deadbeef' });
-      vi.mocked(gitClient.log).mockResolvedValue([commit]);
-      vi.mocked(gitClient.getFilesChanged).mockRejectedValue(new Error('git failed'));
-
-      await expect(
-        repo.findByTarget(makeGitLogArgs(), makeQueryOptions()),
-      ).rejects.toThrow('git failed');
+      expect(gitClient.getFilesChanged).not.toHaveBeenCalled();
     });
   });
 });

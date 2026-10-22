@@ -2,7 +2,7 @@ import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
 import type { PathQueryOptions } from '../types/query.js';
 import type { LoreAtom, LoreId, LoreTrailers } from '../types/domain.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
-import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS, GIT_FILES_CHANGED_BATCH_SIZE } from '../util/constants.js';
+import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
 
 /**
  * Retrieves LoreAtoms from git history.
@@ -189,10 +189,11 @@ export class AtomRepository {
 
   /**
    * Parse an array of RawCommit into LoreAtom[], filtering out non-Lore commits.
+   * Changed files come from each RawCommit (collected in bulk by GitClient.log);
+   * no per-commit git calls remain here.
    */
   private async parseRawCommits(rawCommits: readonly RawCommit[]): Promise<LoreAtom[]> {
-    // First pass: filter to Lore commits and parse trailers (synchronous work)
-    const loreCommits: Array<{ raw: RawCommit; trailers: LoreTrailers }> = [];
+    const atoms: LoreAtom[] = [];
 
     for (const raw of rawCommits) {
       if (!this.trailerParser.containsLoreTrailers(raw.trailers)) {
@@ -204,24 +205,8 @@ export class AtomRepository {
         continue;
       }
 
-      loreCommits.push({ raw, trailers });
+      atoms.push(this.buildAtom(raw, trailers, raw.filesChanged));
     }
-
-    // Second pass: batch getFilesChanged calls with concurrency limit.
-    // Results accumulate in insertion order, maintaining 1:1 alignment with loreCommits.
-    const filesPerCommit: (readonly string[])[] = [];
-    for (let i = 0; i < loreCommits.length; i += GIT_FILES_CHANGED_BATCH_SIZE) {
-      const batch = loreCommits.slice(i, i + GIT_FILES_CHANGED_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(({ raw }) => this.gitClient.getFilesChanged(raw.hash)),
-      );
-      filesPerCommit.push(...batchResults);
-    }
-
-    // Build atoms by pairing parsed trailers with their file lists
-    const atoms: LoreAtom[] = loreCommits.map(({ raw, trailers }, index) =>
-      this.buildAtom(raw, trailers, filesPerCommit[index]),
-    );
 
     return atoms;
   }

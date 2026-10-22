@@ -37,6 +37,7 @@ function createMockTrailerParser(resultOverrides: Partial<LoreTrailers> = {}) {
 function createMockAtomRepository(): Partial<AtomRepository> {
   return {
     findByLoreId: vi.fn(async () => null),
+    getLoreIdIndex: vi.fn(async () => new Map()),
   };
 }
 
@@ -491,7 +492,7 @@ describe('Validator', () => {
     });
 
     it('should not warn when referenced atom exists', async () => {
-      vi.mocked(mockAtomRepo.findByLoreId!).mockResolvedValue({
+      const existingAtom = {
         loreId: 'aabbccdd',
         commitHash: 'abc',
         date: new Date(),
@@ -500,7 +501,10 @@ describe('Validator', () => {
         body: '',
         trailers: makeTrailers({ 'Lore-id': 'aabbccdd' }),
         filesChanged: [],
-      });
+      };
+      vi.mocked(mockAtomRepo.getLoreIdIndex!).mockResolvedValue(
+        new Map([['aabbccdd', existingAtom]]),
+      );
       mockParser.parse.mockReturnValue(
         makeTrailers({
           Related: ['aabbccdd'],

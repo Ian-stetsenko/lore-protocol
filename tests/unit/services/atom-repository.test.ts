@@ -590,6 +590,83 @@ describe('AtomRepository', () => {
     });
   });
 
+  describe('getLoreIdIndex', () => {
+    it('should index atoms by Lore-id from a single --all pass', async () => {
+      const commits = [
+        makeLoreCommit({ hash: 'aaa', loreId: 'aaaa1111', trailerExtras: 'Related: bbbb2222' }),
+        makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' }),
+      ];
+      vi.mocked(gitClient.log).mockResolvedValue(commits);
+
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.size).toBe(2);
+      expect(index.get('aaaa1111')?.commitHash).toBe('aaa');
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toContain('--all');
+    });
+
+    it('should keep the newest atom when a Lore-id appears twice', async () => {
+      const commits = [
+        makeLoreCommit({ hash: 'newest', loreId: 'aaaa1111' }),
+        makeLoreCommit({ hash: 'older', loreId: 'aaaa1111' }),
+      ];
+      vi.mocked(gitClient.log).mockResolvedValue(commits);
+
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.size).toBe(1);
+      expect(index.get('aaaa1111')?.commitHash).toBe('newest');
+    });
+
+    it('should build the index once per repository instance', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([makeLoreCommit({ loreId: 'aaaa1111' })]);
+
+      await repo.getLoreIdIndex();
+      await repo.getLoreIdIndex();
+
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('resolveFollowLinks index usage', () => {
+    it('should resolve referenced ids with a single --all pass', async () => {
+      const commitB = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' });
+      vi.mocked(gitClient.log).mockResolvedValue([commitB]);
+
+      const atomA = {
+        loreId: 'aaaa1111',
+        commitHash: 'aaa',
+        date: new Date(),
+        author: 'dev@example.com',
+        intent: 'test',
+        body: '',
+        trailers: {
+          'Lore-id': 'aaaa1111',
+          Constraint: [],
+          Rejected: [],
+          Confidence: null,
+          'Scope-risk': null,
+          Reversibility: null,
+          Directive: [],
+          Tested: [],
+          'Not-tested': [],
+          Supersedes: [],
+          'Depends-on': [],
+          Related: ['bbbb2222'],
+          custom: CustomTrailerCollection.empty(),
+        },
+        filesChanged: [],
+      };
+
+      const result = await repo.resolveFollowLinks([atomA], 3);
+
+      expect(result).toHaveLength(2);
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toContain('--all');
+    });
+  });
+
   describe('git log format', () => {
     it('should pass args to git client log (format is applied by GitClient)', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([]);

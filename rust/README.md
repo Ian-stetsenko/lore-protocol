@@ -19,7 +19,7 @@ script. The protocol is unchanged; only the runtime is.
 
 ## Build
 
-Requires Rust 1.80 or newer (`rustup` recommended) and `git` on `PATH`.
+Requires Rust 1.85 or newer (`rustup` recommended) and `git` on `PATH`.
 
 ```sh
 cd rust

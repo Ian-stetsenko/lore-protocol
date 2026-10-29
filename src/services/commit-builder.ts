@@ -45,7 +45,7 @@ export class CommitBuilder {
     this.config = config;
   }
 
-  build(input: CommitInput, existingLoreId?: LoreId): string {
+  build(input: CommitInput, existingLoreId?: LoreId): { message: string; loreId: LoreId } {
     const loreId = existingLoreId ?? this.loreIdGenerator.generate();
     const trailers = this.buildTrailers(loreId, input);
     const serialized = this.trailerParser.serialize(trailers);
@@ -60,7 +60,10 @@ export class CommitBuilder {
     parts.push('');
     parts.push(serialized);
 
-    return parts.join('\n');
+    return {
+      message: parts.join('\n'),
+      loreId,
+    };
   }
 
   validate(input: CommitInput): ValidationIssue[] {

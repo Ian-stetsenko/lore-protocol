@@ -39,7 +39,7 @@ function createMockFormatter(): IOutputFormatter {
 
 function createMockCommitBuilder(): CommitBuilder {
   return {
-    build: vi.fn().mockReturnValue('built message'),
+    build: vi.fn().mockReturnValue({ message: 'built message', loreId: 'a1b2c3d4' }),
     validate: vi.fn().mockReturnValue([]),
   } as unknown as CommitBuilder;
 }
@@ -129,6 +129,15 @@ describe('lore commit --amend', () => {
       '',
       { amend: true, noEdit: true },
     );
+  });
+
+  it('should read Lore-id from HEAD even with --amend --no-edit', async () => {
+    const headLoreIdReader = createMockHeadLoreIdReader('cafebabe');
+    const deps = createDeps({ headLoreIdReader });
+
+    await runCommitCommand(['--amend', '--no-edit'], deps);
+
+    expect(headLoreIdReader.read).toHaveBeenCalledOnce();
   });
 
   it('should throw when --no-edit is combined with --file', async () => {

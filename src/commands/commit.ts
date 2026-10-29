@@ -76,8 +76,12 @@ export function registerCommitCommand(
             1,
           );
         }
+        const loreId = await headLoreIdReader.read();
         const result = await gitClient.commit('', { amend: true, noEdit: true });
-        console.log(formatter.formatSuccess(`Commit amended: ${result.hash}`, { hash: result.hash }));
+        const message = loreId
+          ? `Commit amended: ${result.hash} | Lore-id: ${loreId}`
+          : `Commit amended: ${result.hash}`;
+        console.log(formatter.formatSuccess(message, { hash: result.hash, loreId }));
         return;
       }
 
@@ -103,17 +107,17 @@ export function registerCommitCommand(
       }
 
       // Build the commit message (reuse existing Lore-id on amend)
-      const message = commitBuilder.build(input, existingLoreId ?? undefined);
+      const { message: commitMessage, loreId } = commitBuilder.build(input, existingLoreId ?? undefined);
 
       // Run git commit
-      const result = await gitClient.commit(message, options.amend ? { amend: true } : undefined);
+      const result = await gitClient.commit(commitMessage, options.amend ? { amend: true } : undefined);
 
       // Output
       const verb = options.amend ? 'amended' : 'created';
       console.log(
         formatter.formatSuccess(
-          `Commit ${verb}: ${result.hash}`,
-          { hash: result.hash },
+          `Commit ${verb}: ${result.hash} | Lore-id: ${loreId}`,
+          { hash: result.hash, loreId },
         ),
       );
     });

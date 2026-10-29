@@ -142,6 +142,9 @@ export class GitClient implements IGitClient {
    * ~100ms per child process; 800+ atoms made every `lore log` take minutes).
    *
    * Parity notes vs the former per-commit `diff-tree --name-only -r`:
+   * `--full-diff` keeps the whole file list when the query carries a pathspec
+   * (plain `log --name-only -- <path>` would list only files under <path>);
+   * `--no-renames` matches diff-tree plumbing, which lists both sides of a rename;
    * merge commits list no files either way; root commits now list their
    * files (diff-tree without --root always showed none).
    *
@@ -158,8 +161,8 @@ export class GitClient implements IGitClient {
     }
 
     const nameArgs = hasLFlag
-      ? ['--name-only', `--format=%x1E%H`, '--no-walk', ...commits.map(c => c.hash)]
-      : ['--name-only', `--format=%x1E%H`, ...args];
+      ? ['--name-only', '--no-renames', `--format=%x1E%H`, '--no-walk', ...commits.map(c => c.hash)]
+      : ['--name-only', '--no-renames', '--full-diff', `--format=%x1E%H`, ...args];
 
     const stdout = await this.exec(['log', ...nameArgs]);
     const filesByHash = this.parseFilesChangedOutput(stdout);

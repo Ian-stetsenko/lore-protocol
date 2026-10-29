@@ -74,7 +74,7 @@ impl TrailerParser {
                 }
                 Some(_) => {}
                 None => {
-                    if custom_keys.is_empty() || custom_keys.iter().any(|k| *k == key) {
+                    if custom_keys.is_empty() || custom_keys.contains(&key) {
                         custom.entry(key).or_default().push(value.to_owned());
                     }
                 }

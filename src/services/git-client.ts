@@ -215,12 +215,16 @@ export class GitClient implements IGitClient {
   }
 
   async countCommitsSince(path: string, sinceCommitHash: string): Promise<number> {
+    // Paths stored in atoms are repository-relative (as git reports them),
+    // while this client may run from a subdirectory. The `:(top)` pathspec
+    // magic anchors the path at the repository root regardless of cwd, so
+    // `lore stale` no longer reports zero drift from nested directories (#60).
     const stdout = await this.exec([
       'rev-list',
       '--count',
       `${sinceCommitHash}..HEAD`,
       '--',
-      path,
+      `:(top)${path}`,
     ]);
     return parseInt(stdout.trim(), 10);
   }

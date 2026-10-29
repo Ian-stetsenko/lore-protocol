@@ -94,3 +94,14 @@ describe('GitClient.log loreOnly pre-filter', () => {
     expect(atom!.filesChanged).toEqual(['project/src/file.ts']);
   });
 });
+
+describe('GitClient.countCommitsSince from a subdirectory (issue #60)', () => {
+  it('counts commits touching a repository-relative path even when cwd is nested', async () => {
+    // After hashes.atom, exactly one commit (bodyMention) touched project/src/file.ts.
+    const fromRoot = new GitClient(root);
+    const fromSubdir = new GitClient(join(root, 'project'));
+
+    expect(await fromRoot.countCommitsSince('project/src/file.ts', hashes.atom)).toBe(1);
+    expect(await fromSubdir.countCommitsSince('project/src/file.ts', hashes.atom)).toBe(1);
+  });
+});

@@ -17,10 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Bulk file collection**: changed files are collected in one extra `git log --name-only` pass instead of one `git diff-tree` spawn per Lore commit. `lore log --json` on an 840-atom repository went from 36s to 0.7s on Windows. Root commits now report their files; `--full-diff` keeps the complete file list on path-scoped queries. ([#65](https://github.com/Ian-stetsenko/lore-protocol/issues/65), [#66](https://github.com/Ian-stetsenko/lore-protocol/pull/66)) — thanks @TommyC81
 - **Shared Lore-id index**: `lore trace`, follow-link resolution and reference validation resolve ids against one lazily built index (a single `git log --all` pass) instead of one full-history grep per reference. A full-depth trace went from 148s to 0.86s. ([#67](https://github.com/Ian-stetsenko/lore-protocol/pull/67)) — thanks @TommyC81
+- **Git-level Lore-id pre-filter**: discovery queries (`log`, path commands, `search`, `trace` index) pass a `--grep` for the `Lore-id` trailer line, so git skips non-Lore history natively. Lore's work now scales with the number of atoms rather than total commits; a 1.4M-commit repository that previously crashed scans in seconds. The trailer parser remains authoritative. ([#55](https://github.com/Ian-stetsenko/lore-protocol/pull/55)) — thanks @c-ferrier
 
 ### Fixed
 
 - **Windows test suite**: two tests hard-coded `/tmp`; the suite is now green on Windows.
+- **`lore stale` from a subdirectory**: drift was silently reported as zero when run from a nested directory because repository-relative paths were resolved against the current directory. Paths are now anchored at the repository root via the `:(top)` pathspec. ([#60](https://github.com/Ian-stetsenko/lore-protocol/issues/60), diagnosed in [#61](https://github.com/Ian-stetsenko/lore-protocol/pull/61)) — thanks @c-ferrier
 
 ### Maintenance
 

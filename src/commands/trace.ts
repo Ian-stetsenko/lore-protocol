@@ -51,6 +51,11 @@ export function registerTraceCommand(
 
       const maxDepth = options.maxDepth;
 
+      // Edges resolve against one shared index (one git log --all pass)
+      // instead of one full-history grep per edge, which is minutes on
+      // large corpora. Built lazily so atoms without references never pay.
+      let index: ReadonlyMap<LoreId, LoreAtom> | null = null;
+
       while (queue.length > 0) {
         const entry = queue.shift()!;
         const currentAtom = entry.atom;
@@ -64,7 +69,9 @@ export function registerTraceCommand(
               continue;
             }
 
-            const targetAtom = await atomRepository.findByLoreId(refId);
+            index ??= await atomRepository.getLoreIdIndex();
+
+            const targetAtom = index.get(refId) ?? null;
 
             edges.push({
               from: currentAtom.loreId,

@@ -296,13 +296,21 @@ export class Validator {
       }
     }
 
+    const validIds = refSets
+      .flatMap(({ values }) => values)
+      .filter((id) => LORE_ID_PATTERN.test(id));
+
+    // One shared index pass replaces one full-history grep per referenced id
+    const index =
+      validIds.length > 0 ? await this.atomRepository.getLoreIdIndex() : null;
+
     for (const { key, values } of refSets) {
       for (const id of values) {
         if (!LORE_ID_PATTERN.test(id)) {
           continue; // Invalid format already caught by validateReferenceFormats
         }
-        const found = await this.atomRepository.findByLoreId(id);
-        if (found === null) {
+        const found = index !== null && index.has(id);
+        if (!found) {
           issues.push({
             severity: 'warning',
             rule: 'reference-exists',

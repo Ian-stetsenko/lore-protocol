@@ -18,6 +18,9 @@ export class AtomRepository {
     private readonly customTrailerKeys: readonly string[] = [],
   ) {}
 
+  /** Lazily built Lore-id -> atom index over the whole history (--all). */
+  private loreIndex: Promise<ReadonlyMap<LoreId, LoreAtom>> | null = null;
+
   /**
    * Find atoms that touched the given target path/file/directory.
    * Accepts pre-resolved git log args (from PathResolver) so that
@@ -46,6 +49,31 @@ export class AtomRepository {
     const atoms = await this.parseRawCommits(rawCommits);
 
     return atoms.find((atom) => atom.loreId === loreId) ?? null;
+  }
+
+  /**
+   * Build (once per instance) an index of every atom by Lore-id from a
+   * single `git log --all` pass. Reference-heavy traversals (trace BFS,
+   * follow-link resolution, reference validation) look up ids against this
+   * index instead of running one full-history `git log --grep` per id,
+   * which is minutes on large corpora (hundreds of greps per traversal).
+   * Newest-first insertion with first-wins keeps the same atom a grep-based
+   * findByLoreId returns.
+   */
+  async getLoreIdIndex(): Promise<ReadonlyMap<LoreId, LoreAtom>> {
+    this.loreIndex ??= this.gitClient
+      .log(['--all'])
+      .then((rawCommits) => this.parseRawCommits(rawCommits))
+      .then((atoms) => {
+        const index = new Map<LoreId, LoreAtom>();
+        for (const atom of atoms) {
+          if (!index.has(atom.loreId)) {
+            index.set(atom.loreId, atom);
+          }
+        }
+        return index;
+      });
+    return this.loreIndex;
   }
 
   /**
@@ -121,6 +149,9 @@ export class AtomRepository {
 
     const queue: Array<{ loreId: LoreId; depth: number }> = [];
 
+    // Lazily built on the first unresolved reference (see getLoreIdIndex)
+    let index: ReadonlyMap<LoreId, LoreAtom> | null = null;
+
     // Seed the BFS with all reference IDs from the initial atoms
     for (const atom of atoms) {
       const refIds = this.extractReferenceIds(atom.trailers);
@@ -140,7 +171,10 @@ export class AtomRepository {
         continue;
       }
 
-      const resolved = await this.findByLoreId(entry.loreId);
+      // One shared index replaces one full-history grep per visited id
+      index ??= await this.getLoreIdIndex();
+
+      const resolved = index.get(entry.loreId) ?? null;
       if (resolved === null) {
         continue;
       }

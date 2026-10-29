@@ -29,7 +29,7 @@ export class AtomRepository {
   async findByTarget(gitLogArgs: readonly string[], options: PathQueryOptions): Promise<LoreAtom[]> {
     const logArgs = this.buildLogArgs(options);
     const allArgs = [...logArgs, ...gitLogArgs];
-    const rawCommits = await this.gitClient.log(allArgs);
+    const rawCommits = await this.gitClient.log(allArgs, { loreOnly: true });
     const atoms = await this.parseRawCommits(rawCommits);
     return this.applyFilters(atoms, options);
   }
@@ -44,7 +44,11 @@ export class AtomRepository {
       return null;
     }
 
-    const logArgs = ['--all', `--grep=Lore-id: ${loreId}`];
+    // Anchored on a trailer line; whitespace after the colon is optional
+    // because git accepts and normalises `Lore-id:<id>`. loreId is validated
+    // hex above, so no regex escaping is needed. Not combined with loreOnly:
+    // git ORs multiple --grep patterns, which would widen this to a full scan.
+    const logArgs = ['--all', '--extended-regexp', `--grep=^Lore-id:[[:space:]]*${loreId}`];
     const rawCommits = await this.gitClient.log(logArgs);
     const atoms = await this.parseRawCommits(rawCommits);
 
@@ -62,7 +66,7 @@ export class AtomRepository {
    */
   async getLoreIdIndex(): Promise<ReadonlyMap<LoreId, LoreAtom>> {
     this.loreIndex ??= this.gitClient
-      .log(['--all'])
+      .log(['--all'], { loreOnly: true })
       .then((rawCommits) => this.parseRawCommits(rawCommits))
       .then((atoms) => {
         const index = new Map<LoreId, LoreAtom>();
@@ -112,7 +116,7 @@ export class AtomRepository {
       args.push(`--max-count=${options.maxCommits}`);
     }
 
-    const rawCommits = await this.gitClient.log(args);
+    const rawCommits = await this.gitClient.log(args, { loreOnly: true });
     return this.parseRawCommits(rawCommits);
   }
 
@@ -122,7 +126,7 @@ export class AtomRepository {
    */
   async findByScope(scope: string, options: PathQueryOptions): Promise<LoreAtom[]> {
     const logArgs = this.buildLogArgs(options);
-    const rawCommits = await this.gitClient.log(logArgs);
+    const rawCommits = await this.gitClient.log(logArgs, { loreOnly: true });
     const atoms = await this.parseRawCommits(rawCommits);
 
     const scopeFiltered = atoms.filter((atom) => {

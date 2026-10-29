@@ -25,8 +25,17 @@ export interface CommitOptions {
   readonly noEdit?: boolean;
 }
 
+export interface LogOptions {
+  /**
+   * Pre-filter at the git level to commits that carry a Lore-id trailer line.
+   * Lets git skip non-Lore history natively (million-commit repositories stay
+   * usable); the trailer parser remains the authority on what is an atom.
+   */
+  readonly loreOnly?: boolean;
+}
+
 export interface IGitClient {
-  log(args: readonly string[]): Promise<readonly RawCommit[]>;
+  log(args: readonly string[], options?: LogOptions): Promise<readonly RawCommit[]>;
   blame(file: string, lineStart: number, lineEnd: number): Promise<readonly BlameLine[]>;
   commit(message: string, options?: CommitOptions): Promise<CommitResult>;
   hasStagedChanges(): Promise<boolean>;

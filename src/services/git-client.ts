@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { IGitClient, RawCommit, BlameLine, CommitResult, CommitOptions } from '../interfaces/git-client.js';
+import type { IGitClient, RawCommit, BlameLine, CommitResult, CommitOptions, LogOptions } from '../interfaces/git-client.js';
 import { GitError } from '../util/errors.js';
 
 const execFile = promisify(execFileCb);
@@ -32,6 +32,16 @@ const LOG_FORMAT = '%H%x1F%aI%x1F%ae%x1F%s%x1F%b%x1F%(trailers:only,unfold)%x1E'
 const BLAME_HASH_PATTERN = /^([0-9a-f]{40})\s/;
 
 /**
+ * Git-level pre-filter for Lore commits (LogOptions.loreOnly).
+ * `--grep` is line-oriented, so the pattern anchors on a trailer-looking line.
+ * Whitespace after the colon is optional because git accepts and normalises
+ * `Lore-id:abcd1234`; the parser stays authoritative and still rejects
+ * commits where the line sits in the body rather than the trailer block.
+ * Must not be combined with other --grep patterns (git ORs them by default).
+ */
+const LORE_ONLY_ARGS: readonly string[] = ['--extended-regexp', '--grep=^Lore-id:[[:space:]]*[0-9a-f]{8}'];
+
+/**
  * Real git interaction layer using child_process.execFile.
  *
  * GoF: Adapter -- adapts the volatile git CLI to a stable domain interface.
@@ -44,12 +54,13 @@ export class GitClient implements IGitClient {
     this.cwd = cwd ?? process.cwd();
   }
 
-  async log(args: readonly string[]): Promise<readonly RawCommit[]> {
-    const hasLFlag = args.some(arg => arg.startsWith('-L'));
+  async log(args: readonly string[], options?: LogOptions): Promise<readonly RawCommit[]> {
+    const effectiveArgs = options?.loreOnly ? [...LORE_ONLY_ARGS, ...args] : args;
+    const hasLFlag = effectiveArgs.some(arg => arg.startsWith('-L'));
 
     const baseArgs = hasLFlag
-      ? ['log', ...args]
-      : ['log', `--format=${LOG_FORMAT}`, ...args];
+      ? ['log', ...effectiveArgs]
+      : ['log', `--format=${LOG_FORMAT}`, ...effectiveArgs];
 
     const stdout = await this.exec(baseArgs);
 
@@ -57,7 +68,7 @@ export class GitClient implements IGitClient {
       ? this.parseLFlagOutput(stdout)
       : this.parseLogOutput(stdout);
 
-    return this.withFilesChanged(commits, args, hasLFlag);
+    return this.withFilesChanged(commits, effectiveArgs, hasLFlag);
   }
 
   async blame(file: string, lineStart: number, lineEnd: number): Promise<readonly BlameLine[]> {

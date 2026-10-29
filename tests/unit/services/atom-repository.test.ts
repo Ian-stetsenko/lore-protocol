@@ -724,3 +724,46 @@ describe('AtomRepository', () => {
     });
   });
 });
+
+describe('AtomRepository lore-only discovery (git-level pre-filter)', () => {
+  let gitClient: IGitClient;
+  let repo: AtomRepository;
+
+  beforeEach(() => {
+    gitClient = createMockGitClient();
+    repo = new AtomRepository(gitClient, createMockTrailerParser() as any);
+  });
+
+  it('asks GitClient for Lore commits only on discovery queries', async () => {
+    await repo.findAll();
+    await repo.findByTarget(makeGitLogArgs(), makeQueryOptions());
+    await repo.findByScope('auth', makeQueryOptions());
+    await repo.getLoreIdIndex();
+
+    const calls = vi.mocked(gitClient.log).mock.calls;
+    expect(calls).toHaveLength(4);
+    for (const call of calls) {
+      expect(call[1]).toEqual({ loreOnly: true });
+    }
+  });
+
+  it('does not pre-filter single-commit lookups, where --grep would walk to an ancestor', async () => {
+    await repo.findByCommitHash('abc123');
+    await repo.findByRange('main..HEAD');
+
+    for (const call of vi.mocked(gitClient.log).mock.calls) {
+      expect(call[1]).toBeUndefined();
+    }
+  });
+
+  it('findByLoreId greps a trailer line and tolerates missing or extra whitespace after the colon', async () => {
+    await repo.findByLoreId('deadbeef');
+
+    const [args, options] = vi.mocked(gitClient.log).mock.calls[0];
+    expect(args).toContain('--all');
+    expect(args).toContain('--extended-regexp');
+    expect(args).toContain('--grep=^Lore-id:[[:space:]]*deadbeef');
+    // Its own grep must not be OR-ed with the generic Lore-id grep
+    expect(options).toBeUndefined();
+  });
+});

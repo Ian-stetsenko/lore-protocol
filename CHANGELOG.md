@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`lore hooks install` / `lore hooks uninstall`**: commit-msg hook that validates each commit via `lore validate --commit-msg-file`, with a `[hooks]` config section (`enforce`, `allow_fixup`, `skip_authors`, `skip_patterns`), a pre-commit framework hook definition, and an advisory GitHub Actions workflow. ([#41](https://github.com/Ian-stetsenko/lore-protocol/issues/41), [#52](https://github.com/Ian-stetsenko/lore-protocol/pull/52))
+- **Lore-id in `lore commit` output**: text output shows `| Lore-id: <id>` and JSON output includes `loreId`, so agents can reference the new atom without a follow-up query. ([#59](https://github.com/Ian-stetsenko/lore-protocol/pull/59)) — thanks @c-ferrier
+- **`lore init` drift detection**: re-running init on an existing project reports missing options, lists customized keys, and gives recovery hints for corrupted TOML. ([#56](https://github.com/Ian-stetsenko/lore-protocol/pull/56)) — thanks @c-ferrier
+
+### Performance
+
+- **Bulk file collection**: changed files are collected in one extra `git log --name-only` pass instead of one `git diff-tree` spawn per Lore commit. `lore log --json` on an 840-atom repository went from 36s to 0.7s on Windows. Root commits now report their files; `--full-diff` keeps the complete file list on path-scoped queries. ([#65](https://github.com/Ian-stetsenko/lore-protocol/issues/65), [#66](https://github.com/Ian-stetsenko/lore-protocol/pull/66)) — thanks @TommyC81
+- **Shared Lore-id index**: `lore trace`, follow-link resolution and reference validation resolve ids against one lazily built index (a single `git log --all` pass) instead of one full-history grep per reference. A full-depth trace went from 148s to 0.86s. ([#67](https://github.com/Ian-stetsenko/lore-protocol/pull/67)) — thanks @TommyC81
+
+### Fixed
+
+- **Windows test suite**: two tests hard-coded `/tmp`; the suite is now green on Windows.
+
+### Maintenance
+
+- npm publishing is gated to the project owner via the publish workflow and an `npm-publish` environment; maintainers listed in CODEOWNERS can review and merge.
+
 ## [0.5.0] - 2026-05-11
 
 ### Added

@@ -3,13 +3,15 @@ import { HookInstaller } from '../../../src/services/hook-installer.js';
 import { HookScriptGenerator, LORE_MARKER } from '../../../src/services/hook-script-generator.js';
 import { DEFAULT_CONFIG } from '../../../src/types/config.js';
 import * as fs from 'node:fs/promises';
+import { join } from 'node:path';
 
 vi.mock('node:fs/promises');
 
 describe('HookInstaller', () => {
   let installer: HookInstaller;
   const repoRoot = '/repo';
-  const hookPath = '/repo/.git/hooks/commit-msg';
+  const hooksDir = join(repoRoot, '.git', 'hooks');
+  const hookPath = join(hooksDir, 'commit-msg');
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -32,7 +34,7 @@ describe('HookInstaller', () => {
       expect(result.installed).toBe(true);
       expect(result.hookPath).toBe(hookPath);
       expect(result.alreadyInstalled).toBe(false);
-      expect(fs.mkdir).toHaveBeenCalledWith('/repo/.git/hooks', { recursive: true });
+      expect(fs.mkdir).toHaveBeenCalledWith(hooksDir, { recursive: true });
       expect(fs.writeFile).toHaveBeenCalledWith(hookPath, expect.stringContaining(LORE_MARKER), 'utf-8');
       expect(fs.chmod).toHaveBeenCalledWith(hookPath, 0o755);
     });
@@ -72,7 +74,7 @@ describe('HookInstaller', () => {
 
       await installer.install(repoRoot, { force: false });
 
-      expect(fs.mkdir).toHaveBeenCalledWith('/repo/.git/hooks', { recursive: true });
+      expect(fs.mkdir).toHaveBeenCalledWith(hooksDir, { recursive: true });
     });
 
     it('sets executable permission on hook file', async () => {

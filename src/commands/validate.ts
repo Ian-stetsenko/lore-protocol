@@ -52,6 +52,7 @@ export function registerValidateCommand(
           subject: lines[0] ?? '',
           body: content,
           trailers: trailerBlock,
+          filesChanged: [],
         }];
       } else {
         // Normal mode: validate commits from git history

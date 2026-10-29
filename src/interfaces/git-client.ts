@@ -5,6 +5,8 @@ export interface RawCommit {
   readonly subject: string;
   readonly body: string;
   readonly trailers: string;
+  /** Files changed in this commit, collected in bulk by GitClient.log. */
+  readonly filesChanged: readonly string[];
 }
 
 export interface BlameLine {

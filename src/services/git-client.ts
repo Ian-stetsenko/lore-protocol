@@ -53,11 +53,11 @@ export class GitClient implements IGitClient {
 
     const stdout = await this.exec(baseArgs);
 
-    if (hasLFlag) {
-      return this.parseLFlagOutput(stdout);
-    }
+    const commits = hasLFlag
+      ? this.parseLFlagOutput(stdout)
+      : this.parseLogOutput(stdout);
 
-    return this.parseLogOutput(stdout);
+    return this.withFilesChanged(commits, args, hasLFlag);
   }
 
   async blame(file: string, lineStart: number, lineEnd: number): Promise<readonly BlameLine[]> {
@@ -133,6 +133,73 @@ export class GitClient implements IGitClient {
     return stdout.trim().split('\n').filter(line => line.length > 0);
   }
 
+  /**
+   * Attach each commit's changed files in bulk.
+   *
+   * One extra `git log --name-only` pass over the same range replaces one
+   * `git diff-tree` spawn per commit, which dominates query time on large
+   * lore corpora and on platforms with expensive process spawns (Windows:
+   * ~100ms per child process; 800+ atoms made every `lore log` take minutes).
+   *
+   * Parity notes vs the former per-commit `diff-tree --name-only -r`:
+   * merge commits list no files either way; root commits now list their
+   * files (diff-tree without --root always showed none).
+   *
+   * The -L flag does not support --format, so there the already-parsed
+   * hashes are queried via --no-walk instead.
+   */
+  private async withFilesChanged(
+    commits: readonly RawCommit[],
+    args: readonly string[],
+    hasLFlag: boolean,
+  ): Promise<readonly RawCommit[]> {
+    if (commits.length === 0) {
+      return commits;
+    }
+
+    const nameArgs = hasLFlag
+      ? ['--name-only', `--format=%x1E%H`, '--no-walk', ...commits.map(c => c.hash)]
+      : ['--name-only', `--format=%x1E%H`, ...args];
+
+    const stdout = await this.exec(['log', ...nameArgs]);
+    const filesByHash = this.parseFilesChangedOutput(stdout);
+
+    return commits.map(commit => ({
+      ...commit,
+      filesChanged: filesByHash.get(commit.hash) ?? [],
+    }));
+  }
+
+  /**
+   * Parse `git log --name-only --format=%x1E%H` output into a hash -> files map.
+   * Each record is "<hash>\n\n<file per line>"; commits without a diff (merges)
+   * emit only the hash line. Paths cannot contain \n and a 0x1E byte in a
+   * path is pathological, so the split is unambiguous.
+   */
+  private parseFilesChangedOutput(stdout: string): Map<string, readonly string[]> {
+    const map = new Map<string, readonly string[]>();
+    if (!stdout.trim()) {
+      return map;
+    }
+
+    for (const chunk of stdout.split(RECORD_SEP)) {
+      if (!chunk.trim()) continue;
+      const separatorIndex = chunk.indexOf('\n\n');
+      if (separatorIndex === -1) {
+        map.set(chunk.trim(), []);
+        continue;
+      }
+      const hash = chunk.slice(0, separatorIndex).trim();
+      const files = chunk
+        .slice(separatorIndex + 2)
+        .split('\n')
+        .filter(line => line.length > 0);
+      map.set(hash, files);
+    }
+
+    return map;
+  }
+
   async countCommitsSince(path: string, sinceCommitHash: string): Promise<number> {
     const stdout = await this.exec([
       'rev-list',
@@ -169,6 +236,7 @@ export class GitClient implements IGitClient {
       }
 
       commits.push({
+        filesChanged: [],
         hash: fields[0].trim(),
         date: fields[1].trim(),
         author: fields[2].trim(),
@@ -243,7 +311,7 @@ export class GitClient implements IGitClient {
         }
       }
 
-      commits.push({ hash, date, author, subject, body, trailers });
+      commits.push({ hash, date, author, subject, body, trailers, filesChanged: [] });
     }
 
     return commits;

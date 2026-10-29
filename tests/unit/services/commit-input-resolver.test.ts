@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CommitInputResolver } from '../../../src/services/commit-input-resolver.js';
 import type { IPrompt } from '../../../src/interfaces/prompt.js';
 import type { CommitCommandOptions } from '../../../src/services/commit-input-resolver.js';
@@ -57,7 +59,7 @@ describe('CommitInputResolver', () => {
       const prompt = createMockPrompt();
       const resolver = new CommitInputResolver(prompt);
 
-      const tmpPath = '/tmp/test-lore-input.json';
+      const tmpPath = join(tmpdir(), 'test-lore-input.json');
       const { writeFileSync } = await import('node:fs');
       writeFileSync(tmpPath, JSON.stringify({ intent: 'from file', trailers: {} }));
 
@@ -154,7 +156,7 @@ describe('CommitInputResolver', () => {
       const prompt = createMockPrompt();
       const resolver = new CommitInputResolver(prompt);
 
-      const tmpPath = '/tmp/test-lore-file-over-flags.json';
+      const tmpPath = join(tmpdir(), 'test-lore-file-over-flags.json');
       const { writeFileSync } = await import('node:fs');
       writeFileSync(tmpPath, JSON.stringify({ intent: 'file wins' }));
 

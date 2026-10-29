@@ -51,6 +51,14 @@ npm install -g lore-protocol
 
 Requires Node.js >= 18.
 
+A native Rust build of the same CLI lives in [`rust/`](rust/README.md). It has
+no runtime dependency and starts in milliseconds, which matters for the
+commit-msg hook and for agents calling `lore` in loops:
+
+```sh
+cargo install --path rust
+```
+
 ## Quick Start
 
 ### 1. Initialize Lore in your repository

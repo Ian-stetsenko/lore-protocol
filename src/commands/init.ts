@@ -31,6 +31,12 @@ max_depth = 3
 
 [cli]
 update_check = true
+
+[hooks]
+enforce = true
+allow_fixup = true
+skip_authors = []
+skip_patterns = ["^Merge "]
 `;
 
 /**

@@ -24,6 +24,12 @@ export interface LoreConfig {
   readonly cli: {
     readonly updateCheck: boolean;
   };
+  readonly hooks: {
+    readonly enforce: boolean;
+    readonly allowFixup: boolean;
+    readonly skipAuthors: readonly string[];
+    readonly skipPatterns: readonly string[];
+  };
 }
 
 export const DEFAULT_CONFIG: LoreConfig = {
@@ -34,4 +40,5 @@ export const DEFAULT_CONFIG: LoreConfig = {
   output: { defaultFormat: 'text' },
   follow: { maxDepth: 3 },
   cli: { updateCheck: true },
+  hooks: { enforce: true, allowFixup: true, skipAuthors: [], skipPatterns: ['^Merge '] },
 };

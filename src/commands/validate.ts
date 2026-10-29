@@ -1,13 +1,16 @@
 import type { Command } from 'commander';
 import type { Validator } from '../services/validator.js';
-import type { IGitClient } from '../interfaces/git-client.js';
+import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
+import type { TrailerParser } from '../services/trailer-parser.js';
 import type { CommitValidationResult, FormattableValidationResult, ValidationIssue } from '../types/output.js';
+import { readFile } from 'node:fs/promises';
 
 interface ValidateCommandOptions {
   readonly since?: string;
   readonly last?: number;
   readonly strict?: boolean;
+  readonly commitMsgFile?: string;
 }
 
 /**
@@ -21,6 +24,7 @@ export function registerValidateCommand(
   deps: {
     validator: Validator;
     gitClient: IGitClient;
+    trailerParser: TrailerParser;
     getFormatter: () => IOutputFormatter;
   },
 ): void {
@@ -30,26 +34,41 @@ export function registerValidateCommand(
     .option('--since <ref>', 'Validate all commits since ref (e.g., main)')
     .option('--last <n>', 'Validate the last N commits', parseInt)
     .option('--strict', 'Treat warnings as errors')
+    .option('--commit-msg-file <path>', 'Validate a commit message file (used by git hooks)')
     .action(async (range: string | undefined, options: ValidateCommandOptions) => {
-      const { validator, gitClient, getFormatter } = deps;
+      const { validator, gitClient, trailerParser, getFormatter } = deps;
 
-      // Determine the revision range
-      let logArgs: string[];
+      let rawCommits: readonly RawCommit[];
 
-      if (range) {
-        // Explicit range: e.g., HEAD~5..HEAD or main..feature
-        logArgs = [range];
-      } else if (options.since) {
-        logArgs = [`${options.since}..HEAD`];
-      } else if (options.last !== undefined && options.last > 0) {
-        logArgs = [`-${options.last}`];
+      if (options.commitMsgFile) {
+        // Hook mode: validate a commit message file before the commit exists
+        const content = await readFile(options.commitMsgFile, 'utf-8');
+        const trailerBlock = trailerParser.extractTrailerBlock(content);
+        const lines = content.split('\n');
+        rawCommits = [{
+          hash: '(pending)',
+          date: new Date().toISOString(),
+          author: '',
+          subject: lines[0] ?? '',
+          body: content,
+          trailers: trailerBlock,
+        }];
       } else {
-        // Default: last commit
-        logArgs = ['-1'];
-      }
+        // Normal mode: validate commits from git history
+        let logArgs: string[];
 
-      // Get raw commits from git
-      const rawCommits = await gitClient.log(logArgs);
+        if (range) {
+          logArgs = [range];
+        } else if (options.since) {
+          logArgs = [`${options.since}..HEAD`];
+        } else if (options.last !== undefined && options.last > 0) {
+          logArgs = [`-${options.last}`];
+        } else {
+          logArgs = ['-1'];
+        }
+
+        rawCommits = await gitClient.log(logArgs);
+      }
 
       // Validate all commits
       let results: readonly CommitValidationResult[] = await validator.validate(rawCommits);

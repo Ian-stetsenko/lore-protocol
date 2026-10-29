@@ -44,6 +44,10 @@ import { registerCommitCommand } from './commands/commit.js';
 import { registerValidateCommand } from './commands/validate.js';
 import { registerSquashCommand } from './commands/squash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
+import { registerHooksCommand } from './commands/hooks.js';
+
+import { HookScriptGenerator } from './services/hook-script-generator.js';
+import { HookInstaller } from './services/hook-installer.js';
 
 import { LoreError, ValidationError } from './util/errors.js';
 import { shouldCheckForUpdate } from './util/update-check.js';
@@ -182,6 +186,7 @@ async function main(): Promise<void> {
   registerValidateCommand(program, {
     validator,
     gitClient,
+    trailerParser,
     getFormatter,
   });
 
@@ -194,6 +199,14 @@ async function main(): Promise<void> {
   registerDoctorCommand(program, {
     atomRepository,
     configLoader,
+    getFormatter,
+  });
+
+  const hookScriptGenerator = new HookScriptGenerator();
+  const hookInstaller = new HookInstaller(hookScriptGenerator, config.hooks);
+  registerHooksCommand(program, {
+    hookInstaller,
+    gitClient,
     getFormatter,
   });
 

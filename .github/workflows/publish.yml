@@ -11,7 +11,13 @@ permissions:
 
 jobs:
   publish:
+    # Only the project owner publishes. Collaborators can merge to main,
+    # but a release they create (or a manual dispatch) will not reach npm.
+    # The `npm-publish` environment adds a second gate: configure it in
+    # Settings > Environments with the owner as required reviewer.
+    if: github.actor == 'Ian-stetsenko'
     runs-on: ubuntu-latest
+    environment: npm-publish
     steps:
       - uses: actions/checkout@v6
 

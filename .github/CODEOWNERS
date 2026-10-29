@@ -1,2 +1,4 @@
-# All changes require approval from the project owner
-* @Ian-stetsenko
+# Maintainers who can review and merge pull requests.
+# Releases and npm publishing stay with the project owner
+# (see .github/workflows/publish.yml).
+* @Ian-stetsenko @c-ferrier @TommyC81

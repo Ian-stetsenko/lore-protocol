@@ -389,7 +389,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/commands/validate.ts`
 - **Contains**: `registerValidateCommand()` function.
-- **Single Responsibility**: Validates commits for Lore protocol compliance. Supports revision range, `--since`, `--last`, and `--strict` modes.
+- **Single Responsibility**: Validates commits for Lore protocol compliance. Supports revision range, `--from`, `--last`, and `--strict` modes (`--since` is a deprecated alias of `--from`, removed in 0.7).
 - **Dependencies**: `Validator`, `IGitClient`, `IOutputFormatter`, types.
 
 #### `src/commands/squash.ts`

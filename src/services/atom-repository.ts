@@ -18,7 +18,10 @@ export class AtomRepository {
     private readonly customTrailerKeys: readonly string[] = [],
   ) {}
 
-  /** Lazily built Lore-id -> atom index over the whole history (--all). */
+  /**
+   * Lazily built Lore-id -> atom index: HEAD-reachable atoms first, then an
+   * --all pass that fills ids living only off the current branch.
+   */
   private loreIndex: Promise<ReadonlyMap<LoreId, LoreAtom>> | null = null;
 
   /**
@@ -38,6 +41,10 @@ export class AtomRepository {
    * Find an atom by its Lore-id.
    * Uses git log --grep to efficiently search for the specific trailer value
    * instead of fetching entire history.
+   *
+   * The HEAD-reachable history is searched first and --all is consulted only
+   * on a miss, so a future-dated commit on a side branch can never shadow
+   * the current branch's atom (issue #57).
    */
   async findByLoreId(loreId: LoreId): Promise<LoreAtom | null> {
     if (!LORE_ID_PATTERN.test(loreId)) {
@@ -48,35 +55,66 @@ export class AtomRepository {
     // because git accepts and normalises `Lore-id:<id>`. loreId is validated
     // hex above, so no regex escaping is needed. Not combined with loreOnly:
     // git ORs multiple --grep patterns, which would widen this to a full scan.
-    const logArgs = ['--all', '--extended-regexp', `--grep=^Lore-id:[[:space:]]*${loreId}`];
-    const rawCommits = await this.gitClient.log(logArgs);
-    const atoms = await this.parseRawCommits(rawCommits);
+    const grepArgs = ['--extended-regexp', `--grep=^Lore-id:[[:space:]]*${loreId}`];
 
-    return atoms.find((atom) => atom.loreId === loreId) ?? null;
+    // Pass 1: commits reachable from HEAD (no --all). An unborn HEAD (fresh
+    // `git init`) makes this pass fail while --all succeeds and returns
+    // nothing; treat that as a miss so fresh-repo behavior is unchanged.
+    let headMatch: LoreAtom | undefined;
+    try {
+      const headCommits = await this.gitClient.log(grepArgs);
+      headMatch = (await this.parseRawCommits(headCommits)).find(
+        (atom) => atom.loreId === loreId,
+      );
+    } catch {
+      // Fall through to the --all pass, which surfaces real git failures.
+    }
+    if (headMatch) {
+      return headMatch;
+    }
+
+    // Pass 2 (miss): every ref, for Lore-ids that only exist off the branch.
+    const allCommits = await this.gitClient.log(['--all', ...grepArgs]);
+    const allAtoms = await this.parseRawCommits(allCommits);
+    return allAtoms.find((atom) => atom.loreId === loreId) ?? null;
   }
 
   /**
    * Build (once per instance) an index of every atom by Lore-id from a
-   * single `git log --all` pass. Reference-heavy traversals (trace BFS,
-   * follow-link resolution, reference validation) look up ids against this
-   * index instead of running one full-history `git log --grep` per id,
-   * which is minutes on large corpora (hundreds of greps per traversal).
-   * Newest-first insertion with first-wins keeps the same atom a grep-based
-   * findByLoreId returns.
+   * `git log` pass over HEAD followed by a `git log --all` pass.
+   * Reference-heavy traversals (trace BFS, follow-link resolution, reference
+   * validation) look up ids against this index instead of running one
+   * full-history `git log --grep` per id, which is minutes on large corpora
+   * (hundreds of greps per traversal).
+   *
+   * HEAD-reachable atoms are inserted first and the --all pass only fills
+   * ids that are still missing, so lookups stay consistent with
+   * findByLoreId: a side branch can never shadow the current branch
+   * (issue #57). Within each pass, newest-first insertion with first-wins
+   * keeps the same atom a grep-based findByLoreId returns.
    */
   async getLoreIdIndex(): Promise<ReadonlyMap<LoreId, LoreAtom>> {
-    this.loreIndex ??= this.gitClient
-      .log(['--all'], { loreOnly: true })
-      .then((rawCommits) => this.parseRawCommits(rawCommits))
-      .then((atoms) => {
-        const index = new Map<LoreId, LoreAtom>();
-        for (const atom of atoms) {
-          if (!index.has(atom.loreId)) {
-            index.set(atom.loreId, atom);
-          }
+    this.loreIndex ??= (async () => {
+      // HEAD pass seeds every id reachable from the current branch. On an
+      // unborn HEAD it fails while --all succeeds; skip it then, so the
+      // index over a fresh repository stays empty as before.
+      let headCommits: readonly RawCommit[] = [];
+      try {
+        headCommits = await this.gitClient.log([], { loreOnly: true });
+      } catch {
+        // --all pass below is the authority; real git failures throw there.
+      }
+      // --all pass contributes only ids the HEAD pass missed.
+      const allCommits = await this.gitClient.log(['--all'], { loreOnly: true });
+      const atoms = await this.parseRawCommits([...headCommits, ...allCommits]);
+      const index = new Map<LoreId, LoreAtom>();
+      for (const atom of atoms) {
+        if (!index.has(atom.loreId)) {
+          index.set(atom.loreId, atom);
         }
-        return index;
-      });
+      }
+      return index;
+    })();
     return this.loreIndex;
   }
 
@@ -102,9 +140,16 @@ export class AtomRepository {
 
   /**
    * Find all Lore atoms, optionally filtered by date range and limit.
+   * allRefs widens the scan from the current branch to every ref (--all);
+   * used by doctor for opt-in cross-ref duplicate detection.
    */
-  async findAll(options: { since?: string; until?: string; maxCommits?: number } = {}): Promise<LoreAtom[]> {
+  async findAll(
+    options: { since?: string; until?: string; maxCommits?: number; allRefs?: boolean } = {},
+  ): Promise<LoreAtom[]> {
     const args = this.buildBaseLogArgs();
+    if (options.allRefs) {
+      args.push('--all');
+    }
 
     if (options.since) {
       args.push(`--since=${options.since}`);

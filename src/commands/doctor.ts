@@ -6,6 +6,9 @@ import type { FormattableDoctorResult, DoctorCheck } from '../types/output.js';
 import type { LoreAtom } from '../types/domain.js';
 import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
 
+/** Atom scan limit for health checks, bounding runtime on large repos. */
+const DOCTOR_SCAN_LIMIT = 10_000;
+
 /**
  * Register the `lore doctor` command.
  * Runs health checks:
@@ -25,7 +28,8 @@ export function registerDoctorCommand(
   program
     .command('doctor')
     .description('Health check: broken refs, config issues')
-    .action(async () => {
+    .option('--all', 'Check Lore-id uniqueness across all refs, not just the current branch')
+    .action(async (options: { all?: boolean }) => {
       const { atomRepository, configLoader, getFormatter } = deps;
 
       const checks: DoctorCheck[] = [];
@@ -35,9 +39,17 @@ export function registerDoctorCommand(
 
       // Get all atoms for remaining checks
       let allAtoms: LoreAtom[];
+      let uniquenessAtoms: LoreAtom[];
       try {
         // Scan up to 10k commits — enough for most repos while bounding runtime
-        allAtoms = await atomRepository.findAll({ maxCommits: 10000 });
+        allAtoms = await atomRepository.findAll({ maxCommits: DOCTOR_SCAN_LIMIT });
+        // --all opts the uniqueness check into scanning every ref: a Lore-id
+        // shared with a side branch (e.g. a future-dated poison commit)
+        // surfaces only there. Off by default because backup branches make
+        // cross-ref duplicates noisy (issue #57).
+        uniquenessAtoms = options.all
+          ? await atomRepository.findAll({ maxCommits: DOCTOR_SCAN_LIMIT, allRefs: true })
+          : allAtoms;
       } catch {
         checks.push({
           name: 'Atom retrieval',
@@ -46,10 +58,11 @@ export function registerDoctorCommand(
           details: [],
         });
         allAtoms = [];
+        uniquenessAtoms = [];
       }
 
       // Check 2: Lore-id uniqueness
-      checks.push(checkLoreIdUniqueness(allAtoms));
+      checks.push(checkLoreIdUniqueness(uniquenessAtoms, options.all === true));
 
       // Check 3: All references resolve
       checks.push(checkReferencesResolve(allAtoms));
@@ -121,7 +134,9 @@ async function checkConfig(configLoader: IConfigLoader): Promise<DoctorCheck> {
 
 function checkLoreIdUniqueness(
   atoms: readonly LoreAtom[],
+  allRefs = false,
 ): DoctorCheck {
+  const name = allRefs ? 'Lore-id uniqueness (all refs)' : 'Lore-id uniqueness';
   const idCounts = new Map<string, number>();
 
   for (const atom of atoms) {
@@ -138,7 +153,7 @@ function checkLoreIdUniqueness(
 
   if (duplicates.length > 0) {
     return {
-      name: 'Lore-id uniqueness',
+      name,
       status: 'warning',
       message: `${duplicates.length} duplicate Lore-id(s) found`,
       details: duplicates,
@@ -146,7 +161,7 @@ function checkLoreIdUniqueness(
   }
 
   return {
-    name: 'Lore-id uniqueness',
+    name,
     status: 'ok',
     message: `All ${atoms.length} Lore-ids are unique`,
     details: [],

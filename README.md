@@ -121,7 +121,7 @@ lore search --text "session" --confidence high
 | `lore trace <lore-id>` | Trace decision chain via references (Supersedes, Depends-on, Related) |
 | `lore validate [range]` | Validate commits for Lore protocol compliance |
 | `lore squash <range>` | Merge Lore atoms from a revision range for squash merges |
-| `lore doctor` | Health checks: config validity, ID uniqueness, reference integrity |
+| `lore doctor [--all]` | Health checks: config validity, ID uniqueness (every ref with `--all`), reference integrity |
 
 ### Global Options
 

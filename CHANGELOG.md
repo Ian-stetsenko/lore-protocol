@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-02
+
+### Added
+
+- **`lore validate --from <ref>`**: explicit revision-range flag that validates `<ref>..HEAD`, so `--since` can keep its date meaning on every other command. Passing both a positional range and `--from` is an error instead of silently dropping one. ([#69](https://github.com/Ian-stetsenko/lore-protocol/issues/69), [#73](https://github.com/Ian-stetsenko/lore-protocol/pull/73)) — thanks @TommyC81
+- **`lore doctor --all`**: opts the Lore-id uniqueness check into scanning every ref, reporting ids shared with side branches. The default stays current-branch only to avoid backup-branch noise. ([#57](https://github.com/Ian-stetsenko/lore-protocol/issues/57), [#74](https://github.com/Ian-stetsenko/lore-protocol/pull/74)) — thanks @TommyC81
+
+### Deprecated
+
+- **`lore validate --since <ref>`**: still works with ref semantics but prints a warning to stderr; it will be removed in 0.8. Use `--from <ref>`. ([#69](https://github.com/Ian-stetsenko/lore-protocol/issues/69))
+
+### Fixed
+
+- **Lore-id shadowing across refs**: `lore trace` and every Lore-id lookup now prefer the HEAD-reachable atom and consult other refs only on a miss, so a side branch (or a future-dated commit) sharing a Lore-id can no longer shadow the current branch's decision. The shared Lore-id index is built the same way, keeping trace, follow-link resolution and reference validation consistent. ([#57](https://github.com/Ian-stetsenko/lore-protocol/issues/57), [#74](https://github.com/Ian-stetsenko/lore-protocol/pull/74)) — thanks @TommyC81
+- **`lore commit` JSON input validation**: unknown top-level keys (for example a flat `{"intent": ..., "Constraint": [...]}` schema), wrong-typed `intent`/`body`/`trailers`, non-object payloads and invalid JSON now fail with exit 1 and an actionable error naming the allowed schema, instead of silently committing a barren atom. Inner trailer parsing stays lenient. ([#72](https://github.com/Ian-stetsenko/lore-protocol/pull/72)) — thanks @TommyC81
+
+### Maintenance
+
+- **Windows CI**: build, typecheck and tests now run on `windows-latest` alongside `ubuntu-latest`. ([#68](https://github.com/Ian-stetsenko/lore-protocol/issues/68), [#70](https://github.com/Ian-stetsenko/lore-protocol/pull/70)) — thanks @KingEmma7
+- The shipped `lore-validate` advisory workflow uses `validate --from origin/main`.
+
 ## [0.6.0] - 2026-10-29
 
 ### Added

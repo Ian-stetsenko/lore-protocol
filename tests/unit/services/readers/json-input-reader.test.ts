@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { JsonInputReader } from '../../../../src/services/readers/json-input-reader.js';
+import { LoreError } from '../../../../src/util/errors.js';
 
 describe('JsonInputReader', () => {
   describe('valid JSON', () => {
@@ -74,22 +75,126 @@ describe('JsonInputReader', () => {
       expect(result.trailers?.Confidence).toBeUndefined();
     });
 
-    it('should default intent to empty string when not a string', async () => {
+    it('should reject intent when not a string', async () => {
       const input = { intent: 123 };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(/"intent" must be a string, got number/);
+    });
+
+    it('should reject body when not a string', async () => {
+      const input = { intent: 'test', body: 42 };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(/"body" must be a string, got number/);
+    });
+  });
+
+  describe('top-level schema validation', () => {
+    it('should reject an unknown top-level key (flat schema) instead of dropping it', async () => {
+      const input = { intent: 'fix bug', Constraint: ['must preserve backward compat'], Tested: ['unit tests'] };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+      const rejection = reader.read();
+
+      await expect(rejection).rejects.toBeInstanceOf(LoreError);
+      await expect(rejection).rejects.toMatchObject({ exitCode: 1 });
+      await expect(rejection).rejects.toThrow(
+        /Unknown top-level keys in commit input JSON: "Constraint", "Tested"\. Allowed keys: intent, body, trailers\./,
+      );
+    });
+
+    it('should reject a single unknown top-level key', async () => {
+      const input = { intent: 'fix bug', constraint: ['must preserve backward compat'] };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(
+        /Unknown top-level key in commit input JSON: "constraint"\. Allowed keys: intent, body, trailers\./,
+      );
+    });
+
+    it('should reject a nested envelope schema', async () => {
+      const input = { commit: { intent: 'fix bug', trailers: { Tested: ['unit tests'] } } };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(/Unknown top-level key in commit input JSON: "commit"/);
+    });
+
+    it('should reject a non-object top level', async () => {
+      const reader = new JsonInputReader(JSON.stringify(['intent', 'trailers']));
+
+      await expect(reader.read()).rejects.toThrow(
+        /Commit input JSON must be an object with allowed keys intent, body, trailers; got array\./,
+      );
+    });
+
+    it('should reject a number top level', async () => {
+      const reader = new JsonInputReader('42');
+
+      await expect(reader.read()).rejects.toThrow(
+        /Commit input JSON must be an object with allowed keys intent, body, trailers; got number\./,
+      );
+    });
+
+    it('should reject an object with a __proto__ own key as unknown', async () => {
+      const reader = new JsonInputReader('{"__proto__": {"intent": "evil"}}');
+
+      await expect(reader.read()).rejects.toThrow(
+        /Unknown top-level key in commit input JSON: "__proto__"/,
+      );
+    });
+
+    it('should pass an empty object through with intent defaulting to empty string', async () => {
+      const reader = new JsonInputReader('{}');
+      const result = await reader.read();
+
+      expect(result.intent).toBe('');
+      expect(result.body).toBeUndefined();
+      expect(result.trailers).toBeUndefined();
+    });
+
+    it('should reject trailers when not an object', async () => {
+      const input = { intent: 'test', trailers: 'Constraint: stuff' };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(/"trailers" must be an object, got string/);
+    });
+
+    it('should reject trailers when it is an array', async () => {
+      const input = { intent: 'test', trailers: ['Constraint: stuff'] };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(/"trailers" must be an object, got array/);
+    });
+
+    it('should reject trailers when null', async () => {
+      const input = { intent: 'test', trailers: null };
+
+      const reader = new JsonInputReader(JSON.stringify(input));
+
+      await expect(reader.read()).rejects.toThrow(/"trailers" must be an object, got null/);
+    });
+
+    it('should reject invalid JSON with an actionable message', async () => {
+      const reader = new JsonInputReader('{ intent: fix bug }');
+
+      await expect(reader.read()).rejects.toThrow(/Commit input is not valid JSON:/);
+    });
+
+    it('should default intent to empty string when absent', async () => {
+      const input = { body: 'only body' };
 
       const reader = new JsonInputReader(JSON.stringify(input));
       const result = await reader.read();
 
       expect(result.intent).toBe('');
-    });
-
-    it('should ignore body when not a string', async () => {
-      const input = { intent: 'test', body: 42 };
-
-      const reader = new JsonInputReader(JSON.stringify(input));
-      const result = await reader.read();
-
-      expect(result.body).toBeUndefined();
+      expect(result.body).toBe('only body');
     });
   });
 

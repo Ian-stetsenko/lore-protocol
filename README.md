@@ -119,7 +119,7 @@ lore search --text "session" --confidence high
 | `lore log` | Lore-enriched git log |
 | `lore stale [target]` | Flag potentially outdated knowledge |
 | `lore trace <lore-id>` | Trace decision chain via references (Supersedes, Depends-on, Related) |
-| `lore validate [range]` | Validate commits for Lore protocol compliance |
+| `lore validate [range]` | Validate commits for Lore protocol compliance (`--from <ref>`, `--last`, `--strict`) |
 | `lore squash <range>` | Merge Lore atoms from a revision range for squash merges |
 | `lore doctor` | Health checks: config validity, ID uniqueness, reference integrity |
 
@@ -132,7 +132,7 @@ lore search --text "session" --confidence high
 | `--no-color` | Disable colored output |
 | `--no-update-notifier` | Disable update notification |
 | `--limit <n>` | Limit number of results |
-| `--since <ref>` | Only consider commits since ref/date |
+| `--since <ref>` | Only consider commits since ref/date (on `validate`: deprecated, use `--from`) |
 
 ## Trailer Vocabulary
 

@@ -81,7 +81,9 @@ export class AtomRepository {
 
   /**
    * Build (once per instance) an index of every atom by Lore-id from a
-   * `git log` pass over HEAD followed by a `git log --all` pass.
+   * `git log` pass over the pinned HEAD commit followed by a
+   * `git log --all --not <head-hash>` delta pass (plain `--all` when HEAD
+   * cannot be resolved or the first pass fails).
    * Reference-heavy traversals (trace BFS, follow-link resolution, reference
    * validation) look up ids against this index instead of running one
    * full-history `git log --grep` per id, which is minutes on large corpora
@@ -98,14 +100,36 @@ export class AtomRepository {
       // HEAD pass seeds every id reachable from the current branch. On an
       // unborn HEAD it fails while --all succeeds; skip it then, so the
       // index over a fresh repository stays empty as before.
-      let headCommits: readonly RawCommit[] = [];
+      // Resolve HEAD once, then walk exactly that commit: the pin always
+      // equals what the first pass walked, so under concurrent branch
+      // movement or landing commits the exclusion boundary stays
+      // self-consistent - no walked history is dropped from the delta pass
+      // and no new history is hidden from it. (Which duplicate of a
+      // mid-build-landing Lore-id wins first-wins still depends on timing,
+      // as it did before under a different window.)
+      let pin: string | null = null;
       try {
-        headCommits = await this.gitClient.log([], { loreOnly: true });
+        pin = await this.gitClient.resolveRef('HEAD');
       } catch {
-        // --all pass below is the authority; real git failures throw there.
+        // Unborn HEAD on a fresh repository: nothing to walk or exclude;
+        // the --all pass below is the authority (and throws on real git
+        // failures).
       }
-      // --all pass contributes only ids the HEAD pass missed.
-      const allCommits = await this.gitClient.log(['--all'], { loreOnly: true });
+      let headCommits: readonly RawCommit[] = [];
+      if (pin !== null) {
+        try {
+          headCommits = await this.gitClient.log([pin], { loreOnly: true });
+        } catch {
+          // Walk failed: give the exclusion up and let --all cover HEAD.
+          pin = null;
+        }
+      }
+      // --all pass contributes only ids the HEAD pass missed. When HEAD
+      // walked, its pinned commit is excluded from the pass so its history
+      // is not walked and parsed a second time before first-wins dedupes
+      // them; without a pin the pass stays plain --all.
+      const allArgs = pin !== null ? ['--all', '--not', pin] : ['--all'];
+      const allCommits = await this.gitClient.log(allArgs, { loreOnly: true });
       const atoms = await this.parseRawCommits([...headCommits, ...allCommits]);
       const index = new Map<LoreId, LoreAtom>();
       for (const atom of atoms) {

@@ -115,6 +115,13 @@ export class AtomRepository {
       }
       return index;
     })();
+    // A failed build must not poison the cache for the instance lifetime:
+    // clear the slot on rejection so a later call rebuilds (transient git
+    // failures stay retryable). The rejection still propagates to every
+    // current awaiter; the derived promise here is intentionally discarded.
+    this.loreIndex.catch(() => {
+      this.loreIndex = null;
+    });
     return this.loreIndex;
   }
 

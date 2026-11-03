@@ -13,7 +13,7 @@ vi.mock('node:fs/promises', () => ({
 /**
  * Tests for issue #69: `lore validate` gains `--from <ref>` for revision
  * ranges (`<ref>..HEAD`), while `--since <ref>` keeps its ref semantics but
- * prints a deprecation warning (removal in 0.7).
+ * prints a deprecation warning (removal in 0.8).
  *
  * Driven through Commander's parseAsync with mocked services.
  */
@@ -122,7 +122,7 @@ describe('registerValidateCommand (issue #69 --from and --since deprecation)', (
     expect(h.validate).not.toHaveBeenCalled();
   });
 
-  it('keeps --since working as a ref but warns about removal in 0.7', async () => {
+  it('keeps --since working as a ref but warns about removal in 0.8', async () => {
     const commits = [makeRawCommit('c'.repeat(40))];
     const h = buildHarness(commits);
 
@@ -134,7 +134,7 @@ describe('registerValidateCommand (issue #69 --from and --since deprecation)', (
     expect(h.consoleErrorSpy).toHaveBeenCalledTimes(1);
     const warning = h.consoleErrorSpy.mock.calls[0].join(' ');
     expect(warning).toContain('--since is deprecated');
-    expect(warning).toContain('0.7');
+    expect(warning).toContain('0.8');
     expect(warning).toContain('--from');
   });
 

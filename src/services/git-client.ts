@@ -37,9 +37,18 @@ const BLAME_HASH_PATTERN = /^([0-9a-f]{40})\s/;
  * Whitespace after the colon is optional because git accepts and normalises
  * `Lore-id:abcd1234`; the parser stays authoritative and still rejects
  * commits where the line sits in the body rather than the trailer block.
- * Must not be combined with other --grep patterns (git ORs them by default).
+ * Combining with another --grep requires --all-match (git ORs patterns by
+ * default); LogOptions.scope composes exactly that way below.
  */
 const LORE_ONLY_ARGS: readonly string[] = ['--extended-regexp', '--grep=^Lore-id:[[:space:]]*[0-9a-f]{8}'];
+
+/**
+ * Escape regex metacharacters for a POSIX ERE --grep pattern. Escaping any
+ * other character is undefined behaviour in POSIX, so only these are escaped.
+ */
+function escapeEre(value: string): string {
+  return value.replace(/[.^$*+?()[\]{}|\\]/g, (ch) => `\\${ch}`);
+}
 
 /**
  * Real git interaction layer using child_process.execFile.
@@ -55,7 +64,23 @@ export class GitClient implements IGitClient {
   }
 
   async log(args: readonly string[], options?: LogOptions): Promise<readonly RawCommit[]> {
-    const effectiveArgs = options?.loreOnly ? [...LORE_ONLY_ARGS, ...args] : args;
+    let effectiveArgs: readonly string[] = options?.loreOnly ? [...LORE_ONLY_ARGS, ...args] : args;
+    if (options?.scope) {
+      // Conventional-commit scope pushdown: git skips commits whose message
+      // never mentions "(scope)" at all. Coarse by design (case-insensitive
+      // substring over the whole message). For ASCII single-line subjects it
+      // cannot drop an atom the parser-level filter would keep; wrapped
+      // multi-line subjects and non-ASCII case folding are the known
+      // exceptions. --all-match ANDs it with the Lore-id pre-filter instead
+      // of git's default OR.
+      effectiveArgs = [
+        '--all-match',
+        '--extended-regexp',
+        '--regexp-ignore-case',
+        `--grep=\\(${escapeEre(options.scope)}\\)`,
+        ...effectiveArgs,
+      ];
+    }
     const hasLFlag = effectiveArgs.some(arg => arg.startsWith('-L'));
 
     const baseArgs = hasLFlag

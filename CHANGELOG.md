@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-11-03
+
+### Performance
+
+- **Lore-id index build**: the shared index now walks the pinned HEAD commit once and runs `git log --all --not <head>` for the delta, instead of re-walking and re-parsing all of HEAD's history in the `--all` pass. Falls back to a plain `--all` walk on an unborn HEAD or a failed first pass, so coverage never shrinks. Semantics are unchanged: HEAD-reachable atoms still win a shared Lore-id. ([#75](https://github.com/Ian-stetsenko/lore-protocol/pull/75)) — thanks @TommyC81
+- **Scope queries pushed down to git**: `lore` scope lookups add a case-insensitive `--grep` for `(scope)` ANDed with the Lore-id pre-filter via `--all-match`, so git skips commits that never mention the scope. The exact conventional-commit scope filter stays authoritative. Completes the scope half of the filter pushdown from #55. ([#76](https://github.com/Ian-stetsenko/lore-protocol/pull/76)) — thanks @TommyC81
+
+### Fixed
+
+- **Lore-id index retry after a failed build**: a rejected index build no longer stays memoized for the lifetime of the `AtomRepository` instance, so a transient git failure is retried on the next call instead of being replayed forever. ([#77](https://github.com/Ian-stetsenko/lore-protocol/pull/77)) — thanks @TommyC81
+
 ## [0.7.0] - 2026-11-02
 
 ### Added

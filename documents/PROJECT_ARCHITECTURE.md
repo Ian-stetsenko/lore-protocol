@@ -199,7 +199,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/services/atom-repository.ts`
 - **Contains**: `AtomRepository` class.
-- **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal.
+- **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal. Lore-id lookups prefer HEAD-reachable matches and consult other refs only on a miss.
 - **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`.
 - **Dependents**: Commands (`context`, `constraints`, `rejected`, `directives`, `tested`, `search`, `log`, `stale`, `trace`, `squash`, `doctor`), `Validator`, `main.ts`.
 - **Key methods**: `findByTarget()`, `findByLoreId()`, `findByRange()`, `findAll()`, `findByScope()`, `resolveFollowLinks()`.
@@ -399,7 +399,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/commands/doctor.ts`
 - **Contains**: `registerDoctorCommand()` function plus health-check helpers.
-- **Single Responsibility**: Runs four health checks: config validity, Lore-id uniqueness, reference resolution, and orphaned dependencies.
+- **Single Responsibility**: Runs four health checks: config validity, Lore-id uniqueness, reference resolution, and orphaned dependencies. `--all` widens the Lore-id uniqueness check to every ref.
 - **Dependencies**: `AtomRepository`, `IConfigLoader`, `IOutputFormatter`, `constants.ts`.
 
 ### Entry Point

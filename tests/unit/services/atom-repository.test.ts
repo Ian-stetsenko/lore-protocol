@@ -754,6 +754,27 @@ describe('AtomRepository', () => {
       // One build = two git passes (HEAD, then --all).
       expect(gitClient.log).toHaveBeenCalledTimes(2);
     });
+
+    it('should rebuild after a failed build instead of memoizing the rejection', async () => {
+      const atom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      let call = 0;
+      vi.mocked(gitClient.log).mockImplementation(async () => {
+        call += 1;
+        if (call === 2) {
+          throw new Error('transient git failure');
+        }
+        return call < 4 ? [] : [atom];
+      });
+
+      // First build: the authoritative --all pass fails; the rejection
+      // reaches the caller. The slot clears, so the second call rebuilds
+      // instead of returning the memoized rejection.
+      await expect(repo.getLoreIdIndex()).rejects.toThrow('transient git failure');
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.get('aaaa1111')?.commitHash).toBe('head');
+      expect(gitClient.log).toHaveBeenCalledTimes(4);
+    });
   });
 
   describe('resolveFollowLinks index usage', () => {

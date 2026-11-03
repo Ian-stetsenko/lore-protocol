@@ -660,14 +660,18 @@ describe('AtomRepository', () => {
         makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' }),
       ];
       vi.mocked(gitClient.log).mockResolvedValue(commits);
+      vi.mocked(gitClient.resolveRef).mockResolvedValue('aaa');
 
       const index = await repo.getLoreIdIndex();
 
       expect(index.size).toBe(2);
       expect(index.get('aaaa1111')?.commitHash).toBe('aaa');
       expect(gitClient.log).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(gitClient.log).mock.calls[0][0]).not.toContain('--all');
-      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toContain('--all');
+      // The first pass walks the pinned HEAD commit; the second walks only
+      // the delta (follow-up on PR #74). The hash, not the ref, keeps a
+      // concurrent branch move or landing commit consistent between passes.
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toEqual(['aaa']);
+      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toEqual(['--all', '--not', 'aaa']);
     });
 
     it('should keep the newest atom when a Lore-id appears twice', async () => {
@@ -711,17 +715,34 @@ describe('AtomRepository', () => {
       expect(index.get('bbbb2222')?.commitHash).toBe('side');
     });
 
-    it('should build from --all alone when the HEAD pass fails on an unborn branch', async () => {
+    it('should build from --all alone when HEAD cannot be resolved (unborn branch)', async () => {
       const atom = makeLoreCommit({ hash: 'side', loreId: 'aaaa1111' });
-      vi.mocked(gitClient.log).mockImplementation(async (args) =>
-        args.includes('--all')
-          ? [atom]
-          : Promise.reject(new Error('fatal: unborn HEAD')),
-      );
+      vi.mocked(gitClient.resolveRef).mockRejectedValue(new Error('fatal: unborn HEAD'));
+      vi.mocked(gitClient.log).mockResolvedValue([atom]);
 
       const index = await repo.getLoreIdIndex();
 
       expect(index.get('aaaa1111')?.commitHash).toBe('side');
+      // Unborn HEAD: a single plain --all walk, no exclusion.
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toEqual(['--all']);
+    });
+
+    it('should fall back to plain --all when the pinned-hash walk fails after resolution', async () => {
+      const atom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.resolveRef).mockResolvedValue('aaa');
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all') ? [atom] : Promise.reject(new Error('git log failed')),
+      );
+
+      const index = await repo.getLoreIdIndex();
+
+      // The --all pass is the authority; the exclusion is given up so HEAD
+      // history is covered by it.
+      expect(index.get('aaaa1111')?.commitHash).toBe('head');
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toEqual(['aaa']);
+      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toEqual(['--all']);
     });
 
     it('should build the index once per repository instance', async () => {

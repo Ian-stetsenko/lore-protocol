@@ -143,6 +143,21 @@ describe('lore trace with a poisoned Lore-id (issue #57)', () => {
   });
 });
 
+describe('lore getLoreIdIndex with side branches (delta pass, real git)', () => {
+  it('indexes HEAD-reachable and side-branch-only ids, HEAD winning shared ones', async () => {
+    const repo = makeRepository();
+    const index = await repo.getLoreIdIndex();
+
+    // Shared id: the HEAD-reachable atom wins over the future-dated poison,
+    // proving the delta exclusion did not hand victory back to --all.
+    expect(index.get('deadbeef')?.commitHash).toBe(hashes.legit);
+    // Side-branch-only id: still indexed, proving the delta pass did not
+    // over-exclude history the HEAD pass covered.
+    expect(index.get('cafe1234')?.commitHash).toBe(hashes.side);
+    expect(index.size).toBe(2);
+  });
+});
+
 describe('lore lookups on a fresh repository (unborn HEAD)', () => {
   it('return null and an empty index instead of failing', async () => {
     const fresh = mkdtempSync(join(tmpdir(), 'lore-id-fresh-'));

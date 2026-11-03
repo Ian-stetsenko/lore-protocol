@@ -429,6 +429,12 @@ describe('AtomRepository', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].loreId).toBe('aaaa1111');
+      // Scope pushes to the git layer as a coarse "(scope)" grep; the exact
+      // conventional-commit filter above stays authoritative.
+      expect(gitClient.log).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ loreOnly: true, scope: 'auth' }),
+      );
     });
 
     it('should match scope case-insensitively', async () => {
@@ -851,7 +857,9 @@ describe('AtomRepository lore-only discovery (git-level pre-filter)', () => {
     // getLoreIdIndex runs two passes: HEAD first, then --all.
     expect(calls).toHaveLength(5);
     for (const call of calls) {
-      expect(call[1]).toEqual({ loreOnly: true });
+      // findByScope additionally carries its coarse scope grep (see its own
+      // describe block); every discovery query is Lore-only either way.
+      expect(call[1]).toMatchObject({ loreOnly: true });
     }
   });
 

@@ -95,6 +95,66 @@ describe('GitClient.log loreOnly pre-filter', () => {
   });
 });
 
+describe('GitClient.log scope pushdown (LogOptions.scope)', () => {
+  let scopeRoot: string;
+
+  beforeAll(() => {
+    scopeRoot = mkdtempSync(join(tmpdir(), 'lore-git-scope-'));
+    git(scopeRoot, 'init', '-q', '-b', 'main');
+    const commitHere = (file: string, message: string): string => {
+      const full = join(scopeRoot, file);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, `${message}\n${Date.now()}\n`);
+      git(scopeRoot, 'add', '-A');
+      git(scopeRoot, 'commit', '-q', '-m', message);
+      return git(scopeRoot, 'rev-parse', 'HEAD').trim();
+    };
+    commitHere('src/a.ts', 'feat(api): scoped atom\n\nLore-id: dddd4444\nConfidence: high');
+    commitHere('src/b.ts', 'fix(API): mixed-case scope\n\nLore-id: eeee5555');
+    commitHere('src/c.ts', 'feat(other): different scope\n\nLore-id: ffff6666');
+    commitHere('src/d.ts', 'chore(api): no trailers here');
+    commitHere('src/e.ts', 'feat(a.b): dotted scope\n\nLore-id: abab1212');
+    commitHere('src/f.ts', 'feat(axb): dot lookalike\n\nLore-id: cdc12121');
+  });
+
+  afterAll(() => {
+    rmSync(scopeRoot, { recursive: true, force: true });
+  });
+
+  it('ANDs a coarse case-insensitive "(scope)" grep with the Lore-id pre-filter', async () => {
+    const client = new GitClient(scopeRoot);
+    const commits = await client.log([], { loreOnly: true, scope: 'api' });
+    const subjects = commits.map((c) => c.subject);
+
+    expect(subjects).toContain('feat(api): scoped atom');
+    expect(subjects).toContain('fix(API): mixed-case scope');
+    expect(subjects).not.toContain('feat(other): different scope');
+    expect(subjects).not.toContain('chore(api): no trailers here');
+  });
+
+  it('escapes regex metacharacters in the scope so a dot stays a dot', async () => {
+    const client = new GitClient(scopeRoot);
+    const commits = await client.log([], { loreOnly: true, scope: 'a.b' });
+    const subjects = commits.map((c) => c.subject);
+
+    expect(subjects).toContain('feat(a.b): dotted scope');
+    expect(subjects).not.toContain('feat(axb): dot lookalike');
+  });
+
+  it('keeps author patterns working alongside the scope grep, case-insensitively', async () => {
+    const client = new GitClient(scopeRoot);
+    const commits = await client.log(['--author=LORE TEST'], { loreOnly: true, scope: 'api' });
+    const subjects = commits.map((c) => c.subject);
+
+    // --regexp-ignore-case is global: it also case-folds author patterns while
+    // scope is set. That matches the parser-level author refinement (already
+    // case-insensitive), so an author the refinement would keep can no longer
+    // be dropped at the git level in a combined query.
+    expect(subjects).toContain('feat(api): scoped atom');
+    expect(subjects).toContain('fix(API): mixed-case scope');
+  });
+});
+
 describe('GitClient.countCommitsSince from a subdirectory (issue #60)', () => {
   it('counts commits touching a repository-relative path even when cwd is nested', async () => {
     // After hashes.atom, exactly one commit (bodyMention) touched project/src/file.ts.

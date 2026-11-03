@@ -171,7 +171,9 @@ export class AtomRepository {
    */
   async findByScope(scope: string, options: PathQueryOptions): Promise<LoreAtom[]> {
     const logArgs = this.buildLogArgs(options);
-    const rawCommits = await this.gitClient.log(logArgs, { loreOnly: true });
+    // Git-level scope pushdown (coarse "(scope)" substring grep); the exact
+    // conventional-commit scope filter below stays authoritative.
+    const rawCommits = await this.gitClient.log(logArgs, { loreOnly: true, scope });
     const atoms = await this.parseRawCommits(rawCommits);
 
     const scopeFiltered = atoms.filter((atom) => {

@@ -1,9 +1,10 @@
 import type { Command } from 'commander';
 import type { AtomRepository } from '../services/atom-repository.js';
+import type { SupersessionResolver } from '../services/supersession-resolver.js';
 import type { IConfigLoader } from '../interfaces/config-loader.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { FormattableDoctorResult, DoctorCheck } from '../types/output.js';
-import type { LoreAtom } from '../types/domain.js';
+import type { LoreAtom, LoreId, SupersessionStatus } from '../types/domain.js';
 import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
 
 /** Atom scan limit for health checks, bounding runtime on large repos. */
@@ -15,7 +16,7 @@ const DOCTOR_SCAN_LIMIT = 10_000;
  * 1. Config file exists and is valid
  * 2. Lore-id uniqueness
  * 3. All references resolve
- * 4. No orphaned dependencies
+ * 4. No superseded dependencies
  */
 export function registerDoctorCommand(
   program: Command,
@@ -23,6 +24,7 @@ export function registerDoctorCommand(
     atomRepository: AtomRepository;
     configLoader: IConfigLoader;
     getFormatter: () => IOutputFormatter;
+    supersessionResolver: SupersessionResolver;
   },
 ): void {
   program
@@ -30,7 +32,7 @@ export function registerDoctorCommand(
     .description('Health check: broken refs, config issues')
     .option('--all', 'Check Lore-id uniqueness across all refs, not just the current branch')
     .action(async (options: { all?: boolean }) => {
-      const { atomRepository, configLoader, getFormatter } = deps;
+      const { atomRepository, configLoader, getFormatter, supersessionResolver } = deps;
 
       const checks: DoctorCheck[] = [];
 
@@ -67,8 +69,8 @@ export function registerDoctorCommand(
       // Check 3: All references resolve
       checks.push(checkReferencesResolve(allAtoms));
 
-      // Check 4: Orphaned dependencies (depends on superseded atoms)
-      checks.push(checkOrphanedDependencies(allAtoms));
+      // Check 4: Superseded dependencies (transferred dependencies stay silent)
+      checks.push(checkSupersededDependencies(allAtoms, supersessionResolver));
 
       // Compute summary
       let errors = 0;
@@ -204,43 +206,81 @@ function checkReferencesResolve(
   };
 }
 
-function checkOrphanedDependencies(
+function checkSupersededDependencies(
   atoms: readonly LoreAtom[],
+  supersessionResolver: SupersessionResolver,
 ): DoctorCheck {
-  // Build a supersession set: atoms that are superseded
-  const supersededIds = new Set<string>();
-  for (const atom of atoms) {
-    for (const supersededId of atom.trailers.Supersedes) {
-      if (LORE_ID_PATTERN.test(supersededId)) {
-        supersededIds.add(supersededId);
-      }
-    }
-  }
+  // Subtractive: consume the shared resolver's supersession map over the
+  // scanned atom set. An edge whose target has been transferred to a live
+  // successor is satisfied and stays silent.
+  const supersessionMap: ReadonlyMap<string, SupersessionStatus> =
+    supersessionResolver.resolve(atoms);
 
-  const orphaned: string[] = [];
+  const flagged: string[] = [];
   for (const atom of atoms) {
     for (const depId of atom.trailers['Depends-on']) {
-      if (LORE_ID_PATTERN.test(depId) && supersededIds.has(depId)) {
-        orphaned.push(
-          `Atom ${atom.loreId} depends on ${depId}, which has been superseded`,
-        );
+      if (!LORE_ID_PATTERN.test(depId)) {
+        continue;
       }
+      // Absent targets never had a supersession status: missing targets
+      // are the reference-resolution check's business, not this one's.
+      if (!supersessionMap.has(depId)) {
+        continue;
+      }
+      if (chainReachesLiveAtom(depId, supersessionMap)) {
+        continue; // transferred, directly or through a chain, to a live atom
+      }
+      flagged.push(
+        `Atom ${atom.loreId} depends on ${depId}, which has been superseded`,
+      );
     }
   }
 
-  if (orphaned.length > 0) {
+  if (flagged.length > 0) {
     return {
-      name: 'Orphaned dependencies',
+      name: 'Superseded dependencies',
       status: 'info',
-      message: `${orphaned.length} atom(s) depend on superseded atoms`,
-      details: orphaned,
+      message: `${flagged.length} atom(s) depend on superseded atoms`,
+      details: flagged,
     };
   }
 
   return {
-    name: 'Orphaned dependencies',
+    name: 'Superseded dependencies',
     status: 'ok',
-    message: 'No orphaned dependencies found',
+    message: 'No superseded dependencies found',
     details: [],
   };
+}
+
+/**
+ * Follow a dependency target's supersession chain: satisfied (true) when
+ * the chain terminates at a live — not superseded — atom, unresolved
+ * (false) otherwise. Carries its own visited set (the resolver's visited
+ * set only protects map construction), so a chain that cycles without
+ * reaching a live atom — self-supersession included — terminates safely
+ * and counts as unresolved.
+ */
+function chainReachesLiveAtom(
+  startId: LoreId,
+  supersessionMap: ReadonlyMap<string, SupersessionStatus>,
+): boolean {
+  const visited = new Set<string>();
+  let currentId: LoreId | null = startId;
+  while (currentId !== null) {
+    if (visited.has(currentId)) {
+      return false; // cycle without a live atom
+    }
+    visited.add(currentId);
+
+    const status = supersessionMap.get(currentId);
+    if (status === undefined) {
+      return false; // defensive: successor absent from the scanned set
+    }
+    if (!status.superseded) {
+      return true; // chain terminated at a live atom
+    }
+    currentId = status.supersededBy;
+  }
+  return false;
 }

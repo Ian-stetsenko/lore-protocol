@@ -9,6 +9,7 @@ import { TrailerParser } from '../../src/services/trailer-parser.js';
 import { AtomRepository } from '../../src/services/atom-repository.js';
 import { registerTraceCommand } from '../../src/commands/trace.js';
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
+import { SupersessionResolver } from '../../src/services/supersession-resolver.js';
 import { JsonFormatter } from '../../src/formatters/json-formatter.js';
 
 /**
@@ -193,6 +194,7 @@ describe('lore doctor with a poisoned Lore-id (issue #57)', () => {
           findConfigPath: async () => null,
         },
         getFormatter: () => new JsonFormatter(),
+        supersessionResolver: new SupersessionResolver(),
       });
       await program.parseAsync(['node', 'lore', 'doctor']);
     } finally {
@@ -221,6 +223,7 @@ describe('lore doctor with a poisoned Lore-id (issue #57)', () => {
           findConfigPath: async () => null,
         },
         getFormatter: () => new JsonFormatter(),
+        supersessionResolver: new SupersessionResolver(),
       });
       await program.parseAsync(['node', 'lore', 'doctor', '--all']);
     } finally {

@@ -783,6 +783,128 @@ describe('AtomRepository', () => {
     });
   });
 
+  describe('reference resolution', () => {
+    it('resolveReferenceIds resolves an id present on the HEAD pass', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const resolved = await repo.resolveReferenceIds(['aaaa1111']);
+
+      expect(resolved.get('aaaa1111')?.commitHash).toBe('head');
+    });
+
+    it('resolveReferenceIds resolves an id that exists only on a non-HEAD ref', async () => {
+      const sideAtom = makeLoreCommit({ hash: 'side', loreId: 'bbbb2222' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [sideAtom] : [],
+      );
+
+      const resolved = await repo.resolveReferenceIds(['bbbb2222']);
+
+      expect(resolved.get('bbbb2222')?.commitHash).toBe('side');
+    });
+
+    it('resolveReferenceIds maps an id resolving on no ref to null', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const resolved = await repo.resolveReferenceIds(['aaaa1111', 'deadbeef']);
+
+      expect(resolved.get('aaaa1111')?.commitHash).toBe('head');
+      expect(resolved.get('deadbeef')).toBeNull();
+    });
+
+    it('resolveReferenceIds over an empty index reports every id unresolvable without crashing', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      const resolved = await repo.resolveReferenceIds(['aaaa1111', 'bbbb2222']);
+
+      expect(resolved.get('aaaa1111')).toBeNull();
+      expect(resolved.get('bbbb2222')).toBeNull();
+      // The index was still built: one HEAD pass plus one --all pass.
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+    });
+
+    it('resolveReferenceIds never builds the index when handed zero ids', async () => {
+      const resolved = await repo.resolveReferenceIds([]);
+
+      expect(resolved.size).toBe(0);
+      expect(gitClient.log).not.toHaveBeenCalled();
+      expect(gitClient.resolveRef).not.toHaveBeenCalled();
+    });
+
+    it('findNearMatchIds over an empty index returns no candidates without crashing', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      const candidates = await repo.findNearMatchIds('deadbeef');
+
+      expect(candidates).toEqual([]);
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+    });
+
+    it('findNearMatchIds returns an indexed id at Hamming distance exactly 2', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaaaa11' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaabb');
+
+      expect(matches).toEqual(['aaaaaa11']);
+    });
+
+    it('findNearMatchIds returns nothing at Hamming distance 4', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaabb');
+
+      expect(matches).toEqual([]);
+    });
+
+    it('findNearMatchIds caps candidates at three, ties broken by index order', async () => {
+      const commits = [
+        makeLoreCommit({ hash: 'c1', loreId: 'aaaaaa01' }),
+        makeLoreCommit({ hash: 'c2', loreId: 'aaaaaa02' }),
+        makeLoreCommit({ hash: 'c3', loreId: 'aaaaaa03' }),
+        makeLoreCommit({ hash: 'c4', loreId: 'aaaaaa04' }),
+      ];
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : commits,
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaaaa');
+
+      // All four sit at distance 2 (a genuine tie), so the first three in
+      // index iteration order win the cap.
+      expect(matches).toEqual(['aaaaaa01', 'aaaaaa02', 'aaaaaa03']);
+    });
+
+    it('findNearMatchIds orders nearer ids first within the cap', async () => {
+      const commits = [
+        makeLoreCommit({ hash: 'c1', loreId: 'aaaaaa01' }), // distance 2
+        makeLoreCommit({ hash: 'c2', loreId: 'aaaaaaa2' }), // distance 1
+        makeLoreCommit({ hash: 'c3', loreId: 'aaaaaa03' }), // distance 2
+        makeLoreCommit({ hash: 'c4', loreId: 'aaaaaa04' }), // distance 2
+      ];
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : commits,
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaaaa');
+
+      // The distance-1 id leads; the remaining distance-2 ties keep index
+      // order and the fourth is cut by the cap.
+      expect(matches).toEqual(['aaaaaaa2', 'aaaaaa01', 'aaaaaa03']);
+    });
+  });
+
   describe('resolveFollowLinks index usage', () => {
     it('should resolve referenced ids via the HEAD-then-all index passes', async () => {
       const commitB = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' });

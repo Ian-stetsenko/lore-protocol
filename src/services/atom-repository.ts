@@ -150,6 +150,61 @@ export class AtomRepository {
   }
 
   /**
+   * Resolve a batch of reference Lore-ids against the shared all-refs index
+   * (see getLoreIdIndex): one entry per requested id, mapped to its atom or
+   * to null when the id resolves on no ref. Semantics match trace lookups -
+   * an id that exists only on a non-HEAD ref resolves through the delta pass.
+   *
+   * Pattern-invalid ids are excluded from the returned map (they can
+   * never match an indexed atom). An empty id list returns an empty map
+   * and never builds the index, so commits without references pay no git
+   * cost.
+   */
+  async resolveReferenceIds(
+    ids: readonly LoreId[],
+  ): Promise<ReadonlyMap<LoreId, LoreAtom | null>> {
+    const resolved = new Map<LoreId, LoreAtom | null>();
+    const validIds = ids.filter((id) => LORE_ID_PATTERN.test(id));
+    if (validIds.length === 0) {
+      return resolved;
+    }
+
+    const index = await this.getLoreIdIndex();
+    for (const id of validIds) {
+      resolved.set(id, index.get(id) ?? null);
+    }
+    return resolved;
+  }
+
+  /**
+   * Near-match candidates for an unresolvable Lore-id: indexed ids at
+   * Hamming distance at most 2 from the input id, ties broken by index
+   * iteration order, capped at three candidates.
+   *
+   * Returns an empty list when the input is not a pattern-valid id or when
+   * the index holds no atoms.
+   */
+  async findNearMatchIds(id: LoreId): Promise<readonly LoreId[]> {
+    if (!LORE_ID_PATTERN.test(id)) {
+      return [];
+    }
+
+    const index = await this.getLoreIdIndex();
+    const candidates: Array<{ id: LoreId; distance: number }> = [];
+    for (const candidateId of index.keys()) {
+      const distance = this.hammingDistance(id, candidateId);
+      if (distance <= 2) {
+        candidates.push({ id: candidateId, distance });
+      }
+    }
+
+    // Stable sort: equal distances keep index iteration order (HEAD atoms
+    // were inserted first), so tie-breaking is deterministic.
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates.slice(0, 3).map((candidate) => candidate.id);
+  }
+
+  /**
    * Find a single atom by its git commit hash.
    * Fetches the commit via `git log -1 <hash>` and parses it.
    * Returns null if the commit has no valid Lore trailers.
@@ -401,6 +456,21 @@ export class AtomRepository {
   private extractScope(subject: string): string | null {
     const match = subject.match(/^[a-zA-Z]+\(([^)]+)\)/);
     return match ? match[1] : null;
+  }
+
+  /**
+   * Character-level Hamming distance between two same-length ids.
+   * Both inputs are Lore-id pattern-validated (8 lowercase hex chars),
+   * so lengths always match.
+   */
+  private hammingDistance(a: string, b: string): number {
+    let distance = 0;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) {
+        distance += 1;
+      }
+    }
+    return distance;
   }
 
   /**

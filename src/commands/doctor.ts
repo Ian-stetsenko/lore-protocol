@@ -65,7 +65,7 @@ export function registerDoctorCommand(
       checks.push(checkLoreIdUniqueness(uniquenessAtoms, options.all === true));
 
       // Check 3: All references resolve
-      checks.push(checkReferencesResolve(allAtoms));
+      checks.push(...(await checkReferencesResolve(allAtoms, atomRepository)));
 
       // Check 4: Orphaned dependencies (depends on superseded atoms)
       checks.push(checkOrphanedDependencies(allAtoms));
@@ -168,40 +168,94 @@ function checkLoreIdUniqueness(
   };
 }
 
-function checkReferencesResolve(
+async function checkReferencesResolve(
   atoms: readonly LoreAtom[],
-): DoctorCheck {
-  const allLoreIds = new Set(atoms.map((a) => a.loreId));
-  const brokenRefs: string[] = [];
+  atomRepository: AtomRepository,
+): Promise<readonly DoctorCheck[]> {
+  const refEntries: { key: string; refId: string; atomId: string }[] = [];
 
   for (const atom of atoms) {
     for (const key of REFERENCE_TRAILER_KEYS) {
       const refs = atom.trailers[key] as readonly string[];
       for (const refId of refs) {
-        if (LORE_ID_PATTERN.test(refId) && !allLoreIds.has(refId)) {
-          brokenRefs.push(
-            `Lore-id "${refId}" referenced by ${atom.loreId} (${key}) not found`,
-          );
+        if (LORE_ID_PATTERN.test(refId)) {
+          refEntries.push({ key, refId, atomId: atom.loreId });
         }
       }
     }
   }
 
-  if (brokenRefs.length > 0) {
-    return {
-      name: 'Reference resolution',
-      status: 'warning',
-      message: `${brokenRefs.length} broken reference(s) found`,
-      details: brokenRefs,
-    };
-  }
-
-  return {
-    name: 'Reference resolution',
+  // Warning-severity class: dangling Supersedes/Depends-on references.
+  // Always present; its ok message is the reference check's clean output.
+  const warningOk: DoctorCheck = {
+    name: 'Reference resolution (supersedes/depends-on)',
     status: 'ok',
     message: 'All references resolve to existing atoms',
     details: [],
   };
+
+  if (refEntries.length === 0) {
+    return [warningOk];
+  }
+
+  // Resolve against the shared all-refs index (HEAD-first, per
+  // findByLoreId) instead of the scanned atom set: an id living only on a
+  // side branch is a valid reference, not a broken one. Guard mirrors the
+  // validator's (validIds.length > 0 ? await getLoreIdIndex() : null):
+  // reference-free corpora never pay the index build.
+  let index: ReadonlyMap<string, LoreAtom>;
+  try {
+    index = await atomRepository.getLoreIdIndex();
+  } catch {
+    // Failure policy: one dedicated warning-status check, fixed message,
+    // no per-reference details. Never an error status and never an
+    // unhandled rejection; the remaining checks still run.
+    return [
+      {
+        name: 'Reference resolution (skipped)',
+        status: 'warning',
+        message: 'reference check skipped: Lore-id index unavailable',
+        details: [],
+      },
+    ];
+  }
+
+  const brokenEntries = refEntries.filter(({ refId }) => !index.has(refId));
+  const formatDetail = ({
+    refId,
+    atomId,
+    key,
+  }: {
+    refId: string;
+    atomId: string;
+    key: string;
+  }): string => `Lore-id "${refId}" referenced by ${atomId} (${key}) not found`;
+
+  const relatedBroken = brokenEntries.filter(({ key }) => key === 'Related');
+  const warningBroken = brokenEntries.filter(({ key }) => key !== 'Related');
+
+  const warningCheck: DoctorCheck =
+    warningBroken.length > 0
+      ? {
+          name: 'Reference resolution (supersedes/depends-on)',
+          status: 'warning',
+          message: `${warningBroken.length} broken reference(s) found`,
+          details: warningBroken.map(formatDetail),
+        }
+      : warningOk;
+
+  const checks: DoctorCheck[] = [warningCheck];
+  // Info-severity class: dangling Related references. Pushed only when it
+  // has findings, so a clean corpus prints no empty info line.
+  if (relatedBroken.length > 0) {
+    checks.push({
+      name: 'Reference resolution (related)',
+      status: 'info',
+      message: `${relatedBroken.length} broken related reference(s) found`,
+      details: relatedBroken.map(formatDetail),
+    });
+  }
+  return checks;
 }
 
 function checkOrphanedDependencies(

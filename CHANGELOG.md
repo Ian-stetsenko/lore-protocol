@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-09
+
+### Added
+
+- **`lore commit` reference validation**: `Supersedes`/`Depends-on`/`Related` Lore-ids are now resolved against repository history (the shared all-refs Lore-id index, HEAD-preferred) before the commit is created. An id that resolves on no ref fails the commit with exit 1 and nothing committed; format errors and unresolvable ids are reported together in one batched error, with near-match suggestions (Hamming distance <= 2) and hints for pasted git hashes or upper-case ids. `--no-verify-refs` skips the check for the rare legitimate case (an atom that exists only on an unfetched branch). The gate is best-effort: if the index cannot be built, validation is skipped with a warning so "could not check" stays distinguishable from "check failed". ([#78](https://github.com/Ian-stetsenko/lore-protocol/issues/78), [#79](https://github.com/Ian-stetsenko/lore-protocol/pull/79)) — thanks @TommyC81
+
+### Changed
+
+- **`lore doctor` reference check split by severity**: dangling `Supersedes`/`Depends-on` references report under `Reference resolution (supersedes/depends-on)` at warning status (always present, ok message unchanged), while dangling `Related` references report under `Reference resolution (related)` at info status, emitted only when there are findings. Reference ids now resolve through the shared all-refs Lore-id index, so references to atoms living only on a side branch no longer false-dangle and `doctor` agrees with `lore trace`. An index that cannot be built yields one `Reference resolution (skipped)` warning and the remaining checks still run. JSON consumers keying on the old `Reference resolution` check name need to update. ([#80](https://github.com/Ian-stetsenko/lore-protocol/issues/80), [#81](https://github.com/Ian-stetsenko/lore-protocol/pull/81)) — thanks @TommyC81
+- **`lore doctor` dependency check resolves supersession chains**: the check is renamed from `Orphaned dependencies` to `Superseded dependencies` and now follows `Depends-on` targets through supersession chains before flagging. A dependency whose chain reaches a live atom is silent (the supersede carries the decision forward, including dependencies on it); only dead-end chains (cycles, self-supersession) keep the info finding. `lore stale` and its `orphaned-dep` signal are unchanged. The README trailer table now states the carries-forward rule. ([#82](https://github.com/Ian-stetsenko/lore-protocol/issues/82), [#83](https://github.com/Ian-stetsenko/lore-protocol/pull/83)) — thanks @TommyC81
+
+### Removed
+
+- **`lore validate --since <ref>`**: the alias deprecated in 0.7.0 is gone; `lore validate --since` is now rejected as an unknown option. Use `--from <ref>` (or a positional range). `--since` keeps its date meaning on every other command. ([#69](https://github.com/Ian-stetsenko/lore-protocol/issues/69))
+
 ## [0.7.1] - 2026-11-03
 
 ### Performance

@@ -132,7 +132,7 @@ lore search --text "session" --confidence high
 | `--no-color` | Disable colored output |
 | `--no-update-notifier` | Disable update notification |
 | `--limit <n>` | Limit number of results |
-| `--since <ref>` | Only consider commits since ref/date (on `validate`: deprecated, use `--from`) |
+| `--since <ref>` | Only consider commits since ref/date (not on `validate`: use `--from <ref>` there) |
 
 ## Trailer Vocabulary
 

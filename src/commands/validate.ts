@@ -9,7 +9,6 @@ import { readFile } from 'node:fs/promises';
 
 interface ValidateCommandOptions {
   readonly from?: string;
-  readonly since?: string;
   readonly last?: number;
   readonly strict?: boolean;
   readonly commitMsgFile?: string;
@@ -20,7 +19,7 @@ interface ValidateCommandOptions {
  * Validates commits for Lore protocol compliance.
  * Default: last commit (HEAD~1..HEAD).
  * Accepts a git revision range as argument, or `--from <ref>` for `<ref>..HEAD`.
- * `--since <ref>` is a deprecated alias of `--from` (removed in 0.8).
+ * (`--since <ref>`, a deprecated alias of `--from` since 0.7.0, was removed in 0.8.0.)
  */
 export function registerValidateCommand(
   program: Command,
@@ -35,23 +34,11 @@ export function registerValidateCommand(
     .command('validate [range]')
     .description('Validate commits for Lore protocol compliance')
     .option('--from <ref>', 'Validate all commits in the range <ref>..HEAD (e.g., --from main)')
-    .option('--since <ref>', 'Deprecated: use --from instead (removal in 0.8). Validate all commits since ref')
     .option('--last <n>', 'Validate the last N commits', parseInt)
     .option('--strict', 'Treat warnings as errors')
     .option('--commit-msg-file <path>', 'Validate a commit message file (used by git hooks)')
     .action(async (range: string | undefined, options: ValidateCommandOptions) => {
       const { validator, gitClient, trailerParser, getFormatter } = deps;
-
-      if (options.since) {
-        console.error(
-          getFormatter().formatError(0, [
-            {
-              severity: 'warning',
-              message: '--since is deprecated on lore validate and will be removed in 0.8; use --from <ref> instead.',
-            },
-          ]),
-        );
-      }
 
       let rawCommits: readonly RawCommit[];
 
@@ -78,7 +65,7 @@ export function registerValidateCommand(
           );
         }
 
-        const ref = options.from ?? options.since;
+        const ref = options.from;
         let logArgs: string[];
 
         if (range) {

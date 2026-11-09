@@ -11,9 +11,9 @@ vi.mock('node:fs/promises', () => ({
 }));
 
 /**
- * Tests for issue #69: `lore validate` gains `--from <ref>` for revision
- * ranges (`<ref>..HEAD`), while `--since <ref>` keeps its ref semantics but
- * prints a deprecation warning (removal in 0.8).
+ * Tests for issue #69: `lore validate` takes `--from <ref>` for revision
+ * ranges (`<ref>..HEAD`). The deprecated `--since <ref>` alias (0.7.x) was
+ * removed in 0.8.0 and is now rejected as an unknown option.
  *
  * Driven through Commander's parseAsync with mocked services.
  */
@@ -75,7 +75,7 @@ function buildHarness(commits: readonly RawCommit[] = []): Harness {
   return { program, validate, log, consoleLogSpy, consoleErrorSpy };
 }
 
-describe('registerValidateCommand (issue #69 --from and --since deprecation)', () => {
+describe('registerValidateCommand (issue #69 --from; --since removed in 0.8.0)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -122,47 +122,23 @@ describe('registerValidateCommand (issue #69 --from and --since deprecation)', (
     expect(h.validate).not.toHaveBeenCalled();
   });
 
-  it('keeps --since working as a ref but warns about removal in 0.8', async () => {
-    const commits = [makeRawCommit('c'.repeat(40))];
-    const h = buildHarness(commits);
-
-    await h.program.parseAsync(['node', 'lore', 'validate', '--since', 'main']);
-
-    expect(h.log).toHaveBeenCalledWith(['main..HEAD']);
-    expect(h.validate).toHaveBeenCalledWith(commits);
-
-    expect(h.consoleErrorSpy).toHaveBeenCalledTimes(1);
-    const warning = h.consoleErrorSpy.mock.calls[0].join(' ');
-    expect(warning).toContain('--since is deprecated');
-    expect(warning).toContain('0.8');
-    expect(warning).toContain('--from');
-  });
-
-  it('prefers --from when both --from and --since are given, and still warns', async () => {
-    const h = buildHarness();
-
-    await h.program.parseAsync(['node', 'lore', 'validate', '--from', 'develop', '--since', 'main']);
-
-    expect(h.log).toHaveBeenCalledTimes(1);
-    expect(h.log).toHaveBeenCalledWith(['develop..HEAD']);
-    expect(h.consoleErrorSpy.mock.calls[0].join(' ')).toContain('--since is deprecated');
-  });
-
-  it('keeps the positional range winning over --since, as before, and still warns', async () => {
-    const h = buildHarness();
-
-    await h.program.parseAsync(['node', 'lore', 'validate', 'main..feature', '--since', 'develop']);
-
-    expect(h.log).toHaveBeenCalledWith(['main..feature']);
-    expect(h.consoleErrorSpy.mock.calls[0].join(' ')).toContain('--since is deprecated');
-  });
-
-  it('does not warn when --from is used without --since', async () => {
+  it('prints nothing on stderr when --from is used', async () => {
     const h = buildHarness();
 
     await h.program.parseAsync(['node', 'lore', 'validate', '--from', 'main']);
 
     expect(h.consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects --since as an unknown option (removed in 0.8.0; use --from)', async () => {
+    const h = buildHarness();
+
+    await expect(
+      h.program.parseAsync(['node', 'lore', 'validate', '--since', 'main']),
+    ).rejects.toMatchObject({ code: 'commander.unknownOption' });
+
+    expect(h.log).not.toHaveBeenCalled();
+    expect(h.validate).not.toHaveBeenCalled();
   });
 
   it('keeps the default (last commit) and --last behavior', async () => {
@@ -173,21 +149,5 @@ describe('registerValidateCommand (issue #69 --from and --since deprecation)', (
     const last = buildHarness();
     await last.program.parseAsync(['node', 'lore', 'validate', '--last', '3']);
     expect(last.log).toHaveBeenCalledWith(['-3']);
-  });
-
-  it('still warns when --since is passed in hook mode (--commit-msg-file)', async () => {
-    const { readFile } = await import('node:fs/promises');
-    vi.mocked(readFile).mockResolvedValue('feat: hook commit\n\nLore-id: abcd1234');
-
-    const h = buildHarness();
-
-    await h.program.parseAsync([
-      'node', 'lore', 'validate', '--since', 'main', '--commit-msg-file', 'msg.txt',
-    ]);
-
-    // Hook mode ignores range specifiers; the deprecation warning still fires.
-    expect(h.log).not.toHaveBeenCalled();
-    expect(h.validate).toHaveBeenCalledTimes(1);
-    expect(h.consoleErrorSpy.mock.calls[0].join(' ')).toContain('--since is deprecated');
   });
 });

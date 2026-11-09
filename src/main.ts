@@ -181,6 +181,7 @@ async function main(): Promise<void> {
     getFormatter,
     commitInputResolver,
     headLoreIdReader,
+    atomRepository,
   });
 
   registerValidateCommand(program, {

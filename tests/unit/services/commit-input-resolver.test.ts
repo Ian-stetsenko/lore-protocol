@@ -23,7 +23,7 @@ function createMockPrompt(overrides: Partial<IPrompt> = {}): IPrompt {
  * Creates an empty set of commit command options.
  */
 function emptyOptions(overrides: Partial<CommitCommandOptions> = {}): CommitCommandOptions {
-  return { ...overrides };
+  return { verifyRefs: true, ...overrides };
 }
 
 describe('CommitInputResolver', () => {

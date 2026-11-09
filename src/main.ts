@@ -201,6 +201,7 @@ async function main(): Promise<void> {
     atomRepository,
     configLoader,
     getFormatter,
+    supersessionResolver,
   });
 
   const hookScriptGenerator = new HookScriptGenerator();

@@ -399,7 +399,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/commands/doctor.ts`
 - **Contains**: `registerDoctorCommand()` function plus health-check helpers.
-- **Single Responsibility**: Runs four health checks: config validity, Lore-id uniqueness, reference resolution, and orphaned dependencies. `--all` widens the Lore-id uniqueness check to every ref.
+- **Single Responsibility**: Runs four health checks: config validity, Lore-id uniqueness, reference resolution, and superseded dependencies. `--all` widens the Lore-id uniqueness check to every ref.
 - **Dependencies**: `AtomRepository`, `IConfigLoader`, `IOutputFormatter`, `constants.ts`.
 
 ### Entry Point

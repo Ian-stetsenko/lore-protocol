@@ -149,7 +149,7 @@ Every Lore-enriched commit carries a `Lore-id` and any combination of these trai
 | `Directive` | 0..n | free text | Forward-looking instruction for future maintainers |
 | `Tested` | 0..n | free text | What was verified before committing |
 | `Not-tested` | 0..n | free text | What was explicitly *not* verified (known gaps) |
-| `Supersedes` | 0..n | Lore-id | This atom replaces a previous decision |
+| `Supersedes` | 0..n | Lore-id | This atom replaces a previous decision. A supersede carries the decision forward, including dependencies on it |
 | `Depends-on` | 0..n | Lore-id | This atom requires another atom to hold |
 | `Related` | 0..n | Lore-id | Informational link to another atom |
 

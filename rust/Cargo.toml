@@ -1,0 +1,41 @@
+[package]
+name = "lore-cli"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.85"
+description = "CLI tool for the Lore protocol -- structured decision context in git commits"
+license = "MIT"
+repository = "https://github.com/Ian-stetsenko/lore-protocol"
+readme = "README.md"
+keywords = ["git", "commit", "trailers", "decision-records", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
+
+[lib]
+name = "lore"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lore"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+clap = { version = "4.5", features = ["derive"] }
+indexmap = { version = "2", features = ["serde"] }
+rand = "0.8"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+toml = "0.8"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,4 @@
+# Rust sources are always LF so rustfmt output is stable across platforms.
+*.rs text eol=lf
+Cargo.toml text eol=lf
+Cargo.lock text eol=lf

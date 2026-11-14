@@ -19,6 +19,19 @@ TypeScript, Node.js 18+, ESM modules, Commander.js, vitest, chalk, smol-toml, ts
 
 Run `npm run build && npm run typecheck && npm test` before submitting changes.
 
+### Rust implementation (`rust/`)
+
+A native port of the CLI with the same layering lives in `rust/` (Cargo crate `lore-cli`, binary `lore`). Module names map 1:1 onto the TypeScript files (`atom-repository.ts` is `atom_repository.rs`). Tests live beside each module in `src/<module>/tests.rs`; shared mocks are in `src/test_support/`.
+
+| Command (run in `rust/`) | Description |
+|---------|-------------|
+| `cargo build --release` | Build the `lore` binary |
+| `cargo test` | Unit + integration tests |
+| `cargo clippy --all-targets -- -D warnings` | Lint |
+| `cargo fmt` | Format |
+
+Behaviour changes must land in both implementations until the TypeScript sources are retired.
+
 ## Architecture
 
 Strict layered architecture. Dependencies flow inward/downward only.

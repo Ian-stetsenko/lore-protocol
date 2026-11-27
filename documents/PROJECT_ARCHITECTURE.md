@@ -324,8 +324,15 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/helpers/path-query.ts`
 - **Contains**: `PathQueryDeps` interface, `PathQueryCommandOptions` interface, `executePathQuery()` function, `addPathQueryOptions()` function.
 - **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows.
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, types.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, `option-parsers.ts`, types.
 - **Dependents**: `context.ts`, `constraints.ts`, `rejected.ts`, `directives.ts`, `tested.ts`.
+
+#### `src/commands/helpers/option-parsers.ts`
+- **Contains**: `parsePositiveInt()`, `parseNonNegativeInt()` Commander option coercers.
+- **Single Responsibility**: Strict validation of CLI option values. Each parser accepts digits only (one shared pattern; no sign, decimal point or trailing characters) and throws a plain `Error` (`Expected a positive integer, got "x"` / `Expected a non-negative integer, got "x"`) that propagates out of `parseAsync` to `main.ts`'s JSON-aware handler (exit 1).
+- **Dependencies**: None.
+- **Dependents**: `path-query.ts`, `log.ts`, `search.ts`, `trace.ts`.
+- **Directive**: New Commander coercers belong here, and must throw rather than return a sentinel such as `NaN`.
 
 #### `src/commands/init.ts`
 - **Contains**: `registerInitCommand()` function.
@@ -365,12 +372,12 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/search.ts`
 - **Contains**: `registerSearchCommand()` function, `applySearchFilters()`, `atomHasTrailer()`, `atomMatchesText()`, `buildSearchTargetDescription()` helper functions.
 - **Single Responsibility**: Cross-cutting search across all Lore atoms with filters (confidence, scope-risk, reversibility, has-trailer, author, scope, text, date range).
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `IOutputFormatter`, types, `constants.ts`.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `IOutputFormatter`, `option-parsers.ts`, types, `constants.ts`.
 
 #### `src/commands/log.ts`
 - **Contains**: `registerLogCommand()` function.
 - **Single Responsibility**: Lore-enriched git log. Shows all Lore-enriched commits, optionally filtered by path (passed after `--`).
-- **Dependencies**: `AtomRepository`, `IOutputFormatter`, types.
+- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `option-parsers.ts`, types.
 
 #### `src/commands/stale.ts`
 - **Contains**: `registerStaleCommand()` function.
@@ -380,7 +387,8 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/trace.ts`
 - **Contains**: `registerTraceCommand()` function.
 - **Single Responsibility**: BFS traversal of the decision chain starting from a Lore-id, following `Supersedes`, `Depends-on`, and `Related` references.
-- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `errors.ts`, `constants.ts`.
+- **Depth rule**: The root is depth 0 and an edge's depth is its source depth + 1. `--max-depth N` (default 10, parsed by `parseNonNegativeInt`) lists exactly the edges whose source depth is less than N, so N=0 shows the root alone. The bound is checked when an atom is dequeued; each atom is expanded once, and edges back to an already-visited atom (cycles) are still listed.
+- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `option-parsers.ts`, `errors.ts`, `constants.ts`.
 
 #### `src/commands/commit.ts`
 - **Contains**: `registerCommitCommand()` function plus input-parsing and interactive-collection helpers.

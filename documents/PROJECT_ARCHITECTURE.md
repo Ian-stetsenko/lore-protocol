@@ -835,7 +835,7 @@ CONFIG_FILENAME = 'config.toml'  (src/util/constants.ts, line 48)
 
 ### Monorepo Merging
 
-`ConfigLoader.loadForPath()` walks **up the directory tree** from the target path to the git work-tree root, collecting all `.lore/config.toml` files found along the way. The walk includes the nearest ancestor that contains a `.git` entry (a directory, or a file in linked worktrees and submodules) and stops there; config files above the repository root are never merged. If no `.git` exists anywhere above the target, only the target directory's own `.lore/config.toml` is read. `findConfigPath()` uses the same boundary.
+`ConfigLoader.loadForPath()` walks **up the directory tree** from the target path to the git work-tree root, collecting all `.lore/config.toml` files found along the way. The walk includes the nearest ancestor that contains a `.git` entry (a directory, or a file in linked worktrees and submodules) and stops there; config files above the repository root are never merged. If no `.git` exists anywhere above the target, only the target directory's own `.lore/config.toml` is read. `findConfigPath()` uses the same boundary. Bare repositories and `GIT_DIR`/`GIT_WORK_TREE` setups have no `.git` entry at the work-tree root, so in those cases the config loader falls back to reading only the start directory.
 
 Multiple config files are merged with **child overrides parent**. The files are ordered nearest-to-farthest, reversed, and merged parent-first so the nearest config wins.
 

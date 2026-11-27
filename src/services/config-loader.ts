@@ -85,7 +85,7 @@ export class ConfigLoader implements IConfigLoader {
 
     for (const dir of await this.collectSearchDirs(startPath)) {
       const configPath = join(dir, CONFIG_DIR, CONFIG_FILENAME);
-      if (await this.fileExists(configPath)) {
+      if (await this.pathExists(configPath)) {
         paths.push(configPath);
         if (stopAtFirst) break;
       }
@@ -109,7 +109,7 @@ export class ConfigLoader implements IConfigLoader {
 
     while (true) {
       dirs.push(dir);
-      if (await this.fileExists(join(dir, GIT_MARKER))) return dirs;
+      if (await this.pathExists(join(dir, GIT_MARKER))) return dirs;
 
       const parentDir = dirname(dir);
       if (parentDir === dir) return [startDir];
@@ -193,9 +193,10 @@ export class ConfigLoader implements IConfigLoader {
     return typeof rawValue === typeof defaultValue ? rawValue : defaultValue;
   }
 
-  private async fileExists(filePath: string): Promise<boolean> {
+  /** True when any filesystem entry (file or directory) exists at the path. */
+  private async pathExists(entryPath: string): Promise<boolean> {
     try {
-      await access(filePath);
+      await access(entryPath);
       return true;
     } catch {
       return false;

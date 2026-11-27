@@ -9,6 +9,7 @@ import type { PathQueryOptions, QueryResult, TargetType } from '../../types/quer
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
 import { parsePositiveInt } from './option-parsers.js';
+import { LoreError } from '../../util/errors.js';
 
 export interface PathQueryDeps {
   readonly atomRepository: AtomRepository;
@@ -36,7 +37,7 @@ export interface PathQueryCommandOptions {
  * GoF: Template Method (via composition, not inheritance).
  */
 export async function executePathQuery(
-  target: string,
+  target: string | undefined,
   options: PathQueryCommandOptions,
   deps: PathQueryDeps,
   commandName: string,
@@ -54,7 +55,7 @@ export async function executePathQuery(
     since: options.since ?? null,
   };
 
-  // Step 1: Resolve target or use --scope
+  // Step 1: Resolve target or use --scope (--scope wins when both are given)
   let atoms: LoreAtom[];
   let targetType: TargetType | 'search' | 'global';
   let targetDisplay: string;
@@ -63,6 +64,8 @@ export async function executePathQuery(
     atoms = await atomRepository.findByScope(queryOptions.scope, queryOptions);
     targetType = 'global';
     targetDisplay = `scope:${queryOptions.scope}`;
+  } else if (!target) {
+    throw new LoreError('Missing target: pass a <target> path or --scope <name>.', 1);
   } else {
     const parsedTarget = pathResolver.parseTarget(target);
     const gitLogArgs = pathResolver.toGitLogArgs(parsedTarget);

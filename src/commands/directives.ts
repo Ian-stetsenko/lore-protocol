@@ -3,7 +3,7 @@ import { executePathQuery, addPathQueryOptions, type PathQueryDeps, type PathQue
 import { mergeOptions } from './helpers/merge-options.js';
 
 /**
- * Register the `lore directives <target>` command.
+ * Register the `lore directives [target]` command.
  * Shows only Directive trailers.
  */
 export function registerDirectivesCommand(
@@ -11,12 +11,12 @@ export function registerDirectivesCommand(
   deps: PathQueryDeps,
 ): void {
   const cmd = program
-    .command('directives <target>')
+    .command('directives [target]')
     .description('Active forward-looking warnings for a code region');
 
   addPathQueryOptions(cmd);
 
-  cmd.action(async (target: string, _options: PathQueryCommandOptions, command: Command) => {
+  cmd.action(async (target: string | undefined, _options: PathQueryCommandOptions, command: Command) => {
     const options = mergeOptions<PathQueryCommandOptions>(command);
     await executePathQuery(target, options, deps, 'directives', ['Directive']);
   });

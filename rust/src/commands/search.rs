@@ -41,6 +41,7 @@ pub fn run(args: &SearchArgs, deps: &SearchDeps<'_>, io: &mut Io<'_>) -> Result<
         since: options.since.clone(),
         until: options.until.clone(),
         max_commits: options.max_commits,
+        ..FindAllOptions::default()
     })?;
 
     let atoms = deps.search_filter.apply_filters(&atoms, &options);

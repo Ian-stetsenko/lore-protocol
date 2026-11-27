@@ -23,6 +23,7 @@ pub fn run(args: &LogArgs, deps: &LogDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
             since: args.since.clone(),
             until: None,
             max_commits: args.max_commits.filter(|m| *m > 0),
+            ..FindAllOptions::default()
         })?
     } else {
         let query_options = PathQueryOptions {

@@ -1,13 +1,14 @@
 //! `lore doctor`: health checks for config and the reference graph.
 //!
 //! 1. Config file exists and parses.
-//! 2. Lore-ids are unique.
+//! 2. Lore-ids are unique (across every ref with `--all`).
 //! 3. All references resolve.
 //! 4. No dependencies on superseded atoms.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use crate::cli::DoctorArgs;
 use crate::commands::{Io, EXIT_OK};
 use crate::interfaces::config_loader::ConfigLoader;
 use crate::interfaces::output_formatter::OutputFormatter;
@@ -17,8 +18,8 @@ use crate::types::output::{DoctorCheck, DoctorStatus, DoctorSummary, Formattable
 use crate::util::constants::{is_valid_lore_id, EXIT_CODE_VALIDATION_ERROR};
 use crate::util::Result;
 
-/// Scan at most this many commits: enough for most repos while bounding runtime.
-const MAX_COMMITS: usize = 10_000;
+/// Atom scan limit for health checks, bounding runtime on large repos.
+const DOCTOR_SCAN_LIMIT: usize = 10_000;
 
 pub struct DoctorDeps<'a> {
     pub atom_repository: &'a AtomRepository<'a>,
@@ -28,14 +29,11 @@ pub struct DoctorDeps<'a> {
     pub cwd: &'a Path,
 }
 
-pub fn run(deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
+pub fn run(args: &DoctorArgs, deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
     let mut checks: Vec<DoctorCheck> = vec![check_config(deps.config_loader, deps.cwd)];
 
-    let all_atoms: Vec<LoreAtom> = match deps.atom_repository.find_all(&FindAllOptions {
-        max_commits: Some(MAX_COMMITS),
-        ..FindAllOptions::default()
-    }) {
-        Ok(atoms) => atoms,
+    let (all_atoms, uniqueness_atoms) = match scan_atoms(deps.atom_repository, args.all) {
+        Ok(scanned) => scanned,
         Err(_) => {
             checks.push(DoctorCheck {
                 name: "Atom retrieval".to_owned(),
@@ -43,11 +41,11 @@ pub fn run(deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
                 message: "Failed to retrieve atoms from git history".to_owned(),
                 details: Vec::new(),
             });
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
     };
 
-    checks.push(check_lore_id_uniqueness(&all_atoms));
+    checks.push(check_lore_id_uniqueness(&uniqueness_atoms, args.all));
     checks.push(check_references_resolve(&all_atoms));
     checks.push(check_orphaned_dependencies(&all_atoms));
 
@@ -69,6 +67,32 @@ pub fn run(deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
     } else {
         EXIT_OK
     })
+}
+
+/// Atoms on the current branch, plus the atoms the uniqueness check scans.
+///
+/// `all_refs` opts the uniqueness check into scanning every ref: a Lore-id
+/// shared with a side branch (e.g. a future-dated poison commit) surfaces
+/// only there. Off by default because backup branches make cross-ref
+/// duplicates noisy (issue #57).
+fn scan_atoms(
+    repository: &AtomRepository<'_>,
+    all_refs: bool,
+) -> Result<(Vec<LoreAtom>, Vec<LoreAtom>)> {
+    let scan = |all_refs| {
+        repository.find_all(&FindAllOptions {
+            max_commits: Some(DOCTOR_SCAN_LIMIT),
+            all_refs,
+            ..FindAllOptions::default()
+        })
+    };
+    let branch_atoms = scan(false)?;
+    let uniqueness_atoms = if all_refs {
+        scan(true)?
+    } else {
+        branch_atoms.clone()
+    };
+    Ok((branch_atoms, uniqueness_atoms))
 }
 
 fn check_config(config_loader: &dyn ConfigLoader, cwd: &Path) -> DoctorCheck {
@@ -105,7 +129,12 @@ fn config_error(name: String, err: &str) -> DoctorCheck {
     }
 }
 
-fn check_lore_id_uniqueness(atoms: &[LoreAtom]) -> DoctorCheck {
+fn check_lore_id_uniqueness(atoms: &[LoreAtom], all_refs: bool) -> DoctorCheck {
+    let name = if all_refs {
+        "Lore-id uniqueness (all refs)"
+    } else {
+        "Lore-id uniqueness"
+    };
     // Count in first-seen order so duplicate reports are deterministic.
     let mut order: Vec<&str> = Vec::new();
     let mut counts: HashMap<&str, usize> = HashMap::new();
@@ -127,7 +156,7 @@ fn check_lore_id_uniqueness(atoms: &[LoreAtom]) -> DoctorCheck {
 
     if !duplicates.is_empty() {
         return DoctorCheck {
-            name: "Lore-id uniqueness".to_owned(),
+            name: name.to_owned(),
             status: DoctorStatus::Warning,
             message: format!("{} duplicate Lore-id(s) found", duplicates.len()),
             details: duplicates,
@@ -135,7 +164,7 @@ fn check_lore_id_uniqueness(atoms: &[LoreAtom]) -> DoctorCheck {
     }
 
     DoctorCheck {
-        name: "Lore-id uniqueness".to_owned(),
+        name: name.to_owned(),
         status: DoctorStatus::Ok,
         message: format!("All {} Lore-ids are unique", atoms.len()),
         details: Vec::new(),
@@ -221,64 +250,4 @@ fn check_orphaned_dependencies(atoms: &[LoreAtom]) -> DoctorCheck {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::atom;
-
-    #[test]
-    fn uniqueness_reports_duplicates_in_first_seen_order() {
-        let atoms = vec![
-            atom().id("aaaa1111").build(),
-            atom().id("bbbb2222").build(),
-            atom().id("aaaa1111").build(),
-            atom().id("bbbb2222").build(),
-            atom().id("bbbb2222").build(),
-        ];
-        let check = check_lore_id_uniqueness(&atoms);
-        assert_eq!(check.status, DoctorStatus::Warning);
-        assert_eq!(check.message, "2 duplicate Lore-id(s) found");
-        assert_eq!(
-            check.details,
-            vec![
-                "Lore-id \"aaaa1111\" appears 2 times",
-                "Lore-id \"bbbb2222\" appears 3 times"
-            ]
-        );
-        let ok = check_lore_id_uniqueness(&atoms[..2]);
-        assert_eq!(ok.status, DoctorStatus::Ok);
-        assert_eq!(ok.message, "All 2 Lore-ids are unique");
-    }
-
-    #[test]
-    fn references_and_orphans_are_detected() {
-        let atoms = vec![
-            atom().id("aaaa1111").build(),
-            atom()
-                .id("bbbb2222")
-                .supersedes(&["aaaa1111"])
-                .related(&["ffff9999", "not-an-id"])
-                .build(),
-            atom().id("cccc3333").depends_on(&["aaaa1111"]).build(),
-        ];
-        let refs = check_references_resolve(&atoms);
-        assert_eq!(refs.status, DoctorStatus::Warning);
-        assert_eq!(
-            refs.details,
-            vec!["Lore-id \"ffff9999\" referenced by bbbb2222 (Related) not found"]
-        );
-        let orphans = check_orphaned_dependencies(&atoms);
-        assert_eq!(orphans.status, DoctorStatus::Info);
-        assert_eq!(
-            orphans.details,
-            vec!["Atom cccc3333 depends on aaaa1111, which has been superseded"]
-        );
-        assert_eq!(
-            check_references_resolve(&atoms[..1]).status,
-            DoctorStatus::Ok
-        );
-        assert_eq!(
-            check_orphaned_dependencies(&atoms[..1]).status,
-            DoctorStatus::Ok
-        );
-    }
-}
+mod tests;

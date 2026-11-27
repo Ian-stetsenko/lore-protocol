@@ -5,11 +5,12 @@
 //! never the git format string (that belongs to the `GitClient`).
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDate, Utc};
+use indexmap::IndexMap;
 use regex::Regex;
 
 use crate::interfaces::git_client::{GitClient, LogOptions, RawCommit};
@@ -37,15 +38,23 @@ pub struct FindAllOptions {
     pub until: Option<String>,
     /// Passed through as `--max-count=<n>`; only applied when `> 0`.
     pub max_commits: Option<usize>,
+    /// Widen the scan from the current branch to every ref (`--all`); used
+    /// by doctor for opt-in cross-ref duplicate detection.
+    pub all_refs: bool,
 }
+
+/// Lore-id -> atom index in insertion order: HEAD-reachable atoms first
+/// (newest first), then atoms that live only off the current branch.
+pub type LoreIdIndex = IndexMap<LoreId, LoreAtom>;
 
 /// Query engine over git history for Lore atoms.
 pub struct AtomRepository<'a> {
     git: &'a dyn GitClient,
     parser: &'a TrailerParser,
     custom_trailer_keys: Vec<String>,
-    /// Lazily built Lore-id -> atom index over the whole history (`--all`).
-    lore_index: RefCell<Option<Rc<HashMap<LoreId, LoreAtom>>>>,
+    /// Lazily built Lore-id -> atom index: HEAD-reachable atoms first, then
+    /// an `--all` pass that fills ids living only off the current branch.
+    lore_index: RefCell<Option<Rc<LoreIdIndex>>>,
 }
 
 impl<'a> AtomRepository<'a> {
@@ -89,6 +98,10 @@ impl<'a> AtomRepository<'a> {
     /// for the specific value instead of walking the whole history. The
     /// grep is deliberately not combined with `lore_only`: git ORs multiple
     /// `--grep` patterns, which would widen this back to a full scan.
+    ///
+    /// The HEAD-reachable history is searched first and `--all` is consulted
+    /// only on a miss, so a future-dated commit on a side branch can never
+    /// shadow the current branch's atom (issue #57).
     pub fn find_by_lore_id(&self, lore_id: &str) -> Result<Option<LoreAtom>> {
         if !is_valid_lore_id(lore_id) {
             return Ok(None);
@@ -97,37 +110,63 @@ impl<'a> AtomRepository<'a> {
         // Whitespace after the colon is optional because git accepts and
         // normalises `Lore-id:<id>`. The id is validated hex above, so no
         // regex escaping is needed.
-        let args = vec![
-            "--all".to_owned(),
+        let grep_args = vec![
             "--extended-regexp".to_owned(),
             format!("--grep=^Lore-id:[[:space:]]*{lore_id}"),
         ];
-        let raw = self.git.log(&args, LogOptions::default())?;
-        let atoms = self.parse_raw_commits(&raw);
-        Ok(atoms.into_iter().find(|atom| atom.lore_id == lore_id))
+
+        // Pass 1: commits reachable from HEAD. An unborn HEAD (fresh
+        // `git init`) makes this pass fail while `--all` succeeds and returns
+        // nothing, so any failure here counts as a miss.
+        if let Ok(raw) = self.git.log(&grep_args, LogOptions::default()) {
+            if let Some(atom) = self.find_parsed(&raw, lore_id) {
+                return Ok(Some(atom));
+            }
+        }
+
+        // Pass 2 (miss): every ref. Real git failures surface here.
+        let all_args: Vec<String> = std::iter::once("--all".to_owned())
+            .chain(grep_args)
+            .collect();
+        let raw = self.git.log(&all_args, LogOptions::default())?;
+        Ok(self.find_parsed(&raw, lore_id))
+    }
+
+    /// The first atom parsed from `raw` that carries `lore_id`.
+    fn find_parsed(&self, raw: &[RawCommit], lore_id: &str) -> Option<LoreAtom> {
+        self.parse_raw_commits(raw)
+            .into_iter()
+            .find(|atom| atom.lore_id == lore_id)
     }
 
     /// Build (once per instance) an index of every atom by Lore-id from a
-    /// single `git log --all` pass.
+    /// `git log` pass over HEAD followed by a `git log --all` pass.
     ///
     /// Reference-heavy traversals (trace BFS, follow-link resolution,
     /// reference validation) look ids up here instead of running one
-    /// full-history grep per id. Newest-first insertion with first-wins
-    /// keeps the same atom a grep-based [`Self::find_by_lore_id`] returns.
+    /// full-history grep per id. HEAD-reachable atoms are inserted first and
+    /// the `--all` pass only fills ids that are still missing, so lookups
+    /// stay consistent with [`Self::find_by_lore_id`]: a side branch can never
+    /// shadow the current branch (issue #57). Within each pass, newest-first
+    /// insertion with first-wins keeps the atom a grep-based lookup returns.
     ///
     /// Deviation from TS: the TypeScript implementation caches the promise
     /// and therefore also caches a *rejected* build (every later call fails
     /// the same way). Here only a successful build is cached; a failed git
     /// call is retried on the next request.
-    pub fn lore_id_index(&self) -> Result<Rc<HashMap<LoreId, LoreAtom>>> {
+    pub fn lore_id_index(&self) -> Result<Rc<LoreIdIndex>> {
         if let Some(index) = self.lore_index.borrow().as_ref() {
             return Ok(Rc::clone(index));
         }
 
-        let raw = self.git.log(&["--all".to_owned()], LogOptions::LORE_ONLY)?;
+        // The HEAD pass fails on an unborn HEAD while `--all` succeeds; skip
+        // it then, so the index over a fresh repository stays empty.
+        let mut raw = self.git.log(&[], LogOptions::LORE_ONLY).unwrap_or_default();
+        // The `--all` pass is the authority; real git failures throw here.
+        raw.extend(self.git.log(&["--all".to_owned()], LogOptions::LORE_ONLY)?);
         let atoms = self.parse_raw_commits(&raw);
 
-        let mut index: HashMap<LoreId, LoreAtom> = HashMap::new();
+        let mut index = LoreIdIndex::new();
         for atom in atoms {
             index.entry(atom.lore_id.clone()).or_insert(atom);
         }
@@ -155,6 +194,9 @@ impl<'a> AtomRepository<'a> {
     /// Find all Lore atoms, optionally filtered by date range and count.
     pub fn find_all(&self, options: &FindAllOptions) -> Result<Vec<LoreAtom>> {
         let mut args = self.build_base_log_args();
+        if options.all_refs {
+            args.push("--all".to_owned());
+        }
 
         if let Some(since) = non_empty(options.since.as_deref()) {
             args.push(format!("--since={since}"));
@@ -212,7 +254,7 @@ impl<'a> AtomRepository<'a> {
         let mut queue: VecDeque<(LoreId, usize)> = VecDeque::new();
 
         // Lazily built on the first unresolved reference.
-        let mut index: Option<Rc<HashMap<LoreId, LoreAtom>>> = None;
+        let mut index: Option<Rc<LoreIdIndex>> = None;
 
         // Seed the BFS with all reference ids from the initial atoms.
         for atom in atoms {

@@ -38,7 +38,7 @@ pub fn run(args: &TraceArgs, deps: &TraceDeps<'_>, io: &mut Io<'_>) -> Result<i3
     let mut queue: VecDeque<(LoreAtom, usize)> = VecDeque::new();
     queue.push_back((root.clone(), 0));
 
-    // Edges resolve against one shared index (a single `git log --all`)
+    // Edges resolve against one shared index (HEAD-first, then `--all`)
     // instead of one grep per edge. Built lazily so atoms without
     // references never pay for it.
     let mut index = None;

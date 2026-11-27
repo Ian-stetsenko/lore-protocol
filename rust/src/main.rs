@@ -232,7 +232,8 @@ fn dispatch(cli: &Cli, io_streams: &mut Io<'_>) -> lore::util::Result<i32> {
             },
             io_streams,
         ),
-        Command::Doctor => commands::doctor::run(
+        Command::Doctor(args) => commands::doctor::run(
+            args,
             &commands::doctor::DoctorDeps {
                 atom_repository: &atom_repository,
                 config_loader,

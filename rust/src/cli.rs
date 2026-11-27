@@ -92,7 +92,7 @@ pub enum Command {
     Squash(SquashArgs),
 
     /// Health check: broken refs, config issues
-    Doctor,
+    Doctor(DoctorArgs),
 
     /// Manage git hooks for Lore protocol enforcement
     Hooks(HooksArgs),
@@ -381,6 +381,13 @@ pub struct SquashArgs {
     /// Override the body of the merged message
     #[arg(long, value_name = "text")]
     pub body: Option<String>,
+}
+
+#[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
+pub struct DoctorArgs {
+    /// Check Lore-id uniqueness across all refs, not just the current branch
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Args, Debug, Clone, PartialEq, Eq)]

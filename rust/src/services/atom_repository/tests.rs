@@ -72,6 +72,45 @@ fn lore_commit_with_extras(hash: &'static str, lore_id: &str, extras: &'static s
     })
 }
 
+fn lore_commit_dated(hash: &'static str, lore_id: &str, date: &'static str) -> RawCommit {
+    make_lore_commit(LoreCommit {
+        hash,
+        lore_id: lore_id.to_owned(),
+        date,
+        ..LoreCommit::default()
+    })
+}
+
+fn has_all(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--all")
+}
+
+/// Scripts git so `--all` queries return `all` and HEAD queries `head`.
+fn git_by_ref(head: Vec<RawCommit>, all: Vec<RawCommit>) -> MockGitClient {
+    let git = MockGitClient::new();
+    git.set_log(move |args, _| {
+        Ok(if has_all(args) {
+            all.clone()
+        } else {
+            head.clone()
+        })
+    });
+    git
+}
+
+/// Scripts git so HEAD queries fail like an unborn branch.
+fn git_with_unborn_head(all: Vec<RawCommit>) -> MockGitClient {
+    let git = MockGitClient::new();
+    git.set_log(move |args, _| {
+        if has_all(args) {
+            Ok(all.clone())
+        } else {
+            Err(crate::util::LoreError::Git("fatal: unborn HEAD".to_owned()))
+        }
+    });
+    git
+}
+
 fn non_lore_commit(hash: &str, subject: &str) -> RawCommit {
     raw_commit()
         .hash(hash)
@@ -330,6 +369,48 @@ mod find_by_lore_id {
     }
 
     #[test]
+    fn should_prefer_a_head_reachable_atom_and_skip_other_refs_on_a_hit_issue_57() {
+        let git = git_by_ref(
+            vec![lore_commit_with_hash("head", "deadbeef")],
+            vec![lore_commit_dated(
+                "poison",
+                "deadbeef",
+                "2030-01-01T00:00:00Z",
+            )],
+        );
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let result = repo.find_by_lore_id("deadbeef").unwrap();
+
+        assert_eq!(result.map(|a| a.commit_hash), Some("head".to_owned()));
+        // Found on HEAD: the --all fallback pass never runs.
+        assert_eq!(git.log_call_count(), 1);
+        assert!(!has_all(&git.log_calls()[0].0));
+    }
+
+    #[test]
+    fn should_fall_back_to_all_when_the_lore_id_exists_only_off_the_current_branch() {
+        let git = git_by_ref(vec![], vec![lore_commit_with_hash("side", "deadbeef")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let result = repo.find_by_lore_id("deadbeef").unwrap();
+
+        assert_eq!(result.map(|a| a.commit_hash), Some("side".to_owned()));
+        assert_eq!(git.log_call_count(), 2);
+        assert!(has_all(&git.log_calls()[1].0));
+    }
+
+    #[test]
+    fn should_fall_back_to_all_when_the_head_pass_fails_on_an_unborn_branch() {
+        let git = git_with_unborn_head(vec![lore_commit_with_hash("side", "deadbeef")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let result = repo.find_by_lore_id("deadbeef").unwrap();
+
+        assert_eq!(result.map(|a| a.commit_hash), Some("side".to_owned()));
+    }
+
+    #[test]
     fn should_return_null_if_no_atom_matches_the_lore_id() {
         let git = MockGitClient::new();
         git.set_log_result(vec![lore_commit("a1b2c3d4")]);
@@ -461,6 +542,30 @@ mod find_all {
 
         let (args, _) = &git.log_calls()[0];
         assert!(args.is_empty());
+    }
+
+    #[test]
+    fn should_pass_all_refs_option_to_git_log() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        repo.find_all(&FindAllOptions {
+            all_refs: true,
+            ..FindAllOptions::default()
+        })
+        .unwrap();
+
+        assert!(has_all(&git.log_calls()[0].0));
+    }
+
+    #[test]
+    fn should_scan_only_the_current_branch_by_default() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        repo.find_all(&FindAllOptions::default()).unwrap();
+
+        assert!(!has_all(&git.log_calls()[0].0));
     }
 
     #[test]
@@ -700,7 +805,7 @@ mod lore_id_index {
     use super::*;
 
     #[test]
-    fn should_index_atoms_by_lore_id_from_a_single_all_pass() {
+    fn should_index_atoms_by_lore_id_from_a_head_pass_followed_by_an_all_pass() {
         let git = MockGitClient::new();
         git.set_log_result(vec![
             lore_commit_with_extras("aaa", "aaaa1111", "Related: bbbb2222"),
@@ -715,9 +820,10 @@ mod lore_id_index {
             index.get("aaaa1111").map(|a| a.commit_hash.as_str()),
             Some("aaa")
         );
-        assert_eq!(git.log_call_count(), 1);
-        let (args, _) = &git.log_calls()[0];
-        assert!(args.contains(&"--all".to_owned()));
+        let calls = git.log_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(!has_all(&calls[0].0));
+        assert!(has_all(&calls[1].0));
     }
 
     #[test]
@@ -739,6 +845,53 @@ mod lore_id_index {
     }
 
     #[test]
+    fn should_keep_the_head_reachable_atom_when_a_side_branch_shares_the_lore_id_issue_57() {
+        let git = git_by_ref(
+            vec![lore_commit_with_hash("head", "deadbeef")],
+            vec![lore_commit_dated(
+                "poison",
+                "deadbeef",
+                "2030-01-01T00:00:00Z",
+            )],
+        );
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let index = repo.lore_id_index().unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(
+            index.get("deadbeef").map(|a| a.commit_hash.as_str()),
+            Some("head")
+        );
+    }
+
+    #[test]
+    fn should_still_index_a_lore_id_that_exists_only_off_the_current_branch() {
+        let git = git_by_ref(vec![], vec![lore_commit_with_hash("side", "bbbb2222")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let index = repo.lore_id_index().unwrap();
+
+        assert_eq!(
+            index.get("bbbb2222").map(|a| a.commit_hash.as_str()),
+            Some("side")
+        );
+    }
+
+    #[test]
+    fn should_build_from_all_alone_when_the_head_pass_fails_on_an_unborn_branch() {
+        let git = git_with_unborn_head(vec![lore_commit_with_hash("side", "aaaa1111")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let index = repo.lore_id_index().unwrap();
+
+        assert_eq!(
+            index.get("aaaa1111").map(|a| a.commit_hash.as_str()),
+            Some("side")
+        );
+    }
+
+    #[test]
     fn should_build_the_index_once_per_repository_instance() {
         let git = MockGitClient::new();
         git.set_log_result(vec![lore_commit("aaaa1111")]);
@@ -747,7 +900,8 @@ mod lore_id_index {
         repo.lore_id_index().unwrap();
         repo.lore_id_index().unwrap();
 
-        assert_eq!(git.log_call_count(), 1);
+        // One build = two git passes (HEAD, then --all).
+        assert_eq!(git.log_call_count(), 2);
     }
 
     /// Deliberate deviation from TS (which caches the rejected promise):
@@ -764,7 +918,8 @@ mod lore_id_index {
         let index = repo.lore_id_index().unwrap();
 
         assert_eq!(index.len(), 1);
-        assert_eq!(git.log_call_count(), 2);
+        // Each build is two passes (HEAD, then --all).
+        assert_eq!(git.log_call_count(), 4);
     }
 }
 
@@ -775,7 +930,7 @@ mod resolve_follow_links_index_usage {
     use super::*;
 
     #[test]
-    fn should_resolve_referenced_ids_with_a_single_all_pass() {
+    fn should_resolve_referenced_ids_via_the_head_then_all_index_passes() {
         let git = MockGitClient::new();
         git.set_log_result(vec![lore_commit_with_hash("bbb", "bbbb2222")]);
         let repo = AtomRepository::new(&git, &PARSER, vec![]);
@@ -783,9 +938,10 @@ mod resolve_follow_links_index_usage {
         let result = repo.resolve_follow_links(&[atom_a_related_b()], 3).unwrap();
 
         assert_eq!(result.len(), 2);
-        assert_eq!(git.log_call_count(), 1);
-        let (args, _) = &git.log_calls()[0];
-        assert!(args.contains(&"--all".to_owned()));
+        let calls = git.log_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(!has_all(&calls[0].0));
+        assert!(has_all(&calls[1].0));
     }
 }
 
@@ -904,7 +1060,8 @@ mod lore_only_discovery {
         repo.lore_id_index().unwrap();
 
         let calls = git.log_calls();
-        assert_eq!(calls.len(), 4);
+        // lore_id_index runs two passes: HEAD first, then --all.
+        assert_eq!(calls.len(), 5);
         for (_, options) in calls {
             assert_eq!(options, LogOptions { lore_only: true });
         }
@@ -934,12 +1091,17 @@ mod lore_only_discovery {
 
         repo.find_by_lore_id("deadbeef").unwrap();
 
-        let (args, options) = &git.log_calls()[0];
-        assert!(args.contains(&"--all".to_owned()));
-        assert!(args.contains(&"--extended-regexp".to_owned()));
-        assert!(args.contains(&"--grep=^Lore-id:[[:space:]]*deadbeef".to_owned()));
-        // Its own grep must not be OR-ed with the generic Lore-id grep
-        assert_eq!(*options, LogOptions::default());
+        // HEAD pass first; the miss falls back to --all.
+        let calls = git.log_calls();
+        assert_eq!(calls.len(), 2);
+        for (args, options) in &calls {
+            assert!(args.contains(&"--extended-regexp".to_owned()));
+            assert!(args.contains(&"--grep=^Lore-id:[[:space:]]*deadbeef".to_owned()));
+            // Its own grep must not be OR-ed with the generic Lore-id grep
+            assert_eq!(*options, LogOptions::default());
+        }
+        assert!(!has_all(&calls[0].0));
+        assert!(has_all(&calls[1].0));
     }
 }
 

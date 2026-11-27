@@ -45,7 +45,7 @@ const SCOPE_GREP_FLAGS: [&str; 3] = ["--all-match", "--extended-regexp", "--rege
 
 /// Escape regex metacharacters for a POSIX ERE `--grep` pattern. Escaping
 /// any other character is undefined behaviour in POSIX, so only these are.
-pub fn escape_ere(value: &str) -> String {
+fn escape_ere(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for ch in value.chars() {
         if ".^$*+?()[]{}|\\".contains(ch) {

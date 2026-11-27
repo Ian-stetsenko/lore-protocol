@@ -123,3 +123,23 @@ fn keeps_the_default_last_commit_and_last_behavior() {
     run_validate(&last, &["--last", "3"]).expect("validates");
     assert_eq!(log_args(&last), vec![vec!["-3".to_owned()]]);
 }
+
+// ---- empty range values follow JS truthiness (Rust-only coverage) ---------
+
+#[test]
+fn an_empty_from_falls_back_to_the_last_commit() {
+    let git = MockGitClient::new();
+
+    run_validate(&git, &["--from", ""]).expect("validates");
+
+    assert_eq!(log_args(&git), vec![vec!["-1".to_owned()]]);
+}
+
+#[test]
+fn an_empty_positional_range_falls_back_to_the_last_commit() {
+    let git = MockGitClient::new();
+
+    run_validate(&git, &[""]).expect("validates");
+
+    assert_eq!(log_args(&git), vec![vec!["-1".to_owned()]]);
+}

@@ -91,7 +91,9 @@ pub fn run(args: &ValidateArgs, deps: &ValidateDeps<'_>, io: &mut Io<'_>) -> Res
 }
 
 /// The `git log` arguments selecting the commits to validate. A positional
-/// range and `--from` are mutually exclusive.
+/// range and `--from` are mutually exclusive whenever both are given (even
+/// empty, like TS's `!== undefined`); an empty value is otherwise ignored
+/// (JS truthiness).
 fn history_log_args(args: &ValidateArgs) -> Result<Vec<String>> {
     if let (Some(range), Some(from)) = (&args.range, &args.from) {
         return Err(LoreError::new(format!(
@@ -99,9 +101,11 @@ fn history_log_args(args: &ValidateArgs) -> Result<Vec<String>> {
         )));
     }
 
-    Ok(if let Some(range) = &args.range {
-        vec![range.clone()]
-    } else if let Some(from) = &args.from {
+    let range = args.range.as_deref().filter(|s| !s.is_empty());
+    let from = args.from.as_deref().filter(|s| !s.is_empty());
+    Ok(if let Some(range) = range {
+        vec![range.to_owned()]
+    } else if let Some(from) = from {
         vec![format!("{from}..HEAD")]
     } else if let Some(last) = args.last.filter(|n| *n > 0) {
         vec![format!("-{last}")]

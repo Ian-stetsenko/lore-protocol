@@ -44,11 +44,12 @@ pub fn run(args: &DoctorArgs, deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<
                 message: "Failed to retrieve atoms from git history".to_owned(),
                 details: Vec::new(),
             });
-            (Vec::new(), Vec::new())
+            (Vec::new(), None)
         }
     };
 
-    checks.push(check_lore_id_uniqueness(&uniqueness_atoms, args.all));
+    let uniqueness_atoms = uniqueness_atoms.as_deref().unwrap_or(&all_atoms);
+    checks.push(check_lore_id_uniqueness(uniqueness_atoms, args.all));
     checks.extend(check_references_resolve(&all_atoms, deps.atom_repository));
     checks.push(check_superseded_dependencies(
         &all_atoms,
@@ -75,7 +76,8 @@ pub fn run(args: &DoctorArgs, deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<
     })
 }
 
-/// Atoms on the current branch, plus the atoms the uniqueness check scans.
+/// Atoms on the current branch, plus the every-ref atoms the uniqueness
+/// check scans instead when `all_refs` is set (`None` otherwise).
 ///
 /// `all_refs` opts the uniqueness check into scanning every ref: a Lore-id
 /// shared with a side branch (e.g. a future-dated poison commit) surfaces
@@ -84,21 +86,17 @@ pub fn run(args: &DoctorArgs, deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<
 fn scan_atoms(
     repository: &AtomRepository<'_>,
     all_refs: bool,
-) -> Result<(Vec<LoreAtom>, Vec<LoreAtom>)> {
-    let scan = |all_refs| {
+) -> Result<(Vec<LoreAtom>, Option<Vec<LoreAtom>>)> {
+    let scan = |every_ref| {
         repository.find_all(&FindAllOptions {
             max_commits: Some(DOCTOR_SCAN_LIMIT),
-            all_refs,
+            all_refs: every_ref,
             ..FindAllOptions::default()
         })
     };
     let branch_atoms = scan(false)?;
-    let uniqueness_atoms = if all_refs {
-        scan(true)?
-    } else {
-        branch_atoms.clone()
-    };
-    Ok((branch_atoms, uniqueness_atoms))
+    let all_ref_atoms = if all_refs { Some(scan(true)?) } else { None };
+    Ok((branch_atoms, all_ref_atoms))
 }
 
 fn check_config(config_loader: &dyn ConfigLoader, cwd: &Path) -> DoctorCheck {

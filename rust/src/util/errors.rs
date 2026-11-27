@@ -32,9 +32,6 @@ pub enum LoreError {
     Io(#[from] std::io::Error),
 
     #[error("{0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("{0}")]
     Toml(#[from] toml::de::Error),
 }
 
@@ -71,9 +68,7 @@ impl LoreError {
             LoreError::Validation { .. } => EXIT_CODE_VALIDATION_ERROR,
             LoreError::Git(_) => EXIT_CODE_GIT_ERROR,
             LoreError::NoStagedChanges => EXIT_CODE_NO_STAGED_CHANGES,
-            LoreError::Io(_) | LoreError::Json(_) | LoreError::Toml(_) => {
-                EXIT_CODE_VALIDATION_ERROR
-            }
+            LoreError::Io(_) | LoreError::Toml(_) => EXIT_CODE_VALIDATION_ERROR,
         }
     }
 

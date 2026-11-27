@@ -352,9 +352,9 @@ pub struct ValidateArgs {
     /// Git revision range (default: the last commit)
     pub range: Option<String>,
 
-    /// Validate all commits since ref (e.g., main)
+    /// Validate all commits in the range <ref>..HEAD (e.g., --from main)
     #[arg(long, value_name = "ref")]
-    pub since: Option<String>,
+    pub from: Option<String>,
 
     /// Validate the last N commits
     #[arg(long, value_name = "n")]

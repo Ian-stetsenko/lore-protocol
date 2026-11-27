@@ -1,7 +1,8 @@
 //! `lore validate [range]`: Lore protocol compliance for commits.
 //!
-//! Default is the last commit. `--since <ref>`, `--last <n>` or an explicit
-//! range select history; `--commit-msg-file` validates a message before the
+//! Default is the last commit. `--from <ref>` (for `<ref>..HEAD`), `--last <n>`
+//! or an explicit range select history (`--since`, deprecated in TS 0.7.0, was
+//! removed in 0.8.0); `--commit-msg-file` validates a message before the
 //! commit exists (hook mode). Exit codes: 0 clean, 1 errors, 2 warnings only.
 
 use std::fs;
@@ -19,7 +20,7 @@ use crate::types::output::{
     ValidationSummary,
 };
 use crate::util::constants::{EXIT_CODE_GIT_ERROR, EXIT_CODE_VALIDATION_ERROR};
-use crate::util::Result;
+use crate::util::{LoreError, Result};
 
 pub struct ValidateDeps<'a> {
     pub validator: &'a Validator<'a>,
@@ -45,18 +46,9 @@ pub fn run(args: &ValidateArgs, deps: &ValidateDeps<'_>, io: &mut Io<'_>) -> Res
                 files_changed: Vec::new(),
             }]
         }
-        None => {
-            let log_args: Vec<String> = if let Some(range) = &args.range {
-                vec![range.clone()]
-            } else if let Some(since) = &args.since {
-                vec![format!("{since}..HEAD")]
-            } else if let Some(last) = args.last.filter(|n| *n > 0) {
-                vec![format!("-{last}")]
-            } else {
-                vec!["-1".to_owned()]
-            };
-            deps.git_client.log(&log_args, LogOptions::default())?
-        }
+        None => deps
+            .git_client
+            .log(&history_log_args(args)?, LogOptions::default())?,
     };
 
     let mut results = deps.validator.validate(&raw_commits)?;
@@ -98,6 +90,26 @@ pub fn run(args: &ValidateArgs, deps: &ValidateDeps<'_>, io: &mut Io<'_>) -> Res
     })
 }
 
+/// The `git log` arguments selecting the commits to validate. A positional
+/// range and `--from` are mutually exclusive.
+fn history_log_args(args: &ValidateArgs) -> Result<Vec<String>> {
+    if let (Some(range), Some(from)) = (&args.range, &args.from) {
+        return Err(LoreError::new(format!(
+            "Conflicting range specifiers: positional range \"{range}\" and --from {from}. Pass one or the other."
+        )));
+    }
+
+    Ok(if let Some(range) = &args.range {
+        vec![range.clone()]
+    } else if let Some(from) = &args.from {
+        vec![format!("{from}..HEAD")]
+    } else if let Some(last) = args.last.filter(|n| *n > 0) {
+        vec![format!("-{last}")]
+    } else {
+        vec!["-1".to_owned()]
+    })
+}
+
 fn upgrade_warnings(result: CommitValidationResult) -> CommitValidationResult {
     let issues: Vec<ValidationIssue> = result
         .issues
@@ -115,3 +127,6 @@ fn upgrade_warnings(result: CommitValidationResult) -> CommitValidationResult {
         issues,
     }
 }
+
+#[cfg(test)]
+mod tests;

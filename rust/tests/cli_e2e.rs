@@ -863,6 +863,59 @@ fn validate_exit_codes_follow_severity() {
 }
 
 #[test]
+fn validate_from_matches_the_equivalent_positional_range() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.git(&["branch", "base"]);
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: first", &["Lore-id: aaaa1111"]),
+    );
+    repo.commit(
+        "src/b.ts",
+        &atom_message("feat: second", &["Lore-id: bbbb2222"]),
+    );
+
+    let from = repo
+        .lore()
+        .args(["validate", "--from", "base", "--json"])
+        .assert()
+        .success();
+    let positional = repo
+        .lore()
+        .args(["validate", "base..HEAD", "--json"])
+        .assert()
+        .success();
+    let from_out = json(&from.get_output().stdout);
+    assert_eq!(from_out["summary"]["commits_checked"], 2);
+    assert_eq!(from_out, json(&positional.get_output().stdout));
+}
+
+#[test]
+fn validate_rejects_the_removed_since_flag() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.lore()
+        .args(["validate", "--since", "HEAD"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("--since"));
+}
+
+#[test]
+fn validate_rejects_a_range_combined_with_from() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.lore()
+        .args(["validate", "HEAD~1..HEAD", "--from", "HEAD"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Conflicting range specifiers: positional range \"HEAD~1..HEAD\" and --from HEAD. Pass one or the other.",
+        ));
+}
+
+#[test]
 fn validate_commit_msg_file_mode_for_hooks() {
     let repo = Repo::new();
     repo.commit("README.md", "chore: initial");

@@ -4,6 +4,7 @@ import type { IGitClient, RawCommit } from '../../../src/interfaces/git-client.j
 import type { PathQueryOptions } from '../../../src/types/query.js';
 import type { LoreTrailers } from '../../../src/types/domain.js';
 import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
+import { GitError, LoreError } from '../../../src/util/errors.js';
 
 /**
  * Minimal TrailerParser mock that satisfies the AtomRepository's usage.
@@ -1050,5 +1051,81 @@ describe('AtomRepository lore-only discovery (git-level pre-filter)', () => {
     }
     expect(calls[0][0]).not.toContain('--all');
     expect(calls[1][0]).toContain('--all');
+  });
+});
+
+describe('AtomRepository --since / --until ref rejection', () => {
+  let gitClient: IGitClient;
+  let repo: AtomRepository;
+
+  const refHint = (flag: string, value: string): string =>
+    `${flag} takes a date, but "${value}" is a git ref. Pass a date such as 2026-01-31 or "2 weeks ago".`;
+
+  beforeEach(() => {
+    gitClient = createMockGitClient({
+      log: vi.fn(async () => []),
+      resolveRef: vi.fn(async () => 'abc123'),
+    });
+    repo = new AtomRepository(gitClient, createMockTrailerParser() as any);
+  });
+
+  it('should reject a --since value that resolves to a commit, with exit code 1', async () => {
+    const error = await repo.findAll({ since: 'v1.2' }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(LoreError);
+    expect((error as LoreError).exitCode).toBe(1);
+    expect((error as LoreError).message).toBe(refHint('--since', 'v1.2'));
+    expect(gitClient.resolveRef).toHaveBeenCalledWith('v1.2^{commit}');
+    expect(gitClient.log).not.toHaveBeenCalled();
+  });
+
+  it('should name --until in the message for an --until ref', async () => {
+    await expect(repo.findAll({ until: 'main' })).rejects.toThrow(refHint('--until', 'main'));
+  });
+
+  it('should reject a ref passed to findByTarget', async () => {
+    await expect(
+      repo.findByTarget(['--', 'src/'], makeQueryOptions({ since: 'HEAD~3' })),
+    ).rejects.toThrow(refHint('--since', 'HEAD~3'));
+  });
+
+  it('should reject a ref passed to findByScope', async () => {
+    await expect(
+      repo.findByScope('auth', makeQueryOptions({ since: 'v1.2' })),
+    ).rejects.toThrow(refHint('--since', 'v1.2'));
+  });
+
+  it('should treat a value as a date when the ref lookup fails with a GitError', async () => {
+    vi.mocked(gitClient.resolveRef).mockRejectedValue(new GitError('git rev-parse failed'));
+
+    await repo.findAll({ since: 'yesterday', until: 'today' });
+
+    expect(gitClient.log).toHaveBeenCalledTimes(1);
+    const [args] = vi.mocked(gitClient.log).mock.calls[0];
+    expect(args).toContain('--since=yesterday');
+    expect(args).toContain('--until=today');
+  });
+
+  it('should propagate non-git errors from the ref lookup', async () => {
+    vi.mocked(gitClient.resolveRef).mockRejectedValue(new TypeError('boom'));
+
+    await expect(repo.findAll({ since: 'yesterday' })).rejects.toThrow('boom');
+  });
+
+  it.each(['2026-01-31', '2026-01-31T10:00:00', '2 weeks ago', '-1'])(
+    'should skip the ref lookup for %j',
+    async (value) => {
+      await repo.findAll({ since: value, until: value });
+
+      expect(gitClient.resolveRef).not.toHaveBeenCalled();
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('should not look anything up when no bounds are given', async () => {
+    await repo.findAll();
+    await repo.findByTarget(['--', 'src/'], makeQueryOptions());
+
+    expect(gitClient.resolveRef).not.toHaveBeenCalled();
   });
 });

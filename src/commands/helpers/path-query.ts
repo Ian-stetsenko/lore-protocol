@@ -136,5 +136,5 @@ export function addPathQueryOptions(cmd: Command): Command {
     .option('--author <email>', 'Filter by commit author')
     .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
-    .option('--since <ref>', 'Only consider commits since ref/date');
+    .option('--since <date>', 'Only consider commits after this date');
 }

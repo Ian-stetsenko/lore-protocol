@@ -3,14 +3,21 @@
 //! Default is the last commit. `--from <ref>` (for `<ref>..HEAD`), `--last <n>`
 //! or an explicit range select history (`--since`, deprecated in TS 0.7.0, was
 //! removed in 0.8.0); `--commit-msg-file` validates a message before the
-//! commit exists (hook mode). Exit codes: 0 clean, 1 errors, 2 warnings only.
+//! commit exists (hook mode).
+//!
+//! Exit codes:
+//! - Range modes (positional range, `--from`, `--last`, default): 1 on errors,
+//!   2 on warnings only, 0 when clean.
+//! - Hook mode (`--commit-msg-file`): 1 on errors, 0 otherwise. Warnings are
+//!   advisory so they never block a commit; `--strict` upgrades them to
+//!   errors (which `[hooks] enforce = true` does).
 
 use std::fs;
 
 use chrono::{SecondsFormat, Utc};
 
 use crate::cli::ValidateArgs;
-use crate::commands::{Io, EXIT_OK};
+use crate::commands::Io;
 use crate::interfaces::git_client::{GitClient, LogOptions, RawCommit};
 use crate::interfaces::output_formatter::OutputFormatter;
 use crate::services::trailer_parser::TrailerParser;
@@ -19,7 +26,9 @@ use crate::types::output::{
     CommitValidationResult, FormattableValidationResult, Severity, ValidationIssue,
     ValidationSummary,
 };
-use crate::util::constants::{EXIT_CODE_GIT_ERROR, EXIT_CODE_VALIDATION_ERROR};
+use crate::util::constants::{
+    EXIT_CODE_SUCCESS, EXIT_CODE_VALIDATION_ERROR, EXIT_CODE_VALIDATION_WARNINGS,
+};
 use crate::util::{LoreError, Result};
 
 pub struct ValidateDeps<'a> {
@@ -30,6 +39,7 @@ pub struct ValidateDeps<'a> {
 }
 
 pub fn run(args: &ValidateArgs, deps: &ValidateDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
+    let is_hook_mode = args.commit_msg_file.is_some();
     let raw_commits: Vec<RawCommit> = match &args.commit_msg_file {
         Some(path) => {
             // Hook mode: validate a commit message file before the commit exists
@@ -81,13 +91,23 @@ pub fn run(args: &ValidateArgs, deps: &ValidateDeps<'_>, io: &mut Io<'_>) -> Res
 
     io.print(&deps.formatter.format_validation_result(&validation_result))?;
 
-    Ok(if total_errors > 0 {
+    Ok(resolve_exit_code(
+        total_errors,
+        total_warnings,
+        is_hook_mode,
+    ))
+}
+
+/// Maps the (post-`--strict`) issue counts to a process exit code. Hook mode
+/// treats warnings as advisory: only errors block the commit.
+fn resolve_exit_code(total_errors: usize, total_warnings: usize, is_hook_mode: bool) -> i32 {
+    if total_errors > 0 {
         EXIT_CODE_VALIDATION_ERROR
-    } else if total_warnings > 0 {
-        EXIT_CODE_GIT_ERROR
+    } else if total_warnings > 0 && !is_hook_mode {
+        EXIT_CODE_VALIDATION_WARNINGS
     } else {
-        EXIT_OK
-    })
+        EXIT_CODE_SUCCESS
+    }
 }
 
 /// The `git log` arguments selecting the commits to validate. A positional

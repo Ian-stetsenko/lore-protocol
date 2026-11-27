@@ -313,6 +313,19 @@ fn with_dangling_ref(repo: &Repo) {
     );
 }
 
+/// Commit message files for `validate --commit-msg-file` (hook mode).
+fn hook_messages(repo: &Repo) {
+    linear_seeded(repo);
+    repo.write(
+        "msg-clean.txt",
+        "feat: clean\n\nLore-id: abcdef12\nConfidence: high\n",
+    );
+    repo.write(
+        "msg-warn.txt",
+        "feat: dangling\n\nLore-id: abcdef12\nRelated: ffff9999\n",
+    );
+}
+
 // ---- running ---------------------------------------------------------------
 
 struct Run {
@@ -910,4 +923,16 @@ fn parity_for_init_and_hooks() {
         case(&["hooks", "uninstall"]),
     ]);
     assert_parity(linear_seeded, cases);
+}
+
+#[test]
+fn parity_for_validate_hook_mode() {
+    assert_parity(
+        hook_messages,
+        both_formats(vec![
+            case(&["validate", "--commit-msg-file", "msg-clean.txt"]),
+            case(&["validate", "--commit-msg-file", "msg-warn.txt"]),
+            case(&["validate", "--commit-msg-file", "msg-warn.txt", "--strict"]),
+        ]),
+    );
 }

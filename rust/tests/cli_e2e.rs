@@ -1198,6 +1198,29 @@ fn validate_commit_msg_file_mode_for_hooks() {
         .stdout(predicate::str::contains("Lore-id trailer is missing"));
 }
 
+#[test]
+fn validate_commit_msg_file_treats_warnings_as_advisory() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    // A dangling reference is a warning, never an error.
+    repo.write(
+        "msg-warn.txt",
+        "feat: hook message\n\nLore-id: abcdef12\nRelated: ffff9999\n",
+    );
+
+    repo.lore()
+        .args(["validate", "--commit-msg-file", "msg-warn.txt"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[reference-exists]"))
+        .stdout(predicate::str::contains("1 warnings"));
+
+    repo.lore()
+        .args(["validate", "--commit-msg-file", "msg-warn.txt", "--strict"])
+        .assert()
+        .code(1);
+}
+
 // ---------------------------------------------------------------------------
 // stale / squash / doctor
 // ---------------------------------------------------------------------------

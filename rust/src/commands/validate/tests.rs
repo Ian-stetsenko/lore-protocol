@@ -143,3 +143,33 @@ fn an_empty_positional_range_falls_back_to_the_last_commit() {
 
     assert_eq!(log_args(&git), vec![vec!["-1".to_owned()]]);
 }
+
+// ---- exit codes: hook mode treats warnings as advisory (TS v0.8.1) --------
+
+#[test]
+fn hook_mode_exits_0_on_warnings_only() {
+    assert_eq!(resolve_exit_code(0, 1, true), EXIT_CODE_SUCCESS);
+}
+
+#[test]
+fn hook_mode_exits_1_on_errors() {
+    assert_eq!(resolve_exit_code(1, 1, true), EXIT_CODE_VALIDATION_ERROR);
+}
+
+#[test]
+fn hook_mode_exits_0_when_clean() {
+    assert_eq!(resolve_exit_code(0, 0, true), EXIT_CODE_SUCCESS);
+}
+
+#[test]
+fn range_mode_still_exits_2_on_warnings_only() {
+    assert_eq!(
+        resolve_exit_code(0, 1, false),
+        EXIT_CODE_VALIDATION_WARNINGS
+    );
+}
+
+#[test]
+fn range_mode_still_exits_1_on_errors() {
+    assert_eq!(resolve_exit_code(1, 0, false), EXIT_CODE_VALIDATION_ERROR);
+}

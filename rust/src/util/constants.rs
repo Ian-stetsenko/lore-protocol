@@ -40,6 +40,8 @@ pub const CONFIG_DIR: &str = ".lore";
 
 pub const EXIT_CODE_SUCCESS: i32 = 0;
 pub const EXIT_CODE_VALIDATION_ERROR: i32 = 1;
+/// `lore validate` range modes: warnings only, no errors.
+pub const EXIT_CODE_VALIDATION_WARNINGS: i32 = 2;
 pub const EXIT_CODE_GIT_ERROR: i32 = 2;
 pub const EXIT_CODE_NO_STAGED_CHANGES: i32 = 3;
 

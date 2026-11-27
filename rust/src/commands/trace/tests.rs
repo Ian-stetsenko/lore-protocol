@@ -154,22 +154,60 @@ fn tos(out: &Value) -> Vec<&str> {
         .collect()
 }
 
-#[test]
-fn max_depth_limits_the_traversal() {
-    let git = git_with(vec![
+fn chain() -> MockGitClient {
+    git_with(vec![
         commit("aaaa1111", &["bbbb2222"]),
         commit("bbbb2222", &["cccc3333"]),
-        commit("cccc3333", &[]),
+        commit("cccc3333", &["dddd4444"]),
+        commit("dddd4444", &[]),
+    ])
+}
+
+#[test]
+fn max_depth_0_lists_the_root_alone_and_builds_no_index() {
+    let git = chain();
+    let out = run_trace(&git, &["aaaa1111", "--max-depth", "0"]).expect("trace");
+    assert_eq!(tos(&out), Vec::<&str>::new());
+    assert_eq!(out["root"]["lore_id"], "aaaa1111");
+    assert_eq!(index_builds(&git), 0);
+}
+
+#[test]
+fn max_depth_n_lists_exactly_the_edges_whose_source_depth_is_below_n() {
+    let git = chain();
+    let depth = |n: &str| {
+        let out = run_trace(&git, &["aaaa1111", "--max-depth", n]).expect("trace");
+        tos(&out).into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+    assert_eq!(depth("1"), vec!["bbbb2222"]);
+    assert_eq!(depth("2"), vec!["bbbb2222", "cccc3333"]);
+    assert_eq!(depth("3"), vec!["bbbb2222", "cccc3333", "dddd4444"]);
+}
+
+#[test]
+fn the_default_depth_follows_the_whole_chain() {
+    let out = run_trace(&chain(), &["aaaa1111"]).expect("trace");
+    assert_eq!(tos(&out), vec!["bbbb2222", "cccc3333", "dddd4444"]);
+}
+
+#[test]
+fn edges_back_to_visited_atoms_are_still_listed_in_a_cycle() {
+    let git = git_with(vec![
+        commit("aaaa1111", &["bbbb2222"]),
+        commit("bbbb2222", &["aaaa1111"]),
     ]);
-    // Depth 0: the root's edges are listed but nothing is expanded.
-    let shallow = run_trace(&git, &["aaaa1111", "--max-depth", "0"]).expect("trace");
-    assert_eq!(tos(&shallow), vec!["bbbb2222"]);
+    let out = run_trace(&git, &["aaaa1111"]).expect("trace");
+    assert_eq!(tos(&out), vec!["bbbb2222", "aaaa1111"]);
+}
 
-    // Depth 1: bbbb2222 is visited and its edges listed, but cccc3333 is
-    // not expanded further (TS: `depth + 1 <= maxDepth` gate on enqueue).
-    let out = run_trace(&git, &["aaaa1111", "--max-depth", "1"]).expect("trace");
-    assert_eq!(tos(&out), vec!["bbbb2222", "cccc3333"]);
-
-    let deep = run_trace(&git, &["aaaa1111"]).expect("trace");
-    assert_eq!(deep["edges"].as_array().map(Vec::len), Some(2));
+#[test]
+fn rejects_invalid_max_depth_values() {
+    for bad in ["x", "-1", "1.5"] {
+        let err = Cli::try_parse_from(["lore", "trace", "aaaa1111", "--max-depth", bad])
+            .expect_err("invalid depth");
+        assert_eq!(
+            std::error::Error::source(&err).map(ToString::to_string),
+            Some(format!("Expected a non-negative integer, got \"{bad}\""))
+        );
+    }
 }

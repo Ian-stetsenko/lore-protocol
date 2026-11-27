@@ -1,4 +1,8 @@
 //! `lore trace <lore-id>`: BFS over reference trailers from a starting atom.
+//!
+//! Depth: the root is depth 0 and an edge's depth is its source depth + 1.
+//! `--max-depth N` lists exactly the edges whose source depth is < N, so N=0
+//! shows the root alone.
 
 use std::collections::{HashSet, VecDeque};
 
@@ -44,6 +48,9 @@ pub fn run(args: &TraceArgs, deps: &TraceDeps<'_>, io: &mut Io<'_>) -> Result<i3
     let mut index = None;
 
     while let Some((current, depth)) = queue.pop_front() {
+        if depth >= args.max_depth {
+            continue;
+        }
         for key in TrailerKey::REFERENCE {
             let Some(ref_ids) = current.trailers.array_values(key) else {
                 continue;
@@ -67,7 +74,10 @@ pub fn run(args: &TraceArgs, deps: &TraceDeps<'_>, io: &mut Io<'_>) -> Result<i3
                     target_atom: target_atom.clone(),
                 });
 
-                if resolved && !visited.contains(ref_id) && depth < args.max_depth {
+                // Enqueue each atom once; the depth bound is enforced at
+                // dequeue. Edges back to visited atoms (cycles) are still
+                // listed above.
+                if resolved && !visited.contains(ref_id) {
                     visited.insert(ref_id.clone());
                     if let Some(atom) = target_atom {
                         queue.push_back((atom, depth + 1));

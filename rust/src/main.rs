@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use clap::error::ErrorKind;
 use clap::Parser;
 
-use lore::cli::{Cli, Command, InvalidPositiveInt};
+use lore::cli::{Cli, Command, InvalidOptionValue};
 use lore::commands::helpers::path_query::PathQueryDeps;
 use lore::commands::path_queries::PathQueryKind;
 use lore::commands::{self, Io};
@@ -63,10 +63,10 @@ fn run() -> i32 {
 }
 
 /// Commander parity: `--help`/`--version` exit 0 (bare version string);
-/// every usage error exits 1. An invalid positive integer is not a usage
-/// error in TS: it renders through the output formatter.
+/// every usage error exits 1. A value rejected by an option parser is not a
+/// usage error in TS: it renders through the output formatter.
 fn handle_parse_error(err: clap::Error) -> i32 {
-    if let Some(invalid) = invalid_positive_int(&err) {
+    if let Some(invalid) = invalid_option_value(&err) {
         return report_argv_error(&invalid.to_string());
     }
     match err.kind() {
@@ -275,12 +275,12 @@ fn select_formatter(is_json: bool, no_color: bool, is_tty: bool) -> Box<dyn Outp
     }
 }
 
-fn invalid_positive_int(err: &clap::Error) -> Option<&InvalidPositiveInt> {
+fn invalid_option_value(err: &clap::Error) -> Option<&InvalidOptionValue> {
     use std::error::Error as _;
     if err.kind() != ErrorKind::ValueValidation {
         return None;
     }
-    err.source()?.downcast_ref::<InvalidPositiveInt>()
+    err.source()?.downcast_ref::<InvalidOptionValue>()
 }
 
 /// Render an error raised before the options parsed, choosing JSON exactly

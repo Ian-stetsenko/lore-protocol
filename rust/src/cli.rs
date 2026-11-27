@@ -10,6 +10,10 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::types::commit_input::CommitCommandOptions;
 
+mod option_parsers;
+
+pub use option_parsers::{parse_non_negative_int, parse_positive_int, InvalidOptionValue};
+
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "lore",
@@ -98,35 +102,6 @@ pub enum Command {
     Hooks(HooksArgs),
 }
 
-/// A `--limit` / `--max-commits` value that is not a strict positive integer.
-///
-/// Typed so the entry point can tell it from clap's own usage errors: TS's
-/// parser threw a plain `Error` that its top-level handler rendered through
-/// the output formatter (a JSON envelope under `--json`), not usage text.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvalidPositiveInt(String);
-
-impl std::fmt::Display for InvalidPositiveInt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Expected a positive integer, got \"{}\"", self.0)
-    }
-}
-
-impl std::error::Error for InvalidPositiveInt {}
-
-/// Parse a CLI value as a strict positive integer; rejects non-numeric
-/// trailing characters and zero.
-pub fn parse_positive_int(value: &str) -> Result<usize, InvalidPositiveInt> {
-    let err = || InvalidPositiveInt(value.to_owned());
-    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(err());
-    }
-    match value.parse::<usize>() {
-        Ok(n) if n >= 1 => Ok(n),
-        _ => Err(err()),
-    }
-}
-
 /// Options shared by the path-scoped query commands
 /// (`context`, `constraints`, `rejected`, `directives`, `tested`).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
@@ -151,11 +126,11 @@ pub struct PathQueryArgs {
     pub author: Option<String>,
 
     /// Maximum number of results to display
-    #[arg(long, value_name = "n", value_parser = parse_positive_int)]
+    #[arg(long, value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub limit: Option<usize>,
 
     /// Maximum git commits to scan (supersession may be incomplete)
-    #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int)]
+    #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub max_commits: Option<usize>,
 
     /// Only consider commits since ref/date
@@ -212,11 +187,11 @@ pub struct SearchArgs {
     pub all: bool,
 
     /// Maximum number of results to display
-    #[arg(long, value_name = "n", value_parser = parse_positive_int)]
+    #[arg(long, value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub limit: Option<usize>,
 
     /// Maximum git commits to scan (supersession may be incomplete)
-    #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int)]
+    #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub max_commits: Option<usize>,
 }
 
@@ -227,11 +202,11 @@ pub struct LogArgs {
     pub paths: Vec<String>,
 
     /// Maximum number of results to display
-    #[arg(long, value_name = "n", value_parser = parse_positive_int)]
+    #[arg(long, value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub limit: Option<usize>,
 
     /// Maximum git commits to scan (supersession may be incomplete)
-    #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int)]
+    #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub max_commits: Option<usize>,
 
     /// Only consider commits since ref/date
@@ -263,8 +238,14 @@ pub struct TraceArgs {
     #[arg(value_name = "lore-id")]
     pub lore_id: String,
 
-    /// Maximum BFS traversal depth
-    #[arg(long = "max-depth", value_name = "n", default_value_t = 10)]
+    /// Maximum number of edge levels to follow
+    #[arg(
+        long = "max-depth",
+        value_name = "n",
+        default_value_t = 10,
+        value_parser = parse_non_negative_int,
+        allow_hyphen_values = true
+    )]
     pub max_depth: usize,
 }
 
@@ -491,16 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn positive_int_parser_rejects_bad_values() {
-        assert_eq!(parse_positive_int("5"), Ok(5));
-        assert!(parse_positive_int("0").is_err());
-        assert!(parse_positive_int("5abc").is_err());
-        assert!(parse_positive_int("-1").is_err());
-        assert!(parse_positive_int("").is_err());
-        assert_eq!(
-            parse_positive_int("abc").unwrap_err().to_string(),
-            "Expected a positive integer, got \"abc\""
-        );
+    fn invalid_positive_ints_fail_to_parse() {
         assert!(Cli::try_parse_from(["lore", "log", "--limit", "0"]).is_err());
     }
 
@@ -575,6 +547,9 @@ mod tests {
         );
         let cli = parse(&["trace", "a1b2c3d4", "--max-depth", "2"]);
         assert!(matches!(cli.command, Command::Trace(a) if a.max_depth == 2));
+        let cli = parse(&["trace", "a1b2c3d4", "--max-depth", "0"]);
+        assert!(matches!(cli.command, Command::Trace(a) if a.max_depth == 0));
+        assert!(Cli::try_parse_from(["lore", "trace", "a1b2c3d4", "--max-depth", "-1"]).is_err());
     }
 
     #[test]

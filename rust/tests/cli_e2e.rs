@@ -1112,6 +1112,33 @@ fn trace_follows_reference_edges() {
         .stderr(predicate::str::contains("not found in commit history"));
 }
 
+#[test]
+fn trace_max_depth_bounds_edge_depth_and_rejects_invalid_values() {
+    let repo = seeded_repo();
+    let edges = |depth: &str| {
+        let assert = repo
+            .lore()
+            .args(["trace", "bbbb2222", "--max-depth", depth, "--json"])
+            .assert()
+            .success();
+        json(&assert.get_output().stdout)["edges"]
+            .as_array()
+            .map(Vec::len)
+    };
+    assert_eq!(edges("0"), Some(0));
+    assert_eq!(edges("1"), Some(1));
+
+    for bad in ["x", "-1", "1.5"] {
+        repo.lore()
+            .args(["trace", "bbbb2222", "--max-depth", bad])
+            .assert()
+            .code(1)
+            .stderr(format!(
+                "error: Expected a non-negative integer, got \"{bad}\"\n(exit code 1)\n"
+            ));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // validate
 // ---------------------------------------------------------------------------

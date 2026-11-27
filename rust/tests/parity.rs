@@ -720,7 +720,10 @@ fn parity_on_a_linear_seeded_history() {
         case(&["stale", "--drift", "1"]),
         case(&["stale", "--low-confidence"]),
         case(&["stale", "src/auth.ts"]),
+        case(&["trace", "aaaa1111", "--max-depth", "0"]),
         case(&["trace", "aaaa1111", "--max-depth", "1"]),
+        case(&["trace", "cccc3333", "--max-depth", "1"]),
+        case(&["trace", "cccc3333", "--max-depth", "2"]),
         case(&["validate", "--last", "4"]),
         case(&["validate", "--from", "HEAD~3"]),
         case(&["validate", "HEAD~3..HEAD"]),
@@ -834,13 +837,13 @@ fn parity_for_errors_and_usage() {
         case(&["search", "--limit", "5x"]),
         case(&["validate", "--last", "0"]),
         case(&["stale", "--older-than", "garbage"]),
-        // Not compared: `validate --last`, `trace --max-depth` and
-        // `stale --drift` with a non-numeric value. TS 0.8.0 parses them
-        // with a bare parseInt, so `abc` silently becomes NaN and exits 0;
+        case(&["trace", "aaaa1111", "--max-depth", "x"]),
+        case(&["trace", "aaaa1111", "--max-depth", "-1"]),
+        case(&["trace", "aaaa1111", "--max-depth", "1.5"]),
+        case(&["log", "--limit", "-1"]),
+        // Not compared: `validate --last` with a non-numeric value. TS parses
+        // it with a bare parseInt, so `abc` silently becomes NaN and exits 0;
         // Rust rejects it as a usage error (exit 1). Documented in README.md.
-        // `trace --max-depth` moves to exact parity with the 0.8.1 port: TS
-        // #90 parses it with parseNonNegativeInt (accepts 0, renders the
-        // error through the formatter).
     ]);
     // The two-argument `--format json` form: TS's top-level handler only
     // recognises `--json` and `--format=json`.

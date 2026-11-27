@@ -1196,13 +1196,24 @@ fn doctor_reports_checks_and_summary() {
     let assert = repo.lore().args(["doctor", "--json"]).assert().success();
     let out = json(&assert.get_output().stdout);
     let checks = out["checks"].as_array().expect("checks");
-    assert_eq!(checks.len(), 4);
-    assert_eq!(checks[0]["name"], "Config file");
+    let names: Vec<&str> = checks.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Config file",
+            "Lore-id uniqueness",
+            "Reference resolution (supersedes/depends-on)",
+            "Reference resolution (related)",
+            "Orphaned dependencies",
+        ]
+    );
     assert_eq!(checks[0]["status"], "warning");
-    assert_eq!(checks[1]["name"], "Lore-id uniqueness");
     assert_eq!(checks[1]["status"], "ok");
-    assert_eq!(checks[2]["status"], "warning");
-    assert_eq!(out["summary"]["warnings"], 2);
+    // A dangling Related is informational; the warning class stays ok.
+    assert_eq!(checks[2]["status"], "ok");
+    assert_eq!(checks[3]["status"], "info");
+    assert_eq!(out["summary"]["warnings"], 1);
+    assert_eq!(out["summary"]["info"], 1);
     assert_eq!(out["summary"]["errors"], 0);
 
     repo.lore().arg("init").assert().success();
@@ -1214,9 +1225,57 @@ fn doctor_reports_checks_and_summary() {
             "OK  Config file: Found and parsed",
         ))
         .stdout(predicate::str::contains(
-            "WARNING  Reference resolution: 1 broken reference(s) found",
-        ))
-        .stdout(predicate::str::contains("1 warnings"));
+            "INFO  Reference resolution (related): 1 broken related reference(s) found",
+        ));
+}
+
+#[test]
+fn doctor_accepts_a_reference_to_an_atom_that_lives_only_on_a_side_branch() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial commit");
+    // Side branch carries the referenced atom (branch-only id bbbb2222).
+    repo.git(&["checkout", "-q", "-b", "side-branch"]);
+    repo.commit(
+        "side/referenced.md",
+        &atom_message("feat: referenced atom", &["Lore-id: bbbb2222"]),
+    );
+    // Back on main: an atom referencing the side-branch-only id.
+    repo.git(&["checkout", "-q", "main"]);
+    repo.commit(
+        "docs/referencing.md",
+        &atom_message(
+            "feat: referencing atom",
+            &["Lore-id: aaaa1111", "Related: bbbb2222"],
+        ),
+    );
+
+    // Setup validity: the branch-only log scan does not see bbbb2222.
+    let log = repo.lore().args(["log", "--json"]).assert().success();
+    let logged = json(&log.get_output().stdout);
+    let ids: Vec<&str> = logged["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .filter_map(|a| a["lore_id"].as_str())
+        .collect();
+    assert_eq!(ids, ["aaaa1111"]);
+
+    let assert = repo.lore().args(["doctor", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    let checks = out["checks"].as_array().expect("checks");
+    let references = checks
+        .iter()
+        .find(|c| c["name"] == "Reference resolution (supersedes/depends-on)")
+        .expect("reference check");
+    assert_eq!(references["status"], "ok");
+    assert_eq!(
+        references["message"],
+        "All references resolve to existing atoms"
+    );
+    assert_eq!(references["details"], Value::Array(Vec::new()));
+    assert!(checks
+        .iter()
+        .all(|c| c["name"] != "Reference resolution (related)"));
 }
 
 // ---------------------------------------------------------------------------

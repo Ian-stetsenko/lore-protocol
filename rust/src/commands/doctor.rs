@@ -2,7 +2,8 @@
 //!
 //! 1. Config file exists and parses.
 //! 2. Lore-ids are unique (across every ref with `--all`).
-//! 3. All references resolve.
+//! 3. All references resolve, across every ref: dangling Supersedes /
+//!    Depends-on are warnings, dangling Related are info.
 //! 4. No dependencies on superseded atoms.
 
 use std::collections::{HashMap, HashSet};
@@ -46,7 +47,7 @@ pub fn run(args: &DoctorArgs, deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<
     };
 
     checks.push(check_lore_id_uniqueness(&uniqueness_atoms, args.all));
-    checks.push(check_references_resolve(&all_atoms));
+    checks.extend(check_references_resolve(&all_atoms, deps.atom_repository));
     checks.push(check_orphaned_dependencies(&all_atoms));
 
     let mut summary = DoctorSummary::default();
@@ -171,37 +172,97 @@ fn check_lore_id_uniqueness(atoms: &[LoreAtom], all_refs: bool) -> DoctorCheck {
     }
 }
 
-fn check_references_resolve(atoms: &[LoreAtom]) -> DoctorCheck {
-    let all_ids: HashSet<&str> = atoms.iter().map(|a| a.lore_id.as_str()).collect();
-    let mut broken: Vec<String> = Vec::new();
+/// A reference id cited by a scanned atom.
+struct ReferenceEntry<'a> {
+    key: TrailerKey,
+    ref_id: &'a str,
+    atom_id: &'a str,
+}
 
-    for atom in atoms {
-        for key in TrailerKey::REFERENCE {
-            let Some(refs) = atom.trailers.array_values(key) else {
-                continue;
-            };
-            for ref_id in refs {
-                if is_valid_lore_id(ref_id) && !all_ids.contains(ref_id.as_str()) {
-                    broken.push(format!(
-                        "Lore-id \"{ref_id}\" referenced by {} ({key}) not found",
-                        atom.lore_id
-                    ));
-                }
-            }
-        }
+impl ReferenceEntry<'_> {
+    fn detail(&self) -> String {
+        format!(
+            "Lore-id \"{}\" referenced by {} ({}) not found",
+            self.ref_id, self.atom_id, self.key
+        )
+    }
+}
+
+const WARNING_REFERENCES_CHECK: &str = "Reference resolution (supersedes/depends-on)";
+const RELATED_REFERENCES_CHECK: &str = "Reference resolution (related)";
+
+/// Reference checks split by severity: dangling Supersedes / Depends-on is
+/// a warning (always reported), dangling Related is info (reported only
+/// with findings).
+///
+/// Ids resolve through the shared all-refs Lore-id index rather than the
+/// scanned atoms, so an id living only on a side branch is not dangling.
+/// The index is built only when a scanned atom cites a reference; if it
+/// cannot be built a single "skipped" warning replaces both checks.
+fn check_references_resolve(
+    atoms: &[LoreAtom],
+    repository: &AtomRepository<'_>,
+) -> Vec<DoctorCheck> {
+    let entries: Vec<ReferenceEntry<'_>> = atoms
+        .iter()
+        .flat_map(|atom| {
+            TrailerKey::REFERENCE.iter().flat_map(move |key| {
+                atom.trailers
+                    .array_values(*key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|ref_id| is_valid_lore_id(ref_id))
+                    .map(move |ref_id| ReferenceEntry {
+                        key: *key,
+                        ref_id,
+                        atom_id: &atom.lore_id,
+                    })
+            })
+        })
+        .collect();
+
+    if entries.is_empty() {
+        return vec![all_references_resolve()];
     }
 
-    if !broken.is_empty() {
-        return DoctorCheck {
-            name: "Reference resolution".to_owned(),
+    let Ok(index) = repository.lore_id_index() else {
+        return vec![DoctorCheck {
+            name: "Reference resolution (skipped)".to_owned(),
             status: DoctorStatus::Warning,
-            message: format!("{} broken reference(s) found", broken.len()),
-            details: broken,
-        };
-    }
+            message: "reference check skipped: Lore-id index unavailable".to_owned(),
+            details: Vec::new(),
+        }];
+    };
 
+    let (related, warning): (Vec<_>, Vec<_>) = entries
+        .iter()
+        .filter(|entry| !index.contains_key(entry.ref_id))
+        .partition(|entry| entry.key == TrailerKey::Related);
+
+    let mut checks = vec![if warning.is_empty() {
+        all_references_resolve()
+    } else {
+        DoctorCheck {
+            name: WARNING_REFERENCES_CHECK.to_owned(),
+            status: DoctorStatus::Warning,
+            message: format!("{} broken reference(s) found", warning.len()),
+            details: warning.iter().map(|entry| entry.detail()).collect(),
+        }
+    }];
+    if !related.is_empty() {
+        checks.push(DoctorCheck {
+            name: RELATED_REFERENCES_CHECK.to_owned(),
+            status: DoctorStatus::Info,
+            message: format!("{} broken related reference(s) found", related.len()),
+            details: related.iter().map(|entry| entry.detail()).collect(),
+        });
+    }
+    checks
+}
+
+fn all_references_resolve() -> DoctorCheck {
     DoctorCheck {
-        name: "Reference resolution".to_owned(),
+        name: WARNING_REFERENCES_CHECK.to_owned(),
         status: DoctorStatus::Ok,
         message: "All references resolve to existing atoms".to_owned(),
         details: Vec::new(),

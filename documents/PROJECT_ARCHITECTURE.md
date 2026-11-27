@@ -946,6 +946,7 @@ classDiagram
 | 0 | `EXIT_CODE_SUCCESS` | Success |
 | 1 | `EXIT_CODE_VALIDATION_ERROR` | Validation error, invalid input, or not-found |
 | 2 | `EXIT_CODE_GIT_ERROR` | Git command failed |
+| 2 | `EXIT_CODE_VALIDATION_WARNINGS` | `lore validate` range modes: warnings only (never in hook mode) |
 | 3 | `EXIT_CODE_NO_STAGED_CHANGES` | `lore commit` invoked without staged changes |
 
 ### Propagation Flow

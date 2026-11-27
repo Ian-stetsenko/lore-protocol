@@ -330,6 +330,50 @@ fn commit_reads_json_from_stdin() {
 }
 
 #[test]
+fn commit_rejects_a_flat_json_schema_and_leaves_head_unchanged() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .arg("commit")
+        .write_stdin(r#"{"intent":"fix: flat","Constraint":["never panic"],"Tested":["unit"]}"#)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Unknown top-level keys in commit input JSON: \"Constraint\", \"Tested\".",
+        ));
+
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head_before);
+}
+
+#[test]
+fn commit_json_input_errors_come_back_as_an_envelope() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+
+    let assert = repo
+        .lore()
+        .args(["--json", "commit"])
+        .write_stdin(r#"{"intent":"fix: typed","trailers":["Constraint: x"]}"#)
+        .assert()
+        .code(1);
+    let err = json(&assert.get_output().stderr);
+    assert_eq!(err["error"], Value::Bool(true));
+    assert_eq!(err["code"], 1);
+    assert_eq!(
+        err["messages"][0]["message"],
+        "\"trailers\" must be an object, got array."
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head_before);
+}
+
+#[test]
 fn commit_without_staged_changes_exits_3() {
     let repo = Repo::new();
     repo.commit("README.md", "chore: initial");

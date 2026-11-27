@@ -85,6 +85,13 @@ Where the two implementations differ it is deliberate and listed here.
   threw in Node).
 - **Intent length.** Counted in Unicode scalar values rather than UTF-16 code
   units; identical for all text outside astral planes.
+- **JSON commit input errors.** Schema errors (non-object input, unknown or
+  wrong-typed top-level keys) are byte-identical to the TypeScript CLI. Only the
+  text after `Commit input is not valid JSON: ` differs, because it comes from
+  the parser: serde reports e.g. `key must be a string at line 1 column 3`,
+  V8 reports e.g. `Expected property name or '}' in JSON at position 2`. Unknown
+  keys are listed in document order; V8's `Object.keys` would list
+  integer-like keys (`"1"`) first.
 
 ## Status and migration plan
 

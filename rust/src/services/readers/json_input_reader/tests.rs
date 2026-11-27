@@ -1,10 +1,24 @@
 use super::*;
+use crate::util::LoreError;
 
 fn read(json: &str) -> CommitInput {
     JsonInputReader::new(json.to_owned())
         .read()
         .expect("valid JSON input")
 }
+
+/// The error message a rejected input produces, asserting exit code 1 and the
+/// general (not JSON-parse) error variant.
+fn rejection(json: &str) -> String {
+    let err = JsonInputReader::new(json.to_owned())
+        .read()
+        .expect_err("input must be rejected");
+    assert!(matches!(err, LoreError::General { .. }), "got {err:?}");
+    assert_eq!(err.exit_code(), 1);
+    err.to_string()
+}
+
+const ALLOWED_KEYS_HINT: &str = "Allowed keys: intent, body, trailers. Trailer values belong inside the trailers object, e.g. {\"intent\": \"...\", \"trailers\": {\"Tested\": [\"...\"]}}.";
 
 fn strings(values: &[&str]) -> Option<Vec<String>> {
     Some(values.iter().map(|s| s.to_string()).collect())
@@ -78,13 +92,117 @@ fn should_parse_json_with_empty_trailers_object() {
 }
 
 #[test]
-fn should_default_intent_to_empty_string_when_not_a_string() {
-    assert_eq!(read(r#"{"intent": 123}"#).intent, "");
+fn should_reject_intent_when_not_a_string() {
+    assert_eq!(
+        rejection(r#"{"intent": 123}"#),
+        "\"intent\" must be a string, got number."
+    );
 }
 
 #[test]
-fn should_ignore_body_when_not_a_string() {
-    assert!(read(r#"{"intent": "test", "body": 42}"#).body.is_none());
+fn should_reject_body_when_not_a_string() {
+    assert_eq!(
+        rejection(r#"{"intent": "test", "body": 42}"#),
+        "\"body\" must be a string, got number."
+    );
+}
+
+// ---- top-level schema validation ---------------------------------------
+
+#[test]
+fn should_reject_an_unknown_top_level_key_flat_schema_instead_of_dropping_it() {
+    assert_eq!(
+        rejection(
+            r#"{"intent": "fix bug", "Constraint": ["must preserve backward compat"], "Tested": ["unit tests"]}"#
+        ),
+        format!(
+            "Unknown top-level keys in commit input JSON: \"Constraint\", \"Tested\". {ALLOWED_KEYS_HINT}"
+        )
+    );
+}
+
+#[test]
+fn should_reject_a_single_unknown_top_level_key() {
+    assert_eq!(
+        rejection(r#"{"intent": "fix bug", "constraint": ["must preserve backward compat"]}"#),
+        format!("Unknown top-level key in commit input JSON: \"constraint\". {ALLOWED_KEYS_HINT}")
+    );
+}
+
+#[test]
+fn should_reject_a_nested_envelope_schema() {
+    assert_eq!(
+        rejection(r#"{"commit": {"intent": "fix bug", "trailers": {"Tested": ["unit tests"]}}}"#),
+        format!("Unknown top-level key in commit input JSON: \"commit\". {ALLOWED_KEYS_HINT}")
+    );
+}
+
+#[test]
+fn should_reject_a_non_object_top_level() {
+    assert_eq!(
+        rejection(r#"["intent", "trailers"]"#),
+        "Commit input JSON must be an object with allowed keys intent, body, trailers; got array."
+    );
+}
+
+#[test]
+fn should_reject_a_number_top_level() {
+    assert_eq!(
+        rejection("42"),
+        "Commit input JSON must be an object with allowed keys intent, body, trailers; got number."
+    );
+}
+
+#[test]
+fn should_reject_an_object_with_a_proto_own_key_as_unknown() {
+    assert_eq!(
+        rejection(r#"{"__proto__": {"intent": "evil"}}"#),
+        format!("Unknown top-level key in commit input JSON: \"__proto__\". {ALLOWED_KEYS_HINT}")
+    );
+}
+
+#[test]
+fn should_pass_an_empty_object_through_with_intent_defaulting_to_empty_string() {
+    let result = read("{}");
+    assert_eq!(result.intent, "");
+    assert!(result.body.is_none());
+    assert!(result.trailers.is_none());
+}
+
+#[test]
+fn should_reject_trailers_when_not_an_object() {
+    assert_eq!(
+        rejection(r#"{"intent": "test", "trailers": "Constraint: stuff"}"#),
+        "\"trailers\" must be an object, got string."
+    );
+}
+
+#[test]
+fn should_reject_trailers_when_it_is_an_array() {
+    assert_eq!(
+        rejection(r#"{"intent": "test", "trailers": ["Constraint: stuff"]}"#),
+        "\"trailers\" must be an object, got array."
+    );
+}
+
+#[test]
+fn should_reject_trailers_when_null() {
+    assert_eq!(
+        rejection(r#"{"intent": "test", "trailers": null}"#),
+        "\"trailers\" must be an object, got null."
+    );
+}
+
+#[test]
+fn should_reject_invalid_json_with_an_actionable_message() {
+    assert!(rejection("{ intent: fix bug }").starts_with("Commit input is not valid JSON: "));
+}
+
+#[test]
+fn should_default_intent_to_empty_string_when_absent() {
+    let result = read(r#"{"body": "only body"}"#);
+    assert_eq!(result.intent, "");
+    assert_eq!(result.body.as_deref(), Some("only body"));
 }
 
 // ---- array parsing -----------------------------------------------------
@@ -210,17 +328,11 @@ fn should_error_on_malformed_json() {
     let err = JsonInputReader::new("not valid json {{{".to_owned())
         .read()
         .expect_err("malformed JSON must fail");
-    assert!(matches!(err, crate::util::LoreError::Json(_)));
+    assert!(matches!(err, LoreError::General { .. }));
     assert_eq!(err.exit_code(), 1);
 }
 
 #[test]
 fn should_error_on_empty_string() {
     assert!(JsonInputReader::new(String::new()).read().is_err());
-}
-
-#[test]
-fn trailers_that_are_not_an_object_are_ignored() {
-    let result = read(r#"{"intent": "test", "trailers": ["Constraint"]}"#);
-    assert!(result.trailers.is_none());
 }

@@ -262,6 +262,10 @@ pub struct CommitArgs {
     #[arg(long = "no-edit")]
     pub no_edit: bool,
 
+    /// Skip Lore-id reference validation
+    #[arg(long = "no-verify-refs")]
+    pub no_verify_refs: bool,
+
     /// Read JSON input from file
     #[arg(long, value_name = "path")]
     pub file: Option<PathBuf>,
@@ -328,6 +332,7 @@ impl From<&CommitArgs> for CommitCommandOptions {
         CommitCommandOptions {
             amend: a.amend,
             no_edit: a.no_edit,
+            no_verify_refs: a.no_verify_refs,
             file: a.file.clone(),
             interactive: a.interactive,
             intent: a.intent.clone(),

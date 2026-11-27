@@ -373,6 +373,103 @@ fn commit_json_input_errors_come_back_as_an_envelope() {
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head_before);
 }
 
+fn commit_count(repo: &Repo) -> String {
+    repo.git(&["rev-list", "--count", "HEAD"]).trim().to_owned()
+}
+
+#[test]
+fn commit_reference_gate_story_dangling_fails_corrected_and_escape_hatch_succeed() {
+    let repo = Repo::new();
+    repo.commit(
+        "seed.md",
+        &atom_message("feat: seed the original decision", &["Lore-id: a1b2c3d4"]),
+    );
+    assert_eq!(commit_count(&repo), "1");
+
+    // A dangling reference fails and creates nothing.
+    repo.write("change-a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "docs: cite the seed",
+            "--supersedes",
+            "deadbeef",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Supersedes references Lore-id deadbeef, which resolves on no ref.",
+        ));
+    assert_eq!(commit_count(&repo), "1");
+
+    // The corrected id resolves and the commit succeeds.
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "docs: cite the seed",
+            "--supersedes",
+            "a1b2c3d4",
+        ])
+        .assert()
+        .success();
+    assert_eq!(commit_count(&repo), "2");
+
+    // The escape hatch commits despite the dangling id.
+    repo.write("change-b.txt", "b\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "docs: bypass the gate",
+            "--supersedes",
+            "deadbeef",
+            "--no-verify-refs",
+        ])
+        .assert()
+        .success();
+    assert_eq!(commit_count(&repo), "3");
+}
+
+#[test]
+fn commit_reference_gate_on_an_unborn_head() {
+    let repo = Repo::new();
+    repo.write("first.txt", "first\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .args(["commit", "--intent", "feat: first", "--related", "deadbeef"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Related references Lore-id deadbeef, which resolves on no ref.",
+        ));
+    // Still unborn: nothing was committed.
+    let head = Proc::new("git")
+        .args(["rev-parse", "--verify", "-q", "HEAD"])
+        .current_dir(repo.path())
+        .envs(repo.env())
+        .output()
+        .expect("git runs");
+    assert!(!head.status.success());
+
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "feat: first",
+            "--related",
+            "deadbeef",
+            "--no-verify-refs",
+        ])
+        .assert()
+        .success();
+    assert_eq!(commit_count(&repo), "1");
+}
+
 #[test]
 fn commit_without_staged_changes_exits_3() {
     let repo = Repo::new();

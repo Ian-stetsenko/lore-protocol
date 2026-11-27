@@ -211,6 +211,7 @@ fn dispatch(cli: &Cli, io_streams: &mut Io<'_>) -> lore::util::Result<i32> {
                 formatter,
                 commit_input_resolver: &commit_input_resolver,
                 head_lore_id_reader: &head_lore_id_reader,
+                atom_repository: &atom_repository,
             },
             io_streams,
         ),

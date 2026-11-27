@@ -2,20 +2,30 @@
 //!
 //! Input sources, by priority: `-i` interactive, `--file <json>`, flags
 //! (`--intent` ...), JSON on stdin. `--amend` preserves the existing Lore-id;
-//! `--amend --no-edit` passes straight through to git.
+//! `--amend --no-edit` passes straight through to git. Reference trailers
+//! must resolve on some ref unless `--no-verify-refs` is passed.
 
+use std::collections::HashMap;
+
+use indexmap::IndexSet;
 use serde_json::{Map, Value};
 
 use crate::cli::CommitArgs;
 use crate::commands::{Io, EXIT_OK};
 use crate::interfaces::git_client::{CommitOptions, GitClient};
-use crate::interfaces::output_formatter::OutputFormatter;
+use crate::interfaces::output_formatter::{ErrorMessage, OutputFormatter};
+use crate::services::atom_repository::AtomRepository;
 use crate::services::commit_builder::CommitBuilder;
 use crate::services::commit_input_resolver::CommitInputResolver;
 use crate::services::head_lore_id_reader::HeadLoreIdReader;
-use crate::types::commit_input::CommitCommandOptions;
-use crate::types::output::Severity;
+use crate::types::commit_input::{CommitCommandOptions, CommitInput};
+use crate::types::domain::{LoreId, TrailerKey};
+use crate::types::output::{Severity, ValidationIssue};
+use crate::util::constants::is_valid_lore_id;
 use crate::util::{LoreError, Result};
+
+/// Warning printed when the reference gate cannot run ("could not check").
+const REFERENCE_CHECK_SKIPPED: &str = "validation skipped: the Lore-id index could not be built";
 
 pub struct CommitDeps<'a> {
     pub commit_builder: &'a CommitBuilder<'a>,
@@ -23,6 +33,7 @@ pub struct CommitDeps<'a> {
     pub formatter: &'a dyn OutputFormatter,
     pub commit_input_resolver: &'a CommitInputResolver<'a>,
     pub head_lore_id_reader: &'a HeadLoreIdReader<'a>,
+    pub atom_repository: &'a AtomRepository<'a>,
 }
 
 pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<i32> {
@@ -71,9 +82,13 @@ pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<
         None
     };
 
-    // Resolve and validate input
+    // Resolve input, then validate format and references as one batched
+    // pass: malformed and unresolvable ids fail together, once.
     let input = deps.commit_input_resolver.resolve(&options)?;
-    let issues = deps.commit_builder.validate(&input);
+    let mut issues = deps.commit_builder.validate(&input);
+    if !options.no_verify_refs {
+        issues.extend(check_references(&input, deps, io)?);
+    }
     if issues.iter().any(|i| i.severity == Severity::Error) {
         return Err(LoreError::validation(
             "Commit input validation failed",
@@ -103,6 +118,91 @@ pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<
         Some(&success_data(&result.hash, Some(&built.lore_id))),
     ))?;
     Ok(EXIT_OK)
+}
+
+/// `reference-resolves` issues for reference ids that resolve on no ref.
+///
+/// Best-effort: a git failure building the index means "could not check",
+/// not "check failed", so it prints a warning and yields no issues. Every
+/// other error propagates.
+fn check_references(
+    input: &CommitInput,
+    deps: &CommitDeps<'_>,
+    io: &mut Io<'_>,
+) -> Result<Vec<ValidationIssue>> {
+    match unresolved_reference_issues(input, deps.atom_repository) {
+        Err(LoreError::Git(_)) => {
+            let warning = ErrorMessage::warning(REFERENCE_CHECK_SKIPPED);
+            io.eprint(&deps.formatter.format_error(0, &[warning]))?;
+            Ok(Vec::new())
+        }
+        result => result,
+    }
+}
+
+fn unresolved_reference_issues(
+    input: &CommitInput,
+    repository: &AtomRepository<'_>,
+) -> Result<Vec<ValidationIssue>> {
+    let pairs = collect_reference_pairs(input);
+    if pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let unique_ids: Vec<LoreId> = pairs
+        .iter()
+        .map(|(_, id)| id.clone())
+        .collect::<IndexSet<_>>()
+        .into_iter()
+        .collect();
+    let resolved = repository.resolve_reference_ids(&unique_ids)?;
+
+    // Near matches are fetched once per unresolved id; pairs sharing an id
+    // share its candidate list.
+    let mut near_matches: HashMap<&str, Vec<LoreId>> = HashMap::new();
+    for id in &unique_ids {
+        if resolved.get(id).is_none_or(Option::is_none) {
+            near_matches.insert(id, repository.find_near_match_ids(id)?);
+        }
+    }
+
+    Ok(pairs
+        .iter()
+        .filter_map(|(trailer, id)| {
+            let candidates = near_matches.get(id.as_str())?;
+            let suggestion = if candidates.is_empty() {
+                String::new()
+            } else {
+                format!(" Did you mean one of: {}?", candidates.join(", "))
+            };
+            Some(ValidationIssue::error(
+                "reference-resolves",
+                format!("{trailer} references Lore-id {id}, which resolves on no ref.{suggestion}"),
+            ))
+        })
+        .collect())
+}
+
+/// Pattern-valid reference ids as (trailer, id) pairs, deduplicated on the
+/// pair: an id repeated under one trailer reports once, the same id under
+/// two trailers reports twice. Invalid ids belong to the format check.
+fn collect_reference_pairs(input: &CommitInput) -> Vec<(TrailerKey, LoreId)> {
+    let Some(trailers) = &input.trailers else {
+        return Vec::new();
+    };
+    TrailerKey::REFERENCE
+        .iter()
+        .flat_map(|key| {
+            trailers
+                .array(*key)
+                .into_iter()
+                .flatten()
+                .filter(|id| is_valid_lore_id(id))
+                .map(move |id| (*key, id.clone()))
+        })
+        .collect::<IndexSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn success_data(hash: &str, lore_id: Option<&str>) -> Map<String, Value> {

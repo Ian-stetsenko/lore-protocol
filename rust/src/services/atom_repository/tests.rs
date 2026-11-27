@@ -974,6 +974,153 @@ mod lore_id_index {
 }
 
 // ---------------------------------------------------------------------------
+// describe('reference resolution')
+// ---------------------------------------------------------------------------
+mod reference_resolution {
+    use super::*;
+
+    fn head_only(commits: Vec<RawCommit>) -> MockGitClient {
+        git_by_ref(commits, vec![])
+    }
+
+    fn ids(values: &[&str]) -> Vec<LoreId> {
+        strings(values)
+    }
+
+    fn hash_of(resolved: &IndexMap<LoreId, Option<LoreAtom>>, id: &str) -> Option<String> {
+        resolved
+            .get(id)
+            .and_then(|atom| atom.as_ref())
+            .map(|atom| atom.commit_hash.clone())
+    }
+
+    #[test]
+    fn resolve_reference_ids_resolves_an_id_present_on_the_head_pass() {
+        let git = head_only(vec![lore_commit_with_hash("head", "aaaa1111")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let resolved = repo.resolve_reference_ids(&ids(&["aaaa1111"])).unwrap();
+
+        assert_eq!(hash_of(&resolved, "aaaa1111"), Some("head".to_owned()));
+    }
+
+    #[test]
+    fn resolve_reference_ids_resolves_an_id_that_exists_only_on_a_non_head_ref() {
+        let git = git_by_ref(vec![], vec![lore_commit_with_hash("side", "bbbb2222")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let resolved = repo.resolve_reference_ids(&ids(&["bbbb2222"])).unwrap();
+
+        assert_eq!(hash_of(&resolved, "bbbb2222"), Some("side".to_owned()));
+    }
+
+    #[test]
+    fn resolve_reference_ids_maps_an_id_resolving_on_no_ref_to_null() {
+        let git = head_only(vec![lore_commit_with_hash("head", "aaaa1111")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let resolved = repo
+            .resolve_reference_ids(&ids(&["aaaa1111", "deadbeef"]))
+            .unwrap();
+
+        assert_eq!(hash_of(&resolved, "aaaa1111"), Some("head".to_owned()));
+        assert_eq!(resolved.get("deadbeef"), Some(&None));
+    }
+
+    #[test]
+    fn resolve_reference_ids_over_an_empty_index_reports_every_id_unresolvable_without_crashing() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let resolved = repo
+            .resolve_reference_ids(&ids(&["aaaa1111", "bbbb2222"]))
+            .unwrap();
+
+        assert_eq!(resolved.get("aaaa1111"), Some(&None));
+        assert_eq!(resolved.get("bbbb2222"), Some(&None));
+        // The index was still built: one HEAD pass plus one --all pass.
+        assert_eq!(git.log_call_count(), 2);
+    }
+
+    #[test]
+    fn resolve_reference_ids_never_builds_the_index_when_handed_zero_ids() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let resolved = repo.resolve_reference_ids(&[]).unwrap();
+
+        assert!(resolved.is_empty());
+        // No log and no resolve_ref call: git was never touched.
+        assert!(git.calls().is_empty());
+    }
+
+    #[test]
+    fn find_near_match_ids_over_an_empty_index_returns_no_candidates_without_crashing() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let candidates = repo.find_near_match_ids("deadbeef").unwrap();
+
+        assert!(candidates.is_empty());
+        assert_eq!(git.log_call_count(), 2);
+    }
+
+    #[test]
+    fn find_near_match_ids_returns_an_indexed_id_at_hamming_distance_exactly_2() {
+        let git = head_only(vec![lore_commit_with_hash("head", "aaaaaa11")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let matches = repo.find_near_match_ids("aaaaaabb").unwrap();
+
+        assert_eq!(matches, ids(&["aaaaaa11"]));
+    }
+
+    #[test]
+    fn find_near_match_ids_returns_nothing_at_hamming_distance_4() {
+        let git = head_only(vec![lore_commit_with_hash("head", "aaaa1111")]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let matches = repo.find_near_match_ids("aaaaaabb").unwrap();
+
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn find_near_match_ids_caps_candidates_at_three_ties_broken_by_index_order() {
+        let git = head_only(vec![
+            lore_commit_with_hash("c1", "aaaaaa01"),
+            lore_commit_with_hash("c2", "aaaaaa02"),
+            lore_commit_with_hash("c3", "aaaaaa03"),
+            lore_commit_with_hash("c4", "aaaaaa04"),
+        ]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let matches = repo.find_near_match_ids("aaaaaaaa").unwrap();
+
+        // All four sit at distance 2 (a genuine tie): the first three in
+        // index iteration order win the cap.
+        assert_eq!(matches, ids(&["aaaaaa01", "aaaaaa02", "aaaaaa03"]));
+    }
+
+    #[test]
+    fn find_near_match_ids_orders_nearer_ids_first_within_the_cap() {
+        let git = head_only(vec![
+            lore_commit_with_hash("c1", "aaaaaa01"), // distance 2
+            lore_commit_with_hash("c2", "aaaaaaa2"), // distance 1
+            lore_commit_with_hash("c3", "aaaaaa03"), // distance 2
+            lore_commit_with_hash("c4", "aaaaaa04"), // distance 2
+        ]);
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let matches = repo.find_near_match_ids("aaaaaaaa").unwrap();
+
+        // The distance-1 id leads; the distance-2 ties keep index order and
+        // the fourth is cut by the cap.
+        assert_eq!(matches, ids(&["aaaaaaa2", "aaaaaa01", "aaaaaa03"]));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // describe('resolveFollowLinks index usage')
 // ---------------------------------------------------------------------------
 mod resolve_follow_links_index_usage {

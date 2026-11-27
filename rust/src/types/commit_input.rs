@@ -98,6 +98,8 @@ impl CommitInputTrailers {
 pub struct CommitCommandOptions {
     pub amend: bool,
     pub no_edit: bool,
+    /// Mode flag (not input): skip the Lore-id reference resolution gate.
+    pub no_verify_refs: bool,
     pub file: Option<PathBuf>,
     pub interactive: bool,
     pub intent: Option<String>,
@@ -116,8 +118,8 @@ pub struct CommitCommandOptions {
 }
 
 impl CommitCommandOptions {
-    /// Whether any user-supplied input (anything other than `--amend` /
-    /// `--no-edit`) is present.
+    /// Whether any user-supplied input (anything other than the mode flags
+    /// `--amend`, `--no-edit` and `--no-verify-refs`) is present.
     pub fn has_input(&self) -> bool {
         self.file.is_some()
             || self.interactive
@@ -146,6 +148,7 @@ mod tests {
         let opts = CommitCommandOptions {
             amend: true,
             no_edit: true,
+            no_verify_refs: true,
             ..Default::default()
         };
         assert!(!opts.has_input());

@@ -1,10 +1,14 @@
 //! Port of `tests/unit/commands/commit-amend.test.ts`, driven through the
-//! real services with a scripted git client.
+//! real services with a scripted git client. The reference gate cases from
+//! `commit-reference-validation.test.ts` live in `reference_validation`.
+
+mod reference_validation;
 
 use super::*;
 use crate::cli::{Cli, Command};
 use crate::formatters::json_formatter::JsonFormatter;
 use crate::interfaces::git_client::CommitOptions;
+use crate::services::atom_repository::AtomRepository;
 use crate::services::trailer_parser::TrailerParser;
 use crate::test_support::{FixedLoreIdGenerator, GitCall, MockGitClient, MockPrompt};
 use crate::types::config::LoreConfig;
@@ -43,6 +47,7 @@ impl Harness {
         let prompt = MockPrompt::new();
         let resolver = CommitInputResolver::new(&prompt);
         let reader = HeadLoreIdReader::new(&self.git, &parser);
+        let repository = AtomRepository::new(&self.git, &parser, Vec::new());
         let formatter = JsonFormatter::new();
         let deps = CommitDeps {
             commit_builder: &builder,
@@ -50,6 +55,7 @@ impl Harness {
             formatter: &formatter,
             commit_input_resolver: &resolver,
             head_lore_id_reader: &reader,
+            atom_repository: &repository,
         };
         let mut io = Io::new(&mut self.out, &mut self.err);
         run(&parse(args), &deps, &mut io)
@@ -73,6 +79,12 @@ impl Harness {
 
     fn stdout(&self) -> String {
         String::from_utf8_lossy(&self.out).into_owned()
+    }
+
+    /// `git log` calls: the reference gate is the only `log` user here, so
+    /// zero means the Lore-id index was never built.
+    fn index_reads(&self) -> usize {
+        self.git.log_call_count()
     }
 }
 
@@ -147,6 +159,26 @@ fn should_read_lore_id_from_head_even_with_amend_no_edit() {
     assert!(h
         .stdout()
         .contains("Commit amended: abc1234 | Lore-id: cafebabe"));
+}
+
+#[test]
+fn should_accept_amend_no_edit_no_verify_refs_as_a_no_op() {
+    let mut h = Harness::new("");
+    // --no-verify-refs is a mode flag: it must not trip the --no-edit
+    // conflicting-input check.
+    h.run(&["--amend", "--no-edit", "--no-verify-refs"])
+        .expect("ok");
+    assert_eq!(h.index_reads(), 0);
+    assert_eq!(
+        h.git.commit_calls(),
+        vec![(
+            String::new(),
+            CommitOptions {
+                amend: true,
+                no_edit: true
+            }
+        )]
+    );
 }
 
 #[test]
@@ -232,4 +264,90 @@ fn validation_errors_abort_before_committing() {
     assert_eq!(err.issues().len(), 1);
     assert_eq!(err.issues()[0].rule, "invalid-enum");
     assert!(h.git.commit_calls().is_empty());
+}
+
+#[test]
+fn should_report_the_staged_changes_guard_before_reference_validation_when_both_would_fail() {
+    let mut h = Harness::new("");
+    h.git.set_has_staged_changes(false);
+    let err = h
+        .run(&["--intent", "test commit", "--related", "deadbeef"])
+        .expect_err("no staged changes");
+    assert_eq!(
+        err.to_string(),
+        "No staged changes. Stage files with `git add` before running `lore commit`."
+    );
+    // The staged guard wins: the reference gate never runs.
+    assert_eq!(h.index_reads(), 0);
+    assert!(h.git.commit_calls().is_empty());
+}
+
+// ---- reference gate escape (--no-verify-refs) -------------------------------
+
+#[test]
+fn should_commit_despite_unresolvable_reference_ids_when_no_verify_refs_is_passed() {
+    // The empty mock history resolves nothing: deadbeef is unresolvable.
+    let mut h = Harness::new("");
+    h.run(&[
+        "--intent",
+        "test commit",
+        "--related",
+        "deadbeef",
+        "--no-verify-refs",
+    ])
+    .expect("ok");
+    assert_eq!(h.index_reads(), 0);
+    let (_, options) = h.git.commit_calls().remove(0);
+    assert_eq!(options, CommitOptions::default());
+}
+
+#[test]
+fn should_keep_reference_validation_active_when_no_verify_refs_is_omitted() {
+    let mut h = Harness::new("");
+    let err = h
+        .run(&["--intent", "test commit", "--related", "deadbeef"])
+        .expect_err("unresolvable reference");
+    assert_eq!(err.to_string(), "Commit input validation failed");
+    assert!(h.index_reads() > 0);
+    assert!(h.git.commit_calls().is_empty());
+}
+
+#[test]
+fn should_validate_new_reference_trailers_on_amend_with_reference_input() {
+    let mut h = Harness::new("");
+    let err = h
+        .run(&[
+            "--amend",
+            "--intent",
+            "amend test",
+            "--supersedes",
+            "deadbeef",
+        ])
+        .expect_err("unresolvable reference");
+    assert_eq!(err.to_string(), "Commit input validation failed");
+    assert!(h.index_reads() > 0);
+    assert!(h.git.commit_calls().is_empty());
+}
+
+#[test]
+fn should_commit_on_amend_despite_unresolvable_ids_when_no_verify_refs_is_passed() {
+    let mut h = Harness::new("");
+    h.run(&[
+        "--amend",
+        "--intent",
+        "amend test",
+        "--supersedes",
+        "deadbeef",
+        "--no-verify-refs",
+    ])
+    .expect("ok");
+    assert_eq!(h.index_reads(), 0);
+    let (_, options) = h.git.commit_calls().remove(0);
+    assert_eq!(
+        options,
+        CommitOptions {
+            amend: true,
+            no_edit: false
+        }
+    );
 }

@@ -43,6 +43,12 @@ pub struct FindAllOptions {
     pub all_refs: bool,
 }
 
+/// Most near-match candidates suggested for an unresolvable Lore-id.
+const MAX_NEAR_MATCHES: usize = 3;
+
+/// Largest Hamming distance at which an indexed id counts as a near match.
+const MAX_NEAR_MATCH_DISTANCE: usize = 2;
+
 /// Lore-id -> atom index in insertion order: HEAD-reachable atoms first
 /// (newest first), then atoms that live only off the current branch.
 pub type LoreIdIndex = IndexMap<LoreId, LoreAtom>;
@@ -202,6 +208,59 @@ impl<'a> AtomRepository<'a> {
         };
         commits.extend(self.git.log(&delta_args, LogOptions::LORE_ONLY)?);
         Ok(commits)
+    }
+
+    /// Resolve a batch of reference Lore-ids against the shared all-refs
+    /// index ([`Self::lore_id_index`]): one entry per requested id, mapped to
+    /// its atom or to `None` when the id resolves on no ref. Semantics match
+    /// trace lookups: an id that exists only on a non-HEAD ref resolves
+    /// through the delta pass.
+    ///
+    /// Pattern-invalid ids are left out (they can never match an indexed
+    /// atom). When no valid id remains the index is never built, so commits
+    /// without references pay no git cost.
+    pub fn resolve_reference_ids(
+        &self,
+        ids: &[LoreId],
+    ) -> Result<IndexMap<LoreId, Option<LoreAtom>>> {
+        let valid_ids: Vec<&LoreId> = ids.iter().filter(|id| is_valid_lore_id(id)).collect();
+        let mut resolved = IndexMap::new();
+        if valid_ids.is_empty() {
+            return Ok(resolved);
+        }
+
+        let index = self.lore_id_index()?;
+        for id in valid_ids {
+            resolved.insert(id.clone(), index.get(id).cloned());
+        }
+        Ok(resolved)
+    }
+
+    /// Near-match candidates for an unresolvable Lore-id: indexed ids at
+    /// Hamming distance at most 2, nearest first, ties in index order (HEAD
+    /// atoms were inserted first), capped at three.
+    ///
+    /// Empty when `id` is not pattern-valid or the index holds no atoms.
+    pub fn find_near_match_ids(&self, id: &str) -> Result<Vec<LoreId>> {
+        if !is_valid_lore_id(id) {
+            return Ok(Vec::new());
+        }
+
+        let index = self.lore_id_index()?;
+        let mut candidates: Vec<(usize, &LoreId)> = index
+            .keys()
+            .filter_map(|candidate| {
+                let distance = hamming_distance(id, candidate);
+                (distance <= MAX_NEAR_MATCH_DISTANCE).then_some((distance, candidate))
+            })
+            .collect();
+        // Stable: equal distances keep index iteration order.
+        candidates.sort_by_key(|(distance, _)| *distance);
+        Ok(candidates
+            .into_iter()
+            .take(MAX_NEAR_MATCHES)
+            .map(|(_, candidate)| candidate.clone())
+            .collect())
     }
 
     /// Find a single atom by its git commit hash (`git log -1 <hash>`).
@@ -471,6 +530,12 @@ impl<'a> AtomRepository<'a> {
         }
         ids
     }
+}
+
+/// Character-level Hamming distance between two pattern-validated Lore-ids
+/// (always the same length).
+fn hamming_distance(a: &str, b: &str) -> usize {
+    a.chars().zip(b.chars()).filter(|(x, y)| x != y).count()
 }
 
 /// `Some(s)` only when `s` is present and non-empty (JS truthiness).

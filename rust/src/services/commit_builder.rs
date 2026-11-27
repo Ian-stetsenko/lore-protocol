@@ -136,7 +136,8 @@ impl<'a> CommitBuilder<'a> {
                             issues.push(ValidationIssue::error(
                                 "invalid-lore-id-ref",
                                 format!(
-                                    "Invalid Lore-id reference in {key}: \"{value}\". Must be 8-character hex."
+                                    "Invalid Lore-id reference in {key}: \"{value}\". Must be 8-character hex.{}",
+                                    reference_id_hint(value)
                                 ),
                             ));
                         }
@@ -230,6 +231,21 @@ impl<'a> CommitBuilder<'a> {
             }
         }
         count
+    }
+}
+
+/// Hint sentence appended to the invalid-reference message for shapes that
+/// look like recognisable mistakes. Exactly 8 hex characters (any case) can
+/// only fail the pattern on case; pure hex of length 7 or 9 through 64 looks
+/// like a git commit hash. Every other failing shape gets no hint.
+fn reference_id_hint(value: &str) -> &'static str {
+    let is_hex = !value.is_empty() && value.bytes().all(|b| b.is_ascii_hexdigit());
+    match value.len() {
+        8 if is_hex => " Hint: Lore-ids are lowercase hex.",
+        7 | 9..=64 if is_hex => {
+            " Hint: this looks like a git commit hash; Lore-ids are 8-character lowercase hex."
+        }
+        _ => "",
     }
 }
 

@@ -120,12 +120,12 @@ export class GitClient implements IGitClient {
     } else {
       args.push('-m', message);
     }
-    const stdout = await this.exec(args);
+    await this.exec(args);
 
-    // Extract the commit hash from git commit output.
-    // Git outputs something like: [main abc1234] commit message
-    const hashMatch = /\[[\w/-]+\s+([0-9a-f]+)\]/.exec(stdout);
-    const hash = hashMatch ? hashMatch[1] : '';
+    // Ask git for the new HEAD instead of scraping the `[branch hash]`
+    // summary line, whose shape varies (root commits, detached HEAD,
+    // branch names with dots). --short uses the same abbreviation.
+    const hash = (await this.exec(['rev-parse', '--short', 'HEAD'])).trim();
 
     return { hash, success: true };
   }

@@ -79,8 +79,10 @@ lore commit \
   --scope-risk narrow \
   --tested "unit tests for all validation rules"
 
-# Or pipe JSON (ideal for AI agents)
-echo '{"intent":"fix: handle null user in auth middleware","trailers":{"Constraint":["must not throw -- return 401 instead"],"Confidence":"high"}}' | lore commit
+# Or pass JSON (ideal for AI agents)
+lore commit <<'EOF'
+{"intent":"fix: handle null user in auth middleware","trailers":{"Constraint":["must not throw -- return 401 instead"],"Confidence":"high"}}
+EOF
 ```
 
 ### 3. Query decision context
@@ -223,10 +225,11 @@ lore rejected src/services/auth.ts --json
 lore directives src/services/auth.ts --json
 ```
 
-When committing, agents produce structured input via JSON on stdin:
+When committing, agents produce structured input as JSON:
 
 ```sh
-echo '{
+lore commit <<'EOF'
+{
   "intent": "fix: handle expired sessions gracefully",
   "body": "Previously threw 500 on expired session. Now returns 401 with clear message.",
   "trailers": {
@@ -237,8 +240,11 @@ echo '{
     "Tested": ["expired session returns 401", "valid session still works"],
     "Not-tested": ["concurrent session expiry race condition"]
   }
-}' | lore commit
+}
+EOF
 ```
+
+Use a quoted heredoc (`<<'EOF'`) or `lore commit --file msg.json` (works in any shell, including PowerShell). Avoid `echo '...' |`: one apostrophe in the text ends the shell string.
 
 ## Agent Skills (Drop-In Setup)
 

@@ -188,43 +188,92 @@ mod rule_3_lore_id_format {
 // ---------------------------------------------------------------------------
 // describe('Rule 4: valid enum values')
 //
-// The TS tests inject invalid enum strings through a mocked parser. With
-// typed enum fields the real parser drops invalid values, so `invalid-enum`
-// cannot fire; these tests pin that behaviour instead.
+// The TS tests mock `findInvalidEnumValues`; here the real parser reads the
+// raw trailer block, so each case scripts the block instead.
 // ---------------------------------------------------------------------------
 mod rule_4_valid_enum_values {
     use super::*;
 
-    #[test]
-    fn invalid_confidence_is_dropped_by_the_parser_so_no_invalid_enum_issue_is_raised() {
-        let h = Harness::new();
-
-        let results = h.validate(&[commit_with_trailers(
-            "Lore-id: a1b2c3d4\nConfidence: super-high",
-        )]);
-
-        assert!(find(&results[0], "invalid-enum").is_none());
-        assert!(results[0].valid);
+    fn enum_messages(result: &CommitValidationResult) -> Vec<&str> {
+        filter(result, "invalid-enum")
+            .into_iter()
+            .map(|issue| {
+                assert_eq!(issue.severity, Severity::Error);
+                issue.message.as_str()
+            })
+            .collect()
     }
 
     #[test]
-    fn invalid_scope_risk_is_dropped_by_the_parser_so_no_invalid_enum_issue_is_raised() {
+    fn should_check_the_raw_trailer_block_not_the_parsed_trailers() {
+        let h = Harness::new();
+
+        let results = h.validate(&[commit_with_trailers(
+            "Lore-id: a1b2c3d4\nConfidence: very-high",
+        )]);
+
+        assert!(!results[0].valid);
+        assert_eq!(
+            enum_messages(&results[0]),
+            vec!["Invalid Confidence value: \"very-high\". Expected one of: low, medium, high"]
+        );
+    }
+
+    #[test]
+    fn should_error_on_invalid_scope_risk_with_the_exact_message() {
         let h = Harness::new();
 
         let results = h.validate(&[commit_with_trailers("Lore-id: a1b2c3d4\nScope-risk: huge")]);
 
-        assert!(find(&results[0], "invalid-enum").is_none());
+        assert_eq!(
+            enum_messages(&results[0]),
+            vec!["Invalid Scope-risk value: \"huge\". Expected one of: narrow, moderate, wide"]
+        );
     }
 
     #[test]
-    fn invalid_reversibility_is_dropped_by_the_parser_so_no_invalid_enum_issue_is_raised() {
+    fn should_error_on_invalid_reversibility_with_the_exact_message() {
         let h = Harness::new();
 
         let results = h.validate(&[commit_with_trailers(
             "Lore-id: a1b2c3d4\nReversibility: maybe",
         )]);
 
-        assert!(find(&results[0], "invalid-enum").is_none());
+        assert_eq!(
+            enum_messages(&results[0]),
+            vec![
+                "Invalid Reversibility value: \"maybe\". Expected one of: clean, migration-needed, irreversible"
+            ]
+        );
+    }
+
+    #[test]
+    fn should_report_an_empty_value_as_empty_quotes() {
+        let h = Harness::new();
+
+        let results = h.validate(&[commit_with_trailers("Lore-id: a1b2c3d4\nConfidence:")]);
+
+        assert_eq!(
+            enum_messages(&results[0]),
+            vec!["Invalid Confidence value: \"\". Expected one of: low, medium, high"]
+        );
+    }
+
+    #[test]
+    fn should_emit_one_issue_per_invalid_line_in_order() {
+        let h = Harness::new();
+
+        let results = h.validate(&[commit_with_trailers(
+            "Lore-id: a1b2c3d4\nConfidence: High\nScope-risk: tiny",
+        )]);
+
+        assert_eq!(
+            enum_messages(&results[0]),
+            vec![
+                "Invalid Confidence value: \"High\". Expected one of: low, medium, high",
+                "Invalid Scope-risk value: \"tiny\". Expected one of: narrow, moderate, wide",
+            ]
+        );
     }
 
     #[test]

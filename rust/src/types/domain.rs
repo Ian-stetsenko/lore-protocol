@@ -115,6 +115,14 @@ impl fmt::Display for TrailerKey {
     }
 }
 
+/// An enum trailer line whose value is not one of the allowed values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidEnumValue {
+    pub key: TrailerKey,
+    /// The trimmed raw value; `""` when the trailer has no value.
+    pub value: String,
+}
+
 macro_rules! level_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
         $(#[$meta])*

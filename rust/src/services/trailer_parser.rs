@@ -1,8 +1,10 @@
 //! Parses raw trailer text into [`LoreTrailers`] and serializes back.
 //!
-//! Only parsing and serialization live here: no git interaction and no
-//! validation (the parser silently drops invalid enum values; the
-//! `Validator` reports them).
+//! Only parsing and serialization live here: no git interaction. The parser
+//! knows trailer-format and vocabulary rules but builds no validation
+//! issues: `parse` silently drops invalid enum values, and
+//! [`TrailerParser::find_invalid_enum_values`] lists them for the
+//! `Validator`.
 
 use std::sync::LazyLock;
 
@@ -11,8 +13,9 @@ use regex::Regex;
 
 use crate::types::custom_trailer_collection::CustomTrailerCollection;
 use crate::types::domain::{
-    ConfidenceLevel, LoreTrailers, ReversibilityLevel, ScopeRiskLevel, TrailerKey,
+    ConfidenceLevel, InvalidEnumValue, LoreTrailers, ReversibilityLevel, ScopeRiskLevel, TrailerKey,
 };
+use crate::util::constants::enum_values_for;
 
 static TRAILER_LINE_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$").expect("valid regex"));
@@ -83,6 +86,27 @@ impl TrailerParser {
 
         trailers.custom = CustomTrailerCollection::new(custom);
         trailers
+    }
+
+    /// Every enum trailer line (`Confidence`, `Scope-risk`, `Reversibility`)
+    /// in a raw trailer block whose trimmed value is not an allowed value, in
+    /// document order. Matching is case-sensitive; an empty value is reported
+    /// as `""`.
+    ///
+    /// `parse` drops such values, so validation must inspect the raw block.
+    pub fn find_invalid_enum_values(&self, raw_trailers: &str) -> Vec<InvalidEnumValue> {
+        self.parse_lines_to_entries(raw_trailers.split('\n'))
+            .into_iter()
+            .filter_map(|TrailerEntry { key, value }| {
+                let key = TrailerKey::parse(&key)?;
+                let allowed = enum_values_for(key)?;
+                let value = value.trim();
+                (!allowed.contains(&value)).then(|| InvalidEnumValue {
+                    key,
+                    value: value.to_owned(),
+                })
+            })
+            .collect()
     }
 
     /// Serialize trailers to git trailer format, one `Key: Value` per line.

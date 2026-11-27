@@ -1122,6 +1122,67 @@ fn validate_exit_codes_follow_severity() {
         .success();
 }
 
+/// The `invalid-enum` messages `lore validate` reports for HEAD.
+fn invalid_enum_messages(repo: &Repo) -> Vec<String> {
+    let assert = repo.lore().args(["validate", "--json"]).assert();
+    let out = json(&assert.get_output().stdout);
+    out["results"][0]["issues"]
+        .as_array()
+        .expect("issues")
+        .iter()
+        .filter(|issue| issue["rule"] == "invalid-enum")
+        .map(|issue| {
+            assert_eq!(issue["severity"], "error");
+            issue["message"].as_str().expect("message").to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn validate_reports_invalid_enum_values_from_history() {
+    const CONFIDENCE: &str = "Expected one of: low, medium, high";
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+
+    repo.commit(
+        "a.ts",
+        &atom_message(
+            "fix: unknown",
+            &["Lore-id: 1111aaaa", "Confidence: very-high"],
+        ),
+    );
+    assert_eq!(
+        invalid_enum_messages(&repo),
+        vec![format!(
+            "Invalid Confidence value: \"very-high\". {CONFIDENCE}"
+        )]
+    );
+    repo.lore().arg("validate").assert().code(1);
+    // Query output is unchanged: the parsed atom has no confidence.
+    let log = repo.lore().args(["log", "--json"]).assert().success();
+    let atoms = json(&log.get_output().stdout);
+    let trailers = &atoms["results"][0]["trailers"];
+    assert_eq!(atoms["results"][0]["lore_id"], "1111aaaa");
+    assert!(trailers.is_object());
+    assert!(trailers.get("confidence").is_none());
+
+    repo.commit(
+        "b.ts",
+        &atom_message(
+            "fix: two",
+            &["Lore-id: 4444aaaa", "Confidence: High", "Scope-risk: huge"],
+        ),
+    );
+    assert_eq!(
+        invalid_enum_messages(&repo),
+        vec![
+            format!("Invalid Confidence value: \"High\". {CONFIDENCE}"),
+            "Invalid Scope-risk value: \"huge\". Expected one of: narrow, moderate, wide"
+                .to_owned(),
+        ]
+    );
+}
+
 #[test]
 fn validate_from_matches_the_equivalent_positional_range() {
     let repo = Repo::new();

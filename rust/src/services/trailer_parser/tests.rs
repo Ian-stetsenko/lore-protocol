@@ -4,7 +4,9 @@ use indexmap::IndexMap;
 
 use super::TrailerParser;
 use crate::types::custom_trailer_collection::CustomTrailerCollection;
-use crate::types::domain::{ConfidenceLevel, LoreTrailers, ReversibilityLevel, ScopeRiskLevel};
+use crate::types::domain::{
+    ConfidenceLevel, InvalidEnumValue, LoreTrailers, ReversibilityLevel, ScopeRiskLevel, TrailerKey,
+};
 
 fn parser() -> TrailerParser {
     TrailerParser::new()
@@ -615,4 +617,88 @@ fn extract_should_handle_trailer_block_with_continuation_lines() {
     assert!(result.contains("Lore-id: a1b2c3d4"));
     assert!(result.contains("Constraint: A long constraint"));
     assert!(result.contains("  that continues here"));
+}
+
+// ---- find_invalid_enum_values ---------------------------------------------
+
+fn invalid(key: TrailerKey, value: &str) -> InvalidEnumValue {
+    InvalidEnumValue {
+        key,
+        value: value.to_owned(),
+    }
+}
+
+#[test]
+fn find_invalid_enum_values_returns_nothing_when_all_values_are_valid() {
+    let raw =
+        "Lore-id: abcd1234\nConfidence: high\nScope-risk: narrow\nReversibility: migration-needed";
+    assert_eq!(parser().find_invalid_enum_values(raw), vec![]);
+}
+
+#[test]
+fn find_invalid_enum_values_returns_nothing_without_enum_trailers() {
+    assert_eq!(
+        parser().find_invalid_enum_values("Lore-id: abcd1234\nConstraint: x"),
+        vec![]
+    );
+    assert_eq!(parser().find_invalid_enum_values(""), vec![]);
+}
+
+#[test]
+fn find_invalid_enum_values_reports_an_unknown_value_trimmed() {
+    assert_eq!(
+        parser().find_invalid_enum_values("Confidence:   very-high  "),
+        vec![invalid(TrailerKey::Confidence, "very-high")]
+    );
+}
+
+#[test]
+fn find_invalid_enum_values_matches_case_sensitively() {
+    assert_eq!(
+        parser().find_invalid_enum_values("Confidence: High"),
+        vec![invalid(TrailerKey::Confidence, "High")]
+    );
+}
+
+#[test]
+fn find_invalid_enum_values_reports_an_empty_value_as_empty() {
+    assert_eq!(
+        parser().find_invalid_enum_values("Scope-risk:"),
+        vec![invalid(TrailerKey::ScopeRisk, "")]
+    );
+}
+
+#[test]
+fn find_invalid_enum_values_reports_every_invalid_line_in_document_order() {
+    let raw = "Reversibility: maybe\nConfidence: high\nScope-risk: huge\nConfidence: certain";
+    assert_eq!(
+        parser().find_invalid_enum_values(raw),
+        vec![
+            invalid(TrailerKey::Reversibility, "maybe"),
+            invalid(TrailerKey::ScopeRisk, "huge"),
+            invalid(TrailerKey::Confidence, "certain"),
+        ]
+    );
+}
+
+#[test]
+fn find_invalid_enum_values_includes_continuation_lines() {
+    assert_eq!(
+        parser().find_invalid_enum_values("Confidence: very\n  high"),
+        vec![invalid(TrailerKey::Confidence, "very high")]
+    );
+}
+
+#[test]
+fn find_invalid_enum_values_ignores_non_enum_keys() {
+    assert_eq!(
+        parser().find_invalid_enum_values("Constraint: High\nX-Confidence: bogus"),
+        vec![]
+    );
+}
+
+#[test]
+fn find_invalid_enum_values_leaves_parse_unchanged() {
+    let raw = "Lore-id: abcd1234\nConfidence: very-high";
+    assert_eq!(parser().parse(raw, &no_custom()).confidence, None);
 }

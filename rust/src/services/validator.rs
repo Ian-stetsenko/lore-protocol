@@ -5,7 +5,7 @@
 
 use crate::interfaces::git_client::RawCommit;
 use crate::types::config::LoreConfig;
-use crate::types::domain::{LoreTrailers, TrailerKey};
+use crate::types::domain::{InvalidEnumValue, LoreTrailers, TrailerKey};
 use crate::types::output::{CommitValidationResult, Severity, ValidationIssue};
 use crate::util::constants::{enum_values_for, is_valid_lore_id};
 use crate::util::Result;
@@ -81,8 +81,8 @@ impl<'a> Validator<'a> {
             ));
         }
 
-        // Rule 4: Valid enum values
-        Self::validate_enum_values(&trailers, &mut issues);
+        // Rule 4: Valid enum values (read from the raw block; parse() drops invalid ones)
+        self.validate_enum_values(&commit.trailers, &mut issues);
 
         // Rule 5: Intent length (JS string length = UTF-16 code units)
         let subject_len = commit.subject.encode_utf16().count();
@@ -126,24 +126,16 @@ impl<'a> Validator<'a> {
         })
     }
 
-    /// With typed enum fields this can never fire (the parser drops
-    /// unrecognised values), but the check and its message are kept so the
-    /// rule set mirrors the TypeScript validator.
-    fn validate_enum_values(trailers: &LoreTrailers, issues: &mut Vec<ValidationIssue>) {
-        for key in TrailerKey::ENUM {
-            let (Some(value), Some(allowed)) = (trailers.enum_value(key), enum_values_for(key))
-            else {
-                continue;
-            };
-            if !allowed.contains(&value) {
-                issues.push(ValidationIssue::error(
-                    "invalid-enum",
-                    format!(
-                        "Invalid {key} value: \"{value}\". Expected one of: {}",
-                        allowed.join(", ")
-                    ),
-                ));
-            }
+    fn validate_enum_values(&self, raw_trailers: &str, issues: &mut Vec<ValidationIssue>) {
+        for InvalidEnumValue { key, value } in self.parser.find_invalid_enum_values(raw_trailers) {
+            let allowed = enum_values_for(key).unwrap_or_default();
+            issues.push(ValidationIssue::error(
+                "invalid-enum",
+                format!(
+                    "Invalid {key} value: \"{value}\". Expected one of: {}",
+                    allowed.join(", ")
+                ),
+            ));
         }
     }
 

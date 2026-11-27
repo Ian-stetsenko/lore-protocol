@@ -291,6 +291,41 @@ fn mixed_scopes(repo: &Repo) {
     );
 }
 
+/// Atoms whose enum trailers are invalid (unknown, wrong case, empty).
+fn invalid_enums(repo: &Repo) {
+    repo.commit("README.md", "chore: initial commit");
+    repo.commit(
+        "a.md",
+        &atom_message(
+            "fix: unknown confidence",
+            &["Lore-id: 1111aaaa", "Confidence: very-high"],
+        ),
+    );
+    repo.commit(
+        "b.md",
+        &atom_message(
+            "fix: cased and empty",
+            &[
+                "Lore-id: 2222aaaa",
+                "Confidence: High",
+                "Scope-risk:",
+                "Reversibility: maybe",
+            ],
+        ),
+    );
+    repo.commit(
+        "c.md",
+        &atom_message(
+            "fix: valid",
+            &[
+                "Lore-id: 3333aaaa",
+                "Confidence: high",
+                "Scope-risk: narrow",
+            ],
+        ),
+    );
+}
+
 /// A repository with one staged file, ready for `lore commit`.
 fn staged(repo: &Repo) {
     linear_seeded(repo);
@@ -933,6 +968,20 @@ fn parity_for_validate_hook_mode() {
             case(&["validate", "--commit-msg-file", "msg-clean.txt"]),
             case(&["validate", "--commit-msg-file", "msg-warn.txt"]),
             case(&["validate", "--commit-msg-file", "msg-warn.txt", "--strict"]),
+        ]),
+    );
+}
+
+#[test]
+fn parity_for_invalid_enum_values() {
+    assert_parity(
+        invalid_enums,
+        both_formats(vec![
+            case(&["validate"]),
+            case(&["validate", "--last", "3"]),
+            case(&["validate", "--last", "3", "--strict"]),
+            case(&["log"]),
+            case(&["search", "--confidence", "high"]),
         ]),
     );
 }

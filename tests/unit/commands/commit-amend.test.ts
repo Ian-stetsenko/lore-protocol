@@ -7,6 +7,7 @@ import type { IOutputFormatter } from '../../../src/interfaces/output-formatter.
 import type { CommitInputResolver } from '../../../src/services/commit-input-resolver.js';
 import type { HeadLoreIdReader } from '../../../src/services/head-lore-id-reader.js';
 import type { AtomRepository } from '../../../src/services/atom-repository.js';
+import { JsonFormatter } from '../../../src/formatters/json-formatter.js';
 
 function createMockGitClient(): IGitClient {
   return {
@@ -35,6 +36,7 @@ function createMockFormatter(): IOutputFormatter {
     formatMetricsResult: vi.fn().mockReturnValue(''),
     formatSuccess: vi.fn().mockReturnValue(''),
     formatError: vi.fn().mockReturnValue(''),
+    formatWarnings: vi.fn().mockReturnValue(''),
   };
 }
 
@@ -78,11 +80,12 @@ function createDeps(overrides?: {
   gitClient?: IGitClient;
   atomRepository?: AtomRepository;
   resolvedInput?: CommitInput;
+  formatter?: IOutputFormatter;
 }) {
   return {
     commitBuilder: createMockCommitBuilder(),
     gitClient: overrides?.gitClient ?? createMockGitClient(),
-    getFormatter: () => createMockFormatter(),
+    getFormatter: () => overrides?.formatter ?? createMockFormatter(),
     commitInputResolver: createMockInputResolver(
       overrides?.resolvedInput ?? { intent: 'test commit' },
     ),
@@ -281,6 +284,35 @@ describe('lore commit --amend', () => {
     // The staged guard wins: the reference gate never runs.
     expect(deps.atomRepository.resolveReferenceIds).not.toHaveBeenCalled();
     expect(deps.gitClient.commit).not.toHaveBeenCalled();
+  });
+
+  describe('warnings in JSON output', () => {
+    function lastJsonPayload(): Record<string, unknown> {
+      const calls = vi.mocked(console.log).mock.calls;
+      return JSON.parse(String(calls[calls.length - 1][0])) as Record<string, unknown>;
+    }
+
+    it('should emit an empty warnings array on --amend --no-edit', async () => {
+      const deps = createDeps({ formatter: new JsonFormatter() });
+
+      await runCommitCommand(['--amend', '--no-edit'], deps);
+
+      expect(lastJsonPayload().warnings).toEqual([]);
+    });
+
+    it('should carry validation warnings in the payload when amending with input', async () => {
+      const deps = createDeps({ formatter: new JsonFormatter() });
+      vi.mocked(deps.commitBuilder.validate).mockReturnValue([
+        { severity: 'warning', rule: 'intent-length', message: 'Intent exceeds 72 characters (got 80)' },
+      ]);
+
+      await runCommitCommand(['--amend', '--intent', 'amend test'], deps);
+
+      expect(lastJsonPayload().warnings).toEqual([
+        { severity: 'warning', rule: 'intent-length', message: 'Intent exceeds 72 characters (got 80)' },
+      ]);
+      expect(deps.gitClient.commit).toHaveBeenCalledWith('built message', { amend: true });
+    });
   });
 
   describe('reference gate escape (--no-verify-refs)', () => {

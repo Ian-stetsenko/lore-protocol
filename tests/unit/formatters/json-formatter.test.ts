@@ -414,6 +414,27 @@ describe('JsonFormatter', () => {
     });
   });
 
+  describe('formatWarnings', () => {
+    it('should return an empty string so no stderr document is written', () => {
+      expect(
+        formatter.formatWarnings([{ severity: 'warning', message: 'Intent exceeds 72 characters' }]),
+      ).toBe('');
+    });
+
+    it('should return an empty string for no warnings', () => {
+      expect(formatter.formatWarnings([])).toBe('');
+    });
+  });
+
+  describe('formatSuccess warnings payload', () => {
+    it('should pass a warnings array through to the success document', () => {
+      const warnings = [{ severity: 'warning', rule: 'intent-length', message: 'too long' }];
+      const parsed = JSON.parse(formatter.formatSuccess('ok', { warnings }));
+
+      expect(parsed.warnings).toEqual(warnings);
+    });
+  });
+
   describe('JSON format validity', () => {
     it('should always produce well-formed JSON with 2-space indentation', () => {
       const data: FormattableValidationResult = {

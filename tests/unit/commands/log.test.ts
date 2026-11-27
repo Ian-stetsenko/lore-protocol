@@ -74,6 +74,7 @@ function buildHarness(atoms: LoreAtom[], filteredAtoms?: LoreAtom[]): Harness {
     formatDoctorResult: vi.fn(),
     formatSuccess: vi.fn(),
     formatError: vi.fn(),
+    formatWarnings: vi.fn(() => ''),
   } as IOutputFormatter;
 
   const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

@@ -249,6 +249,40 @@ describe('TextFormatter', () => {
       const output = formatter.formatValidationResult(data);
       expect(output).toContain('abc12345');
     });
+
+    describe('commit label', () => {
+      const labelFor = (commit: string, loreId: string | null): string => {
+        const data: FormattableValidationResult = {
+          valid: false,
+          summary: { errors: 1, warnings: 0, commitsChecked: 1 },
+          results: [
+            {
+              commit,
+              loreId,
+              valid: false,
+              issues: [{ severity: 'error', rule: 'lore-id-present', message: 'Missing Lore-id' }],
+            },
+          ],
+        };
+        return formatter.formatValidationResult(data).split('\n')[0];
+      };
+
+      it('should prefer the Lore-id over the commit', () => {
+        expect(labelFor('(pending)', 'a1b2c3d4')).toBe('\u2717 a1b2c3d4');
+      });
+
+      it('should print the full "(pending)" placeholder in hook mode', () => {
+        expect(labelFor('(pending)', null)).toBe('\u2717 (pending)');
+      });
+
+      it('should abbreviate a full git hash to 8 characters', () => {
+        expect(labelFor('0123456789abcdef0123456789abcdef01234567', null)).toBe('\u2717 01234567');
+      });
+
+      it('should print a non-hash value in full', () => {
+        expect(labelFor('not-a-hash-value', null)).toBe('\u2717 not-a-hash-value');
+      });
+    });
   });
 
   describe('formatStalenessResult', () => {

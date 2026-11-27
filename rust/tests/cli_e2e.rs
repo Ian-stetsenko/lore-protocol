@@ -1256,6 +1256,7 @@ fn validate_commit_msg_file_mode_for_hooks() {
         .args(["validate", "--commit-msg-file", "msg-bad.txt"])
         .assert()
         .code(1)
+        .stdout(predicate::str::starts_with("\u{2717} (pending)\n"))
         .stdout(predicate::str::contains("Lore-id trailer is missing"));
 }
 

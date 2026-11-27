@@ -12,6 +12,9 @@ use crate::types::output::{
     FormattableTraceResult, FormattableValidationResult, Severity, VisibleTrailers,
 };
 
+/// Length a git hash is abbreviated to in validation labels.
+const SHORT_HASH_LENGTH: usize = 8;
+
 /// Width (in characters) of an atom header rule in query output.
 const HEADER_WIDTH: usize = 60;
 
@@ -301,8 +304,8 @@ impl OutputFormatter for TextFormatter {
                 self.red("\u{2717}")
             };
             let label = match &commit_result.lore_id {
-                Some(id) => id.clone(),
-                None => commit_result.commit.chars().take(8).collect(),
+                Some(id) => id.as_str(),
+                None => commit_label(&commit_result.commit),
             };
             lines.push(format!("{icon} {label}"));
 
@@ -456,6 +459,20 @@ impl OutputFormatter for TextFormatter {
         }
 
         lines.join("\n")
+    }
+}
+
+/// A git hash (`^[0-9a-f]{8,}$`) abbreviated to its first 8 characters; any
+/// other value (such as hook mode's `(pending)` placeholder) in full.
+fn commit_label(commit: &str) -> &str {
+    let is_git_hash = commit.len() >= SHORT_HASH_LENGTH
+        && commit
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if is_git_hash {
+        &commit[..SHORT_HASH_LENGTH]
+    } else {
+        commit
     }
 }
 

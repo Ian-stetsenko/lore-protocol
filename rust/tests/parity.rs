@@ -359,6 +359,7 @@ fn hook_messages(repo: &Repo) {
         "msg-warn.txt",
         "feat: dangling\n\nLore-id: abcdef12\nRelated: ffff9999\n",
     );
+    repo.write("msg-error.txt", "feat: no trailers\n");
 }
 
 // ---- running ---------------------------------------------------------------
@@ -968,6 +969,7 @@ fn parity_for_validate_hook_mode() {
             case(&["validate", "--commit-msg-file", "msg-clean.txt"]),
             case(&["validate", "--commit-msg-file", "msg-warn.txt"]),
             case(&["validate", "--commit-msg-file", "msg-warn.txt", "--strict"]),
+            case(&["validate", "--commit-msg-file", "msg-error.txt"]),
         ]),
     );
 }

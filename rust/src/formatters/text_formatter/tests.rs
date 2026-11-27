@@ -284,6 +284,46 @@ mod format_query_result {
 mod format_validation_result {
     use super::*;
 
+    fn label_for(commit: &str, lore_id: Option<&str>) -> String {
+        let data = FormattableValidationResult {
+            valid: true,
+            summary: ValidationSummary {
+                errors: 0,
+                warnings: 0,
+                commits_checked: 1,
+            },
+            results: vec![CommitValidationResult {
+                commit: commit.to_owned(),
+                lore_id: lore_id.map(str::to_owned),
+                valid: true,
+                issues: vec![],
+            }],
+        };
+        let output = formatter().format_validation_result(&data);
+        let first = output.lines().next().expect("label line");
+        first.trim_start_matches("\u{2713} ").to_owned()
+    }
+
+    #[test]
+    fn should_prefer_the_lore_id_as_the_label() {
+        assert_eq!(label_for("(pending)", Some("abcd1234")), "abcd1234");
+    }
+
+    #[test]
+    fn should_print_the_pending_placeholder_in_full() {
+        assert_eq!(label_for("(pending)", None), "(pending)");
+    }
+
+    #[test]
+    fn should_cut_a_full_hash_to_8_characters() {
+        assert_eq!(label_for(&"a1".repeat(20), None), "a1a1a1a1");
+    }
+
+    #[test]
+    fn should_print_a_non_hash_value_in_full() {
+        assert_eq!(label_for("not-a-hash-value", None), "not-a-hash-value");
+    }
+
     #[test]
     fn should_show_checkmark_for_valid_commits() {
         let data = FormattableValidationResult {

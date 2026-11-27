@@ -1112,13 +1112,26 @@ describe('AtomRepository --since / --until ref rejection', () => {
     await expect(repo.findAll({ since: 'yesterday' })).rejects.toThrow('boom');
   });
 
-  it.each(['2026-01-31', '2026-01-31T10:00:00', '2 weeks ago', '-1'])(
+  it.each(['2026-01-31', '2026-01-31T10:00:00', '2 weeks ago', '-1', '2001', '1700000000', '20260131'])(
     'should skip the ref lookup for %j',
     async (value) => {
       await repo.findAll({ since: value, until: value });
 
       expect(gitClient.resolveRef).not.toHaveBeenCalled();
       expect(gitClient.log).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['2001', '1700000000'])(
+    'should treat digit-only %j as a date even when it would match a commit hash prefix',
+    async (value) => {
+      // resolveRef resolves by default here, as rev-parse does for a unique hash prefix.
+      await expect(repo.findAll({ since: value })).resolves.toEqual([]);
+      await repo.findByTarget(['--', 'src/'], makeQueryOptions({ since: value }));
+
+      expect(gitClient.resolveRef).not.toHaveBeenCalled();
+      const [args] = vi.mocked(gitClient.log).mock.calls[0];
+      expect(args).toContain(`--since=${value}`);
     },
   );
 

@@ -81,7 +81,7 @@ describe('--since / --until ref rejection (real git integration)', () => {
     );
   });
 
-  it.each(['2026-01-01', '2 weeks ago', 'yesterday'])(
+  it.each(['2026-01-01', '2 weeks ago', 'yesterday', '2001', '1700000000'])(
     'accepts the date %j',
     async (since) => {
       await expect(repo.findAll({ since })).resolves.toBeInstanceOf(Array);

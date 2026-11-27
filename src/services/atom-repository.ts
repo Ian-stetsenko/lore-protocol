@@ -12,11 +12,14 @@ interface DateBounds {
 }
 
 /**
- * Values that can only be dates, so the ref lookup is skipped: ISO-dated
- * (2026-01-31...), containing whitespace ("2 weeks ago"), or starting with
- * "-" (never a ref, and must not reach rev-parse as an option).
+ * Values treated as dates without a ref lookup: ISO-dated (2026-01-31...),
+ * digit-only (a year, a Unix timestamp or 20260131 -- git reads these as
+ * dates, but rev-parse would match them as an abbreviated commit hash),
+ * containing whitespace ("2 weeks ago"), or starting with "-" (never a ref,
+ * and must not reach rev-parse as an option).
  */
 const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
+const DIGITS_ONLY = /^\d+$/;
 const WHITESPACE = /\s/;
 
 /**
@@ -470,7 +473,8 @@ export class AtomRepository {
   }
 
   private isUnambiguousDate(value: string): boolean {
-    return ISO_DATE_PREFIX.test(value) || WHITESPACE.test(value) || value.startsWith('-');
+    return [ISO_DATE_PREFIX, DIGITS_ONLY, WHITESPACE].some((shape) => shape.test(value))
+      || value.startsWith('-');
   }
 
   /**

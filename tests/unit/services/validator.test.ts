@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Validator } from '../../../src/services/validator.js';
 import type { LoreConfig } from '../../../src/types/config.js';
 import type { RawCommit } from '../../../src/interfaces/git-client.js';
-import type { LoreTrailers } from '../../../src/types/domain.js';
+import type { LoreTrailers, InvalidEnumValue } from '../../../src/types/domain.js';
 import type { AtomRepository } from '../../../src/services/atom-repository.js';
 import { DEFAULT_CONFIG } from '../../../src/types/config.js';
 import { CustomTrailerCollection } from '../../../src/types/custom-trailer-collection.js';
@@ -28,6 +28,7 @@ function makeTrailers(overrides: Partial<LoreTrailers> = {}): LoreTrailers {
 function createMockTrailerParser(resultOverrides: Partial<LoreTrailers> = {}) {
   return {
     parse: vi.fn(() => makeTrailers(resultOverrides)),
+    findInvalidEnumValues: vi.fn((): readonly InvalidEnumValue[] => []),
     serialize: vi.fn(),
     containsLoreTrailers: vi.fn(),
     extractTrailerBlock: vi.fn(),
@@ -158,76 +159,87 @@ describe('Validator', () => {
   });
 
   describe('Rule 4: valid enum values', () => {
-    it('should error on invalid Confidence', async () => {
-      mockParser.parse.mockReturnValue(
-        makeTrailers({ Confidence: 'super-high' as any }),
-      );
+    it('should check the raw trailer block, not the parsed trailers', async () => {
+      const commit = makeCommit({ trailers: 'Lore-id: a1b2c3d4\nConfidence: very-high' });
 
-      const commit = makeCommit();
-      const results = await validator.validate([commit]);
+      await validator.validate([commit]);
 
-      const enumIssue = results[0].issues.find(
-        (i) => i.rule === 'invalid-enum' && i.message.includes('Confidence'),
-      );
-      expect(enumIssue).toBeDefined();
-      expect(enumIssue!.severity).toBe('error');
+      expect(mockParser.findInvalidEnumValues).toHaveBeenCalledWith(commit.trailers);
     });
 
-    it('should error on invalid Scope-risk', async () => {
-      mockParser.parse.mockReturnValue(
-        makeTrailers({ 'Scope-risk': 'huge' as any }),
-      );
+    it('should error on invalid Confidence with the exact message', async () => {
+      mockParser.findInvalidEnumValues.mockReturnValue([{ key: 'Confidence', value: 'very-high' }]);
 
-      const commit = makeCommit();
-      const results = await validator.validate([commit]);
+      const results = await validator.validate([makeCommit()]);
 
-      const enumIssue = results[0].issues.find(
-        (i) => i.rule === 'invalid-enum' && i.message.includes('Scope-risk'),
-      );
-      expect(enumIssue).toBeDefined();
+      expect(results[0].valid).toBe(false);
+      expect(results[0].issues).toEqual([
+        {
+          severity: 'error',
+          rule: 'invalid-enum',
+          message: 'Invalid Confidence value: "very-high". Expected one of: low, medium, high',
+        },
+      ]);
     });
 
-    it('should error on invalid Reversibility', async () => {
-      mockParser.parse.mockReturnValue(
-        makeTrailers({ Reversibility: 'maybe' as any }),
-      );
+    it('should error on invalid Scope-risk with the exact message', async () => {
+      mockParser.findInvalidEnumValues.mockReturnValue([{ key: 'Scope-risk', value: 'huge' }]);
 
-      const commit = makeCommit();
-      const results = await validator.validate([commit]);
+      const results = await validator.validate([makeCommit()]);
 
-      const enumIssue = results[0].issues.find(
-        (i) => i.rule === 'invalid-enum' && i.message.includes('Reversibility'),
-      );
-      expect(enumIssue).toBeDefined();
+      expect(results[0].issues).toEqual([
+        {
+          severity: 'error',
+          rule: 'invalid-enum',
+          message: 'Invalid Scope-risk value: "huge". Expected one of: narrow, moderate, wide',
+        },
+      ]);
     });
 
-    it('should accept valid enum values', async () => {
-      mockParser.parse.mockReturnValue(
-        makeTrailers({
-          Confidence: 'medium',
-          'Scope-risk': 'narrow',
-          Reversibility: 'clean',
-        }),
-      );
+    it('should error on invalid Reversibility with the exact message', async () => {
+      mockParser.findInvalidEnumValues.mockReturnValue([{ key: 'Reversibility', value: 'maybe' }]);
 
-      const commit = makeCommit();
-      const results = await validator.validate([commit]);
+      const results = await validator.validate([makeCommit()]);
 
-      const enumIssues = results[0].issues.filter((i) => i.rule === 'invalid-enum');
-      expect(enumIssues).toHaveLength(0);
+      expect(results[0].issues).toEqual([
+        {
+          severity: 'error',
+          rule: 'invalid-enum',
+          message:
+            'Invalid Reversibility value: "maybe". Expected one of: clean, migration-needed, irreversible',
+        },
+      ]);
     });
 
-    it('should not error when enum trailers are null', async () => {
-      mockParser.parse.mockReturnValue(
-        makeTrailers({
-          Confidence: null,
-          'Scope-risk': null,
-          Reversibility: null,
-        }),
-      );
+    it('should report an empty value as ""', async () => {
+      mockParser.findInvalidEnumValues.mockReturnValue([{ key: 'Confidence', value: '' }]);
 
-      const commit = makeCommit();
-      const results = await validator.validate([commit]);
+      const results = await validator.validate([makeCommit()]);
+
+      expect(results[0].issues[0].message).toBe(
+        'Invalid Confidence value: "". Expected one of: low, medium, high',
+      );
+    });
+
+    it('should emit one issue per invalid line, in order', async () => {
+      mockParser.findInvalidEnumValues.mockReturnValue([
+        { key: 'Confidence', value: 'High' },
+        { key: 'Scope-risk', value: 'tiny' },
+      ]);
+
+      const results = await validator.validate([makeCommit()]);
+
+      const enumMessages = results[0].issues
+        .filter((i) => i.rule === 'invalid-enum')
+        .map((i) => i.message);
+      expect(enumMessages).toEqual([
+        'Invalid Confidence value: "High". Expected one of: low, medium, high',
+        'Invalid Scope-risk value: "tiny". Expected one of: narrow, moderate, wide',
+      ]);
+    });
+
+    it('should not error when there are no invalid enum values', async () => {
+      const results = await validator.validate([makeCommit()]);
 
       const enumIssues = results[0].issues.filter((i) => i.rule === 'invalid-enum');
       expect(enumIssues).toHaveLength(0);

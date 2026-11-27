@@ -181,7 +181,8 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Single Responsibility**: Parses raw trailer text (multi-line `Key: Value` format) into structured `LoreTrailers` objects, and serializes back. Also detects whether text contains Lore trailers and extracts trailer blocks from full commit messages.
 - **Dependencies**: `domain.ts`, `constants.ts`.
 - **Dependents**: `AtomRepository`, `CommitBuilder`, `Validator`, `why.ts`, `main.ts`.
-- **Key methods**: `parse()`, `serialize()`, `containsLoreTrailers()`, `extractTrailerBlock()`.
+- **Key methods**: `parse()`, `serialize()`, `containsLoreTrailers()`, `extractTrailerBlock()`, `findInvalidEnumValues()`.
+- **Enum handling**: `parse()` drops enum values it does not recognise (they become `null`), so query output never shows them. `findInvalidEnumValues()` reads the raw block and returns each Confidence / Scope-risk / Reversibility line whose trimmed value is not allowed (case-sensitive, empty reported as `""`), in document order; `Validator` Rule 4 (`invalid-enum`) is built on it.
 
 #### `src/services/path-resolver.ts`
 - **Contains**: `PathResolver` class.

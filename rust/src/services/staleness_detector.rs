@@ -19,19 +19,32 @@ use crate::types::config::LoreConfig;
 use crate::types::domain::{ConfidenceLevel, LoreAtom, SupersessionStatus};
 use crate::types::output::{StaleAtomReport, StaleReason, StaleSignal};
 use crate::util::constants::is_valid_lore_id;
+use crate::util::duration::{parse_duration_ms, MS_PER_DAY};
 
 static UNTIL_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[until:(\d{4}-\d{2}(?:-\d{2})?)\]").expect("valid regex"));
-static DURATION_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d+)(d|w|m|y)$").expect("valid regex"));
 static MONTH_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d{4})-(\d{2})$").expect("valid regex"));
 static DAY_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d{4})-(\d{2})-(\d{2})$").expect("valid regex"));
 
-const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
-/// Fallback when `stale.older_than` cannot be parsed: six 30-day months.
-const DEFAULT_MAX_AGE_MS: i64 = 6 * 30 * MS_PER_DAY;
+/// Six 30-day months; used when the effective `older_than` is not a valid
+/// duration (config only: CLI input is validated).
+const FALLBACK_MAX_AGE_MS: i64 = 6 * 30 * MS_PER_DAY;
+
+/// Per-call replacements for the configured `[stale]` thresholds (e.g. from
+/// CLI flags). A `None` field keeps the config value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StaleOverrides {
+    pub older_than: Option<String>,
+    pub drift_threshold: Option<usize>,
+}
+
+/// The effective thresholds for one analysis.
+struct StaleThresholds<'t> {
+    older_than: &'t str,
+    drift_threshold: usize,
+}
 
 /// Detects stale atoms using the signals listed in the module docs.
 pub struct StalenessDetector<'a> {
@@ -44,31 +57,43 @@ impl<'a> StalenessDetector<'a> {
         StalenessDetector { git, config }
     }
 
-    /// Analyze atoms against the current time. Returns a report only for
-    /// atoms with at least one staleness signal.
+    /// Analyze atoms against the current time with the configured
+    /// thresholds. Returns a report only for atoms with at least one
+    /// staleness signal.
     pub fn analyze(
         &self,
         atoms: &[LoreAtom],
         supersession_map: &HashMap<String, SupersessionStatus>,
     ) -> Vec<StaleAtomReport> {
-        self.analyze_at(atoms, supersession_map, Utc::now())
+        self.analyze_with(atoms, supersession_map, &StaleOverrides::default())
     }
 
-    /// [`Self::analyze`] with an explicit "now", for deterministic tests.
+    /// [`Self::analyze`] with `overrides` laid over the configured thresholds.
+    pub fn analyze_with(
+        &self,
+        atoms: &[LoreAtom],
+        supersession_map: &HashMap<String, SupersessionStatus>,
+        overrides: &StaleOverrides,
+    ) -> Vec<StaleAtomReport> {
+        self.analyze_at(atoms, supersession_map, overrides, Utc::now())
+    }
+
+    /// [`Self::analyze_with`] with an explicit "now", for deterministic tests.
     pub fn analyze_at(
         &self,
         atoms: &[LoreAtom],
         supersession_map: &HashMap<String, SupersessionStatus>,
+        overrides: &StaleOverrides,
         now: DateTime<Utc>,
     ) -> Vec<StaleAtomReport> {
-        let max_age_ms = parse_duration(&self.config.stale.older_than);
+        let thresholds = self.resolve_thresholds(overrides);
         let mut reports = Vec::new();
 
         for atom in atoms {
             let mut reasons: Vec<StaleReason> = Vec::new();
 
-            self.check_age(atom, now, max_age_ms, &mut reasons);
-            self.check_drift(atom, &mut reasons);
+            Self::check_age(atom, now, thresholds.older_than, &mut reasons);
+            self.check_drift(atom, thresholds.drift_threshold, &mut reasons);
             Self::check_low_confidence(atom, &mut reasons);
             Self::check_expired_hints(atom, now, &mut reasons);
             Self::check_orphaned_dependency(atom, supersession_map, &mut reasons);
@@ -84,21 +109,35 @@ impl<'a> StalenessDetector<'a> {
         reports
     }
 
+    /// Lay per-call overrides over the configured thresholds, field by field.
+    fn resolve_thresholds<'t>(&'t self, overrides: &'t StaleOverrides) -> StaleThresholds<'t> {
+        StaleThresholds {
+            older_than: overrides
+                .older_than
+                .as_deref()
+                .unwrap_or(&self.config.stale.older_than),
+            drift_threshold: overrides
+                .drift_threshold
+                .unwrap_or(self.config.stale.drift_threshold),
+        }
+    }
+
+    /// An unparseable threshold (possible only from config) falls back to
+    /// six months.
     fn check_age(
-        &self,
         atom: &LoreAtom,
         now: DateTime<Utc>,
-        max_age_ms: i64,
+        older_than: &str,
         reasons: &mut Vec<StaleReason>,
     ) {
+        let max_age_ms = parse_duration_ms(older_than).unwrap_or(FALLBACK_MAX_AGE_MS);
         let age_ms = (now - atom.date).num_milliseconds();
         if age_ms > max_age_ms {
             reasons.push(StaleReason {
                 signal: StaleSignal::Age,
                 description: format!(
-                    "Atom is {} old (threshold: {})",
-                    format_age(age_ms),
-                    self.config.stale.older_than
+                    "Atom is {} old (threshold: {older_than})",
+                    format_age(age_ms)
                 ),
             });
         }
@@ -106,8 +145,7 @@ impl<'a> StalenessDetector<'a> {
 
     /// Drift is the number of commits to a file since the atom's commit.
     /// Git errors (deleted or renamed files) skip that file silently.
-    fn check_drift(&self, atom: &LoreAtom, reasons: &mut Vec<StaleReason>) {
-        let threshold = self.config.stale.drift_threshold;
+    fn check_drift(&self, atom: &LoreAtom, threshold: usize, reasons: &mut Vec<StaleReason>) {
         for file_path in &atom.files_changed {
             let Ok(commits_since) = self.git.count_commits_since(file_path, &atom.commit_hash)
             else {
@@ -174,28 +212,6 @@ impl<'a> StalenessDetector<'a> {
             }
         }
     }
-}
-
-/// Parse a duration such as `6m`, `1y`, `30d`, `2w` into milliseconds.
-/// Months are 30 days, years 365 days. Unparseable input (including a
-/// number too large to represent) defaults to six months.
-fn parse_duration(duration: &str) -> i64 {
-    let Some(caps) = DURATION_PATTERN.captures(duration) else {
-        return DEFAULT_MAX_AGE_MS;
-    };
-    let Ok(value) = caps[1].parse::<i64>() else {
-        return DEFAULT_MAX_AGE_MS;
-    };
-    let days_per_unit = match &caps[2] {
-        "d" => 1,
-        "w" => 7,
-        "m" => 30,
-        "y" => 365,
-        _ => return DEFAULT_MAX_AGE_MS,
-    };
-    value
-        .saturating_mul(days_per_unit)
-        .saturating_mul(MS_PER_DAY)
 }
 
 /// Human-readable age: `N year(s)`, `N month(s)`, `N week(s)` or `N day(s)`.

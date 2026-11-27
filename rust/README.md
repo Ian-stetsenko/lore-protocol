@@ -104,13 +104,13 @@ Where the two implementations differ it is deliberate and listed here.
   An invalid `--limit` / `--max-commits` value is not a usage error in
   either CLI: it renders through the output formatter (a JSON envelope when
   the arguments contain `--json` or `--format=json`), as in TS.
-- **Non-numeric counts.** `validate --last` and `stale --drift` reject a
-  non-numeric value with exit 1. TS 0.8.0 parses these with a bare
-  `parseInt`, so `--last abc` silently becomes `NaN`, falls back to the
-  default and exits 0, and `--last 3x` means 3. `trace --max-depth`,
-  `--limit` and `--max-commits` match TS exactly: a strict digits-only parser
-  whose error renders through the output formatter, and a value starting with
-  `-` (`--max-depth -1`) is taken as the value, as Commander does. One edge
+- **Non-numeric counts.** `validate --last` rejects a non-numeric value with
+  exit 1. TS parses it with a bare `parseInt`, so `--last abc` silently
+  becomes `NaN`, falls back to the default and exits 0, and `--last 3x`
+  means three. `trace --max-depth`, `stale --drift`, `stale --older-than`,
+  `--limit` and `--max-commits` match TS exactly: a strict parser whose error
+  renders through the output formatter, and a value starting with `-`
+  (`--max-depth -1`) is taken as the value, as Commander does. One edge
   remains: Commander claims the global `--json` / `--format` options before
   the subcommand sees them, so `--limit --json` is "argument missing" usage
   text in TS and an invalid-value error in Rust (exit 1 in both).

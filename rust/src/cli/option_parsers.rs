@@ -9,6 +9,8 @@
 
 use std::fmt;
 
+use crate::util::duration::parse_duration_ms;
+
 /// An option value rejected by one of the parsers in this module. Holds the
 /// complete, user-facing message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,9 +57,37 @@ pub fn parse_non_negative_int(value: &str) -> Result<usize, InvalidOptionValue> 
     Ok(digits_to_usize(value))
 }
 
+/// Validate a CLI duration such as `30d`, `2w`, `6m` or `1y`; returns the
+/// value unchanged.
+pub fn parse_duration_option(value: &str) -> Result<String, InvalidOptionValue> {
+    match parse_duration_ms(value) {
+        Some(_) => Ok(value.to_owned()),
+        None => Err(InvalidOptionValue(format!(
+            "Expected a duration like 30d, 2w, 6m or 1y, got \"{value}\""
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duration_option_accepts_durations_unchanged() {
+        for good in ["30d", "2w", "6m", "1y", "0d"] {
+            assert_eq!(parse_duration_option(good), Ok(good.to_owned()));
+        }
+    }
+
+    #[test]
+    fn duration_option_rejects_anything_else() {
+        for bad in ["30", "x", "6M", "-1d", ""] {
+            assert_eq!(
+                parse_duration_option(bad).unwrap_err().to_string(),
+                format!("Expected a duration like 30d, 2w, 6m or 1y, got \"{bad}\""),
+            );
+        }
+    }
 
     #[test]
     fn positive_int_rejects_bad_values() {

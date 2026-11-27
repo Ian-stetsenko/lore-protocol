@@ -1072,3 +1072,25 @@ fn parity_for_date_bounds_that_are_git_refs() {
         ]),
     );
 }
+
+#[test]
+fn parity_for_stale_threshold_overrides() {
+    let mut cases = both_formats(vec![
+        case(&["stale", "--older-than", "30d"]),
+        case(&["stale", "--older-than", "1d", "--low-confidence"]),
+        case(&["stale", "--drift", "0"]),
+        case(&["stale", "--drift", "0", "--older-than", "100y"]),
+    ]);
+    cases.extend(both_formats(
+        ["30", "x", "6M", "-1d"]
+            .into_iter()
+            .map(|bad| case(&["stale", "--older-than", bad]))
+            .chain(
+                ["x", "-1", "2.5"]
+                    .into_iter()
+                    .map(|bad| case(&["stale", "--drift", bad])),
+            )
+            .collect(),
+    ));
+    assert_parity(linear_seeded, cases);
+}

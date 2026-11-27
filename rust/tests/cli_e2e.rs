@@ -1437,6 +1437,38 @@ fn stale_reports_old_and_low_confidence_atoms() {
 }
 
 #[test]
+fn stale_flags_override_the_config_thresholds() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: recent", &["Lore-id: aaaa1111"]),
+    );
+    // The default 6m threshold does not flag a recent atom; the flag does.
+    repo.lore()
+        .arg("stale")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No stale atoms found."));
+    repo.lore()
+        .args(["stale", "--older-than", "1d"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(threshold: 1d)"));
+
+    repo.lore()
+        .args(["stale", "--older-than", "30"])
+        .assert()
+        .code(1)
+        .stderr("error: Expected a duration like 30d, 2w, 6m or 1y, got \"30\"\n(exit code 1)\n");
+    repo.lore()
+        .args(["stale", "--drift", "-1"])
+        .assert()
+        .code(1)
+        .stderr("error: Expected a non-negative integer, got \"-1\"\n(exit code 1)\n");
+}
+
+#[test]
 fn squash_merges_atoms_in_a_range() {
     let repo = Repo::new();
     repo.commit("README.md", "chore: initial");

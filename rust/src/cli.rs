@@ -12,7 +12,9 @@ use crate::types::commit_input::CommitCommandOptions;
 
 mod option_parsers;
 
-pub use option_parsers::{parse_non_negative_int, parse_positive_int, InvalidOptionValue};
+pub use option_parsers::{
+    parse_duration_option, parse_non_negative_int, parse_positive_int, InvalidOptionValue,
+};
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -219,12 +221,22 @@ pub struct StaleArgs {
     /// Optional target; analyzes all atoms when omitted
     pub target: Option<String>,
 
-    /// Time-based staleness threshold (e.g., 6m, 1y)
-    #[arg(long = "older-than", value_name = "duration")]
+    /// Flag atoms older than this; overrides [stale] older_than (e.g., 30d, 2w, 6m, 1y)
+    #[arg(
+        long = "older-than",
+        value_name = "duration",
+        value_parser = parse_duration_option,
+        allow_hyphen_values = true
+    )]
     pub older_than: Option<String>,
 
-    /// File drift threshold (commits since atom)
-    #[arg(long, value_name = "n")]
+    /// Flag files with more than n commits since the atom; overrides [stale] drift_threshold
+    #[arg(
+        long,
+        value_name = "n",
+        value_parser = parse_non_negative_int,
+        allow_hyphen_values = true
+    )]
     pub drift: Option<usize>,
 
     /// Flag low-confidence atoms

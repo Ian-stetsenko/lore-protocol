@@ -5,7 +5,7 @@ use crate::commands::{Io, EXIT_OK};
 use crate::interfaces::output_formatter::OutputFormatter;
 use crate::services::atom_repository::{AtomRepository, FindAllOptions};
 use crate::services::path_resolver::PathResolver;
-use crate::services::staleness_detector::StalenessDetector;
+use crate::services::staleness_detector::{StaleOverrides, StalenessDetector};
 use crate::services::supersession_resolver::SupersessionResolver;
 use crate::types::output::{FormattableStalenessResult, StaleSignal};
 use crate::types::query::PathQueryOptions;
@@ -37,11 +37,16 @@ pub fn run(args: &StaleArgs, deps: &StaleDeps<'_>, io: &mut Io<'_>) -> Result<i3
         .supersession_resolver
         .filter_active(&atoms, &supersession_map);
 
-    let mut reports = deps
-        .staleness_detector
-        .analyze(&active_atoms, &supersession_map);
+    // Flag values override the config thresholds ...
+    let overrides = StaleOverrides {
+        older_than: args.older_than.clone(),
+        drift_threshold: args.drift,
+    };
+    let mut reports =
+        deps.staleness_detector
+            .analyze_with(&active_atoms, &supersession_map, &overrides);
 
-    // CLI-level filters: keep reports matching ANY requested signal.
+    // ... and also select signals: keep reports matching ANY requested one.
     let mut active_signals: Vec<StaleSignal> = Vec::new();
     if args.older_than.as_deref().is_some_and(|v| !v.is_empty()) {
         active_signals.push(StaleSignal::Age);

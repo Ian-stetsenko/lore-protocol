@@ -166,7 +166,8 @@ mod age_signal {
 
         for (atom_date, expected) in cases {
             let a = make_atom().date(atom_date).build();
-            let result = detector.analyze_at(&[a], &no_supersession(), now);
+            let result =
+                detector.analyze_at(&[a], &no_supersession(), &StaleOverrides::default(), now);
             assert_eq!(
                 result[0].reasons[0].description,
                 format!("Atom is {expected} old (threshold: 1d)"),
@@ -186,10 +187,22 @@ mod age_signal {
         let stale = make_atom().at(now - Duration::days(181)).build();
 
         assert!(detector
-            .analyze_at(&[fresh], &no_supersession(), now)
+            .analyze_at(
+                &[fresh],
+                &no_supersession(),
+                &StaleOverrides::default(),
+                now
+            )
             .is_empty());
         assert_eq!(
-            detector.analyze_at(&[stale], &no_supersession(), now).len(),
+            detector
+                .analyze_at(
+                    &[stale],
+                    &no_supersession(),
+                    &StaleOverrides::default(),
+                    now
+                )
+                .len(),
             1
         );
     }
@@ -488,13 +501,19 @@ mod expired_hints_signal {
             .analyze_at(
                 std::slice::from_ref(&a),
                 &no_supersession(),
+                &StaleOverrides::default(),
                 date("2024-06-15T12:00:00Z")
             )
             .is_empty());
         // Well into July: expired in every timezone.
         assert_eq!(
             detector
-                .analyze_at(&[a], &no_supersession(), date("2024-07-03T12:00:00Z"))
+                .analyze_at(
+                    &[a],
+                    &no_supersession(),
+                    &StaleOverrides::default(),
+                    date("2024-07-03T12:00:00Z")
+                )
                 .len(),
             1
         );
@@ -514,12 +533,18 @@ mod expired_hints_signal {
             .analyze_at(
                 std::slice::from_ref(&a),
                 &no_supersession(),
+                &StaleOverrides::default(),
                 date("2024-01-14T00:00:00Z")
             )
             .is_empty());
         assert_eq!(
             detector
-                .analyze_at(&[a], &no_supersession(), date("2024-01-17T12:00:00Z"))
+                .analyze_at(
+                    &[a],
+                    &no_supersession(),
+                    &StaleOverrides::default(),
+                    date("2024-01-17T12:00:00Z")
+                )
                 .len(),
             1
         );
@@ -540,6 +565,7 @@ mod expired_hints_signal {
             .analyze_at(
                 std::slice::from_ref(&month_overflow),
                 &no_supersession(),
+                &StaleOverrides::default(),
                 date("2025-01-15T00:00:00Z")
             )
             .is_empty());
@@ -548,6 +574,7 @@ mod expired_hints_signal {
                 .analyze_at(
                     &[month_overflow],
                     &no_supersession(),
+                    &StaleOverrides::default(),
                     date("2025-02-15T00:00:00Z")
                 )
                 .len(),
@@ -563,6 +590,7 @@ mod expired_hints_signal {
             .analyze_at(
                 std::slice::from_ref(&day_overflow),
                 &no_supersession(),
+                &StaleOverrides::default(),
                 date("2024-03-01T00:00:00Z")
             )
             .is_empty());
@@ -571,6 +599,7 @@ mod expired_hints_signal {
                 .analyze_at(
                     &[day_overflow],
                     &no_supersession(),
+                    &StaleOverrides::default(),
                     date("2024-03-05T00:00:00Z")
                 )
                 .len(),
@@ -754,5 +783,131 @@ mod combined_signals {
         let result = detector.analyze(&[], &no_supersession());
 
         assert!(result.is_empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// describe('threshold overrides') (TS v0.8.1: --older-than / --drift)
+// ---------------------------------------------------------------------------
+mod threshold_overrides {
+    use super::*;
+
+    fn overrides(older_than: Option<&str>, drift_threshold: Option<usize>) -> StaleOverrides {
+        StaleOverrides {
+            older_than: older_than.map(str::to_owned),
+            drift_threshold,
+        }
+    }
+
+    fn age_descriptions(
+        detector: &StalenessDetector<'_>,
+        atom_age_days: i64,
+        overrides: &StaleOverrides,
+    ) -> Vec<String> {
+        let now = date("2025-06-01T00:00:00Z");
+        let a = make_atom().at(now - Duration::days(atom_age_days)).build();
+        detector
+            .analyze_at(&[a], &no_supersession(), overrides, now)
+            .into_iter()
+            .flat_map(|r| r.reasons)
+            .filter(|r| r.signal == StaleSignal::Age)
+            .map(|r| r.description)
+            .collect()
+    }
+
+    #[test]
+    fn an_older_than_override_widens_the_age_signal_and_prints_its_value() {
+        let git = MockGitClient::new();
+        let config = LoreConfig::default(); // 6m
+        let detector = StalenessDetector::new(&git, &config);
+
+        assert!(age_descriptions(&detector, 45, &StaleOverrides::default()).is_empty());
+        assert_eq!(
+            age_descriptions(&detector, 45, &overrides(Some("30d"), None)),
+            vec!["Atom is 1 month old (threshold: 30d)"]
+        );
+    }
+
+    #[test]
+    fn an_older_than_override_narrows_the_age_signal() {
+        let git = MockGitClient::new();
+        let config = older_than("1d");
+        let detector = StalenessDetector::new(&git, &config);
+
+        assert_eq!(
+            age_descriptions(&detector, 45, &StaleOverrides::default()).len(),
+            1
+        );
+        assert!(age_descriptions(&detector, 45, &overrides(Some("1y"), None)).is_empty());
+    }
+
+    #[test]
+    fn a_drift_override_replaces_the_configured_threshold() {
+        let git = MockGitClient::new();
+        git.set_count_commits_since(|_, _| Ok(4));
+        let config = LoreConfig::default(); // 20
+        let detector = StalenessDetector::new(&git, &config);
+        let a = make_atom().at(now()).files(&["src/auth.ts"]).build();
+
+        assert!(detector
+            .analyze(std::slice::from_ref(&a), &no_supersession())
+            .is_empty());
+        let three = detector.analyze_with(
+            std::slice::from_ref(&a),
+            &no_supersession(),
+            &overrides(None, Some(3)),
+        );
+        assert!(has_signal_containing(
+            &three[0],
+            StaleSignal::Drift,
+            "src/auth.ts has 4 commits since this atom (threshold: 3)"
+        ));
+        let zero = detector.analyze_with(&[a], &no_supersession(), &overrides(None, Some(0)));
+        assert!(has_signal_containing(
+            &zero[0],
+            StaleSignal::Drift,
+            "(threshold: 0)"
+        ));
+    }
+
+    #[test]
+    fn absent_override_fields_keep_the_config_values() {
+        let git = MockGitClient::new();
+        git.set_count_commits_since(|_, _| Ok(4));
+        let config = config_with(StaleConfig {
+            older_than: "30d".to_owned(),
+            drift_threshold: 3,
+        });
+        let detector = StalenessDetector::new(&git, &config);
+        let a = make_atom()
+            .at(now() - Duration::days(45))
+            .files(&["src/auth.ts"])
+            .build();
+
+        let result = detector.analyze_with(&[a], &no_supersession(), &StaleOverrides::default());
+
+        assert!(has_signal_containing(
+            &result[0],
+            StaleSignal::Age,
+            "(threshold: 30d)"
+        ));
+        assert!(has_signal_containing(
+            &result[0],
+            StaleSignal::Drift,
+            "(threshold: 3)"
+        ));
+    }
+
+    #[test]
+    fn an_invalid_config_duration_still_falls_back_to_six_months() {
+        let git = MockGitClient::new();
+        let config = older_than("soon");
+        let detector = StalenessDetector::new(&git, &config);
+
+        assert!(age_descriptions(&detector, 179, &StaleOverrides::default()).is_empty());
+        assert_eq!(
+            age_descriptions(&detector, 181, &StaleOverrides::default()),
+            vec!["Atom is 6 months old (threshold: soon)"]
+        );
     }
 }

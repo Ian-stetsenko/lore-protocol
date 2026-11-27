@@ -21,8 +21,8 @@ Every adapter tells the agent:
 
 1. **Query before modifying** -- run `lore constraints`, `lore rejected`, and `lore directives` for files being changed
 2. **Respect what it finds** -- constraints are inviolable, rejected approaches are off-limits, directives are standing orders
-3. **Commit with Lore** -- pipe JSON to `lore commit` with the right trailers
-4. **The JSON schema** -- exact format for `lore commit` stdin input
+3. **Commit with Lore** -- pass JSON to `lore commit` (heredoc or `--file`) with the right trailers
+4. **The JSON schema** -- exact format for `lore commit` JSON input
 
 ## Universal Reference
 
@@ -37,20 +37,20 @@ The platform adapters are streamlined versions of this document, formatted for e
 ## Example: Claude Code
 
 ```sh
-# From your project root (assuming lore-cli is installed globally)
-cat /path/to/lore-cli/skills/adapters/claude-code.md >> CLAUDE.md
+# From your project root (lore-protocol installed globally with npm install -g)
+cat "$(npm root -g)"/lore-protocol/skills/adapters/claude-code.md >> CLAUDE.md
 ```
 
 ## Example: Cursor
 
 ```sh
 mkdir -p .cursor/rules
-cp /path/to/lore-cli/skills/adapters/cursor.mdc .cursor/rules/lore.mdc
+cp "$(npm root -g)"/lore-protocol/skills/adapters/cursor.mdc .cursor/rules/lore.mdc
 ```
 
 ## Example: GitHub Copilot
 
 ```sh
 mkdir -p .github
-cat /path/to/lore-cli/skills/adapters/github-copilot.md >> .github/copilot-instructions.md
+cat "$(npm root -g)"/lore-protocol/skills/adapters/github-copilot.md >> .github/copilot-instructions.md
 ```

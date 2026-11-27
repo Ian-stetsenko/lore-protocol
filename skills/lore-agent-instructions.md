@@ -53,7 +53,7 @@ lore context <path> --json
 
 ## 2. When Committing Code
 
-After making changes, create a Lore-enriched commit by piping JSON to `lore commit`.
+After making changes, create a Lore-enriched commit by passing JSON to `lore commit`.
 
 ### JSON Schema
 
@@ -72,19 +72,26 @@ After making changes, create a Lore-enriched commit by piping JSON to `lore comm
     "Not-tested": ["string array -- known untested areas"],
     "Supersedes": ["string array -- 8-char hex Lore-ids this replaces"],
     "Depends-on": ["string array -- 8-char hex Lore-ids this requires"],
-    "Related": ["string array -- 8-char hex Lore-ids for reference"]
+    "Related": ["string array -- 8-char hex Lore-ids for reference"],
+    "Co-Authored-By": ["any other key is kept as a custom trailer"]
   }
 }
 ```
 
 All trailer fields are optional. Only `intent` is required. Include trailers that are relevant -- do not pad with empty values.
 
+`lore commit` rejects malformed input instead of guessing, and exits 1 with a message saying what to fix:
+- Only `intent`, `body` and `trailers` are allowed at the top level. Trailers placed next to `intent` fail with `Unknown top-level key`; move them inside `trailers`.
+- `Confidence`, `Scope-risk` and `Reversibility` must use the exact values above.
+- Every Lore-id in `Supersedes`, `Depends-on` and `Related` must exist in the repository. Find ids with `lore log --json` or `lore search`.
+
 ### Commit Command
 
-Stage your changes with `git add`, then pipe JSON to `lore commit`:
+Stage your changes with `git add`, then pass JSON to `lore commit`:
 
 ```sh
-echo '{
+lore commit <<'EOF'
+{
   "intent": "fix: handle null user in auth middleware",
   "body": "Previously threw 500 on null user. Now returns 401.",
   "trailers": {
@@ -95,8 +102,13 @@ echo '{
     "Tested": ["null user returns 401", "valid user still works"],
     "Not-tested": ["concurrent request race condition"]
   }
-}' | lore commit
+}
+EOF
 ```
+
+Use a quoted heredoc (`<<'EOF'`) or `lore commit --file msg.json` (works in any shell, including PowerShell). Avoid `echo '...' |`: one apostrophe in the text ends the shell string.
+
+Extra trailers such as `Co-Authored-By` go **inside** `trailers` (any key not listed in the schema is kept as a custom trailer). Never append them after the generated message: only the last paragraph is read as the trailer block, so a separate `Co-Authored-By` paragraph hides the Lore trailers.
 
 A `Lore-id` is generated automatically -- do not include one.
 
@@ -131,8 +143,14 @@ lore stale <path> --json
 # Trace a decision chain
 lore trace <lore-id> --json
 
-# Validate recent commits for protocol compliance
-lore validate HEAD~5..HEAD
+# Validate commits for protocol compliance
+lore validate --from main          # every commit on this branch
+lore validate --last 5             # or a range: lore validate HEAD~5..HEAD
+lore validate --from main --strict # warnings fail too (for CI)
+
+# One-time setup per repository
+lore init                          # create .lore/config.toml
+lore hooks install                 # validate every commit message with a commit-msg hook
 ```
 
 ---
@@ -161,7 +179,8 @@ lore directives src/routes/upload.ts --json
 # Step 4: Stage and commit with Lore
 git add src/routes/upload.ts src/middleware/rate-limit.ts
 
-echo '{
+lore commit <<'EOF'
+{
   "intent": "feat: add server-side rate limiting to /api/upload",
   "body": "Adds token-bucket rate limiter as Express middleware. Limits configurable via UPLOAD_RATE_LIMIT and UPLOAD_RATE_WINDOW env vars.",
   "trailers": {
@@ -172,7 +191,8 @@ echo '{
     "Tested": ["rate limit triggers 429 after threshold", "authenticated vs anonymous limits differ"],
     "Not-tested": ["behavior under Redis connection failure"]
   }
-}' | lore commit
+}
+EOF
 ```
 
 ---
@@ -186,7 +206,7 @@ echo '{
 | Query directives | `lore directives <path> --json` |
 | Full context | `lore context <path> --json` |
 | Line-level blame | `lore why <file>:<line> --json` |
-| Commit with Lore | `echo '<json>' \| lore commit` |
+| Commit with Lore | `lore commit --file msg.json` (or a `<<'EOF'` heredoc) |
 | Search all lore | `lore search --text "query" --json` |
 | Check staleness | `lore stale <path> --json` |
-| Validate commits | `lore validate <range>` |
+| Validate commits | `lore validate --from main` |

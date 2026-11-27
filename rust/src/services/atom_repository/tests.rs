@@ -807,6 +807,7 @@ mod lore_id_index {
     #[test]
     fn should_index_atoms_by_lore_id_from_a_head_pass_followed_by_an_all_pass() {
         let git = MockGitClient::new();
+        git.set_resolve_ref(|_| Ok("aaa".to_owned()));
         git.set_log_result(vec![
             lore_commit_with_extras("aaa", "aaaa1111", "Related: bbbb2222"),
             lore_commit_with_hash("bbb", "bbbb2222"),
@@ -820,10 +821,13 @@ mod lore_id_index {
             index.get("aaaa1111").map(|a| a.commit_hash.as_str()),
             Some("aaa")
         );
+        // The first pass walks the pinned HEAD commit; the second walks only
+        // the delta. The hash, not the ref, keeps a concurrent branch move or
+        // landing commit consistent between passes.
         let calls = git.log_calls();
         assert_eq!(calls.len(), 2);
-        assert!(!has_all(&calls[0].0));
-        assert!(has_all(&calls[1].0));
+        assert_eq!(calls[0].0, strings(&["aaa"]));
+        assert_eq!(calls[1].0, strings(&["--all", "--not", "aaa"]));
     }
 
     #[test]
@@ -879,8 +883,10 @@ mod lore_id_index {
     }
 
     #[test]
-    fn should_build_from_all_alone_when_the_head_pass_fails_on_an_unborn_branch() {
-        let git = git_with_unborn_head(vec![lore_commit_with_hash("side", "aaaa1111")]);
+    fn should_build_from_all_alone_when_head_cannot_be_resolved_unborn_branch() {
+        let git = MockGitClient::new();
+        git.set_resolve_ref(|_| Err(crate::util::LoreError::Git("fatal: unborn HEAD".to_owned())));
+        git.set_log_result(vec![lore_commit_with_hash("side", "aaaa1111")]);
         let repo = AtomRepository::new(&git, &PARSER, vec![]);
 
         let index = repo.lore_id_index().unwrap();
@@ -889,6 +895,30 @@ mod lore_id_index {
             index.get("aaaa1111").map(|a| a.commit_hash.as_str()),
             Some("side")
         );
+        // Unborn HEAD: a single plain --all walk, no exclusion.
+        let calls = git.log_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, strings(&["--all"]));
+    }
+
+    #[test]
+    fn should_fall_back_to_plain_all_when_the_pinned_hash_walk_fails_after_resolution() {
+        let git = git_with_unborn_head(vec![lore_commit_with_hash("head", "aaaa1111")]);
+        git.set_resolve_ref(|_| Ok("aaa".to_owned()));
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let index = repo.lore_id_index().unwrap();
+
+        // The --all pass is the authority; the exclusion is given up so HEAD
+        // history is covered by it.
+        assert_eq!(
+            index.get("aaaa1111").map(|a| a.commit_hash.as_str()),
+            Some("head")
+        );
+        let calls = git.log_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, strings(&["aaa"]));
+        assert_eq!(calls[1].0, strings(&["--all"]));
     }
 
     #[test]

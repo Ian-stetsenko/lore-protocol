@@ -140,7 +140,9 @@ impl<'a> AtomRepository<'a> {
     }
 
     /// Build (once per instance) an index of every atom by Lore-id from a
-    /// `git log` pass over HEAD followed by a `git log --all` pass.
+    /// `git log` pass over the pinned HEAD commit followed by a
+    /// `git log --all --not <head-hash>` delta pass (plain `--all` when HEAD
+    /// cannot be resolved or the first pass fails).
     ///
     /// Reference-heavy traversals (trace BFS, follow-link resolution,
     /// reference validation) look ids up here instead of running one
@@ -159,12 +161,7 @@ impl<'a> AtomRepository<'a> {
             return Ok(Rc::clone(index));
         }
 
-        // The HEAD pass fails on an unborn HEAD while `--all` succeeds; skip
-        // it then, so the index over a fresh repository stays empty.
-        let mut raw = self.git.log(&[], LogOptions::LORE_ONLY).unwrap_or_default();
-        // The `--all` pass is the authority; real git failures throw here.
-        raw.extend(self.git.log(&["--all".to_owned()], LogOptions::LORE_ONLY)?);
-        let atoms = self.parse_raw_commits(&raw);
+        let atoms = self.parse_raw_commits(&self.walk_index_commits()?);
 
         let mut index = LoreIdIndex::new();
         for atom in atoms {
@@ -174,6 +171,39 @@ impl<'a> AtomRepository<'a> {
         let index = Rc::new(index);
         *self.lore_index.borrow_mut() = Some(Rc::clone(&index));
         Ok(index)
+    }
+
+    /// Raw commits for the Lore-id index: the pinned HEAD history first,
+    /// then the `--all` delta.
+    ///
+    /// HEAD is resolved once and exactly that commit is walked, so the pin
+    /// always equals what the first pass walked: under concurrent branch
+    /// movement no walked history is dropped from the delta and no new
+    /// history is hidden from it.
+    fn walk_index_commits(&self) -> Result<Vec<RawCommit>> {
+        // Unborn HEAD on a fresh repository: nothing to walk or exclude.
+        let mut pin = self.git.resolve_ref("HEAD").ok();
+
+        let mut commits = Vec::new();
+        if let Some(head) = &pin {
+            match self
+                .git
+                .log(std::slice::from_ref(head), LogOptions::LORE_ONLY)
+            {
+                Ok(head_commits) => commits = head_commits,
+                // Walk failed: give the exclusion up and let --all cover HEAD.
+                Err(_) => pin = None,
+            }
+        }
+
+        // The delta pass contributes only ids the HEAD pass missed and is
+        // the authority: real git failures surface here.
+        let delta_args: Vec<String> = match pin {
+            Some(head) => vec!["--all".to_owned(), "--not".to_owned(), head],
+            None => vec!["--all".to_owned()],
+        };
+        commits.extend(self.git.log(&delta_args, LogOptions::LORE_ONLY)?);
+        Ok(commits)
     }
 
     /// Find a single atom by its git commit hash (`git log -1 <hash>`).

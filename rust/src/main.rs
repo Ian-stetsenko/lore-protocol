@@ -239,6 +239,7 @@ fn dispatch(cli: &Cli, io_streams: &mut Io<'_>) -> lore::util::Result<i32> {
                 atom_repository: &atom_repository,
                 config_loader,
                 formatter,
+                supersession_resolver: &supersession_resolver,
                 cwd: &cwd,
             },
             io_streams,

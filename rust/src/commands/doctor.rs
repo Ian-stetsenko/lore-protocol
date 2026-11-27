@@ -4,7 +4,7 @@
 //! 2. Lore-ids are unique (across every ref with `--all`).
 //! 3. All references resolve, across every ref: dangling Supersedes /
 //!    Depends-on are warnings, dangling Related are info.
-//! 4. No dependencies on superseded atoms.
+//! 4. No dependencies on superseded atoms without a live successor.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -14,7 +14,8 @@ use crate::commands::{Io, EXIT_OK};
 use crate::interfaces::config_loader::ConfigLoader;
 use crate::interfaces::output_formatter::OutputFormatter;
 use crate::services::atom_repository::{AtomRepository, FindAllOptions};
-use crate::types::domain::{LoreAtom, TrailerKey};
+use crate::services::supersession_resolver::SupersessionResolver;
+use crate::types::domain::{LoreAtom, SupersessionStatus, TrailerKey};
 use crate::types::output::{DoctorCheck, DoctorStatus, DoctorSummary, FormattableDoctorResult};
 use crate::util::constants::{is_valid_lore_id, EXIT_CODE_VALIDATION_ERROR};
 use crate::util::Result;
@@ -26,6 +27,7 @@ pub struct DoctorDeps<'a> {
     pub atom_repository: &'a AtomRepository<'a>,
     pub config_loader: &'a dyn ConfigLoader,
     pub formatter: &'a dyn OutputFormatter,
+    pub supersession_resolver: &'a SupersessionResolver,
     /// Directory the config lookup starts from (the process cwd in production).
     pub cwd: &'a Path,
 }
@@ -48,7 +50,10 @@ pub fn run(args: &DoctorArgs, deps: &DoctorDeps<'_>, io: &mut Io<'_>) -> Result<
 
     checks.push(check_lore_id_uniqueness(&uniqueness_atoms, args.all));
     checks.extend(check_references_resolve(&all_atoms, deps.atom_repository));
-    checks.push(check_orphaned_dependencies(&all_atoms));
+    checks.push(check_superseded_dependencies(
+        &all_atoms,
+        deps.supersession_resolver,
+    ));
 
     let mut summary = DoctorSummary::default();
     for check in &checks {
@@ -269,21 +274,26 @@ fn all_references_resolve() -> DoctorCheck {
     }
 }
 
-fn check_orphaned_dependencies(atoms: &[LoreAtom]) -> DoctorCheck {
-    let superseded_ids: HashSet<&str> = atoms
-        .iter()
-        .flat_map(|a| a.trailers.supersedes.iter())
-        .filter(|id| is_valid_lore_id(id))
-        .map(String::as_str)
-        .collect();
+/// Depends-on edges whose target is superseded with no live successor.
+///
+/// A supersede carries the decision forward, dependencies included, so an
+/// edge whose target's supersession chain reaches a live atom is satisfied
+/// and stays silent. Targets absent from the scanned set are the reference
+/// check's business, not this one's.
+fn check_superseded_dependencies(
+    atoms: &[LoreAtom],
+    supersession_resolver: &SupersessionResolver,
+) -> DoctorCheck {
+    let supersession_map = supersession_resolver.resolve(atoms);
 
-    let orphaned: Vec<String> = atoms
+    let flagged: Vec<String> = atoms
         .iter()
         .flat_map(|atom| {
             atom.trailers
                 .depends_on
                 .iter()
-                .filter(|dep| is_valid_lore_id(dep) && superseded_ids.contains(dep.as_str()))
+                .filter(|dep| is_valid_lore_id(dep) && supersession_map.contains_key(dep.as_str()))
+                .filter(|dep| !chain_reaches_live_atom(dep, &supersession_map))
                 .map(move |dep| {
                     format!(
                         "Atom {} depends on {dep}, which has been superseded",
@@ -293,21 +303,46 @@ fn check_orphaned_dependencies(atoms: &[LoreAtom]) -> DoctorCheck {
         })
         .collect();
 
-    if !orphaned.is_empty() {
+    if !flagged.is_empty() {
         return DoctorCheck {
-            name: "Orphaned dependencies".to_owned(),
+            name: "Superseded dependencies".to_owned(),
             status: DoctorStatus::Info,
-            message: format!("{} atom(s) depend on superseded atoms", orphaned.len()),
-            details: orphaned,
+            message: format!("{} atom(s) depend on superseded atoms", flagged.len()),
+            details: flagged,
         };
     }
 
     DoctorCheck {
-        name: "Orphaned dependencies".to_owned(),
+        name: "Superseded dependencies".to_owned(),
         status: DoctorStatus::Ok,
-        message: "No orphaned dependencies found".to_owned(),
+        message: "No superseded dependencies found".to_owned(),
         details: Vec::new(),
     }
+}
+
+/// Whether `start_id`'s supersession chain ends at a live (not superseded)
+/// atom. Carries its own visited set, so a chain that cycles without
+/// reaching a live atom (self-supersession included) terminates and counts
+/// as unresolved, as does a successor missing from the scanned set.
+fn chain_reaches_live_atom(
+    start_id: &str,
+    supersession_map: &HashMap<String, SupersessionStatus>,
+) -> bool {
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut current = Some(start_id);
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            return false; // cycle without a live atom
+        }
+        let Some(status) = supersession_map.get(id) else {
+            return false; // successor absent from the scanned set
+        };
+        if !status.superseded {
+            return true;
+        }
+        current = status.superseded_by.as_deref();
+    }
+    false
 }
 
 #[cfg(test)]

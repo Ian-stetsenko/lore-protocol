@@ -74,10 +74,12 @@ fn run_doctor_formatted(
 ) -> (String, i32) {
     let parser = TrailerParser::new();
     let repo = AtomRepository::new(git, &parser, Vec::new());
+    let resolver = SupersessionResolver::new();
     let deps = DoctorDeps {
         atom_repository: &repo,
         config_loader,
         formatter,
+        supersession_resolver: &resolver,
         cwd: Path::new("."),
     };
     let mut out = Vec::new();
@@ -240,29 +242,6 @@ fn uniqueness_reports_duplicates_in_first_seen_order() {
     let ok = check_lore_id_uniqueness(&atoms[..2], false);
     assert_eq!(ok.status, DoctorStatus::Ok);
     assert_eq!(ok.message, "All 2 Lore-ids are unique");
-}
-
-#[test]
-fn orphans_are_detected() {
-    let atoms = vec![
-        atom().id("aaaa1111").build(),
-        atom()
-            .id("bbbb2222")
-            .supersedes(&["aaaa1111"])
-            .related(&["ffff9999", "not-an-id"])
-            .build(),
-        atom().id("cccc3333").depends_on(&["aaaa1111"]).build(),
-    ];
-    let orphans = check_orphaned_dependencies(&atoms);
-    assert_eq!(orphans.status, DoctorStatus::Info);
-    assert_eq!(
-        orphans.details,
-        vec!["Atom cccc3333 depends on aaaa1111, which has been superseded"]
-    );
-    assert_eq!(
-        check_orphaned_dependencies(&atoms[..1]).status,
-        DoctorStatus::Ok
-    );
 }
 
 // ---- reference resolution split by severity (#81) ------------------------
@@ -537,4 +516,156 @@ fn keeps_the_errors_only_exit_contract_with_error_warning_and_info_together() {
     assert_eq!(find_check(checks, "Config file")["status"], "error");
     // Warnings and info never fail the run; the error alone sets exit 1.
     assert_eq!(code, 1);
+}
+
+// ---- superseded dependency check resolves supersession chains (#83) -------
+
+/// An atom with optional Supersedes / Depends-on trailers.
+fn dependency_atom(lore_id: &str, supersedes: &[&str], depends_on: &[&str]) -> LoreAtom {
+    atom()
+        .id(lore_id)
+        .supersedes(supersedes)
+        .depends_on(depends_on)
+        .build()
+}
+
+fn superseded_check(atoms: &[LoreAtom]) -> DoctorCheck {
+    check_superseded_dependencies(atoms, &SupersessionResolver::new())
+}
+
+#[test]
+fn a_transferred_dependency_superseded_target_live_successor_is_silent() {
+    let check = superseded_check(&[
+        dependency_atom("11111111", &[], &["22222222"]),
+        dependency_atom("22222222", &[], &[]),
+        dependency_atom("33333333", &["22222222"], &[]),
+    ]);
+
+    assert_eq!(check.status, DoctorStatus::Ok);
+    assert!(check.details.is_empty());
+}
+
+#[test]
+fn an_edge_whose_target_sits_at_the_head_of_a_chain_resolves_to_the_live_tail_and_is_silent() {
+    // 22222222 is superseded by 33333333, which the live 44444444 supersedes.
+    let check = superseded_check(&[
+        dependency_atom("11111111", &[], &["22222222"]),
+        dependency_atom("22222222", &[], &[]),
+        dependency_atom("33333333", &["22222222"], &[]),
+        dependency_atom("44444444", &["33333333"], &[]),
+    ]);
+
+    assert_eq!(check.status, DoctorStatus::Ok);
+}
+
+#[test]
+fn a_side_branch_only_target_is_silent_in_this_check_absent_from_the_scanned_set() {
+    // 55555555 lives only on another ref; missing targets belong to the
+    // reference-resolution check.
+    let check = superseded_check(&[
+        dependency_atom("11111111", &[], &["55555555"]),
+        dependency_atom("66666666", &["55555555"], &[]),
+    ]);
+
+    assert_eq!(check.status, DoctorStatus::Ok);
+    assert!(check.details.is_empty());
+}
+
+#[test]
+fn where_multiple_superseders_claim_one_target_the_last_writer_wins_successor_is_accepted_silent() {
+    let check = superseded_check(&[
+        dependency_atom("11111111", &[], &["22222222"]),
+        dependency_atom("22222222", &[], &[]),
+        dependency_atom("33333333", &["22222222"], &[]),
+        dependency_atom("44444444", &["22222222"], &[]),
+    ]);
+
+    assert_eq!(check.status, DoctorStatus::Ok);
+}
+
+#[test]
+fn a_supersession_cycle_keeps_the_existing_info_line_and_never_fails_the_command() {
+    // 22222222 and 33333333 supersede each other: the walk must terminate.
+    let git = git_with(
+        vec![
+            referencing_commit("11111111", &[("Depends-on", "22222222")]),
+            referencing_commit("22222222", &[("Supersedes", "33333333")]),
+            referencing_commit("33333333", &[("Supersedes", "22222222")]),
+        ],
+        vec![
+            lore_commit("11111111"),
+            lore_commit("22222222"),
+            lore_commit("33333333"),
+        ],
+    );
+
+    let (result, code) = run_doctor_json(&git, &NoConfigLoader);
+
+    let checks = result["checks"].as_array().expect("checks");
+    let superseded: Vec<_> = checks
+        .iter()
+        .filter(|c| c["name"] == "Superseded dependencies")
+        .collect();
+    assert_eq!(superseded.len(), 1);
+    assert_eq!(superseded[0]["status"], "info");
+    assert_eq!(
+        superseded[0]["details"],
+        serde_json::json!(["Atom 11111111 depends on 22222222, which has been superseded"])
+    );
+    // Info never fails the command.
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn a_self_supersession_keeps_the_existing_info_line() {
+    let check = superseded_check(&[
+        dependency_atom("11111111", &[], &["22222222"]),
+        dependency_atom("22222222", &["22222222"], &[]),
+    ]);
+
+    assert_eq!(check.status, DoctorStatus::Info);
+    assert_eq!(
+        check.details,
+        vec!["Atom 11111111 depends on 22222222, which has been superseded"]
+    );
+}
+
+#[test]
+fn a_zero_finding_corpus_yields_status_ok_with_empty_details_the_ok_line_is_expected_output() {
+    let check = superseded_check(&[]);
+
+    assert_eq!(check.status, DoctorStatus::Ok);
+    assert_eq!(check.message, "No superseded dependencies found");
+    assert!(check.details.is_empty());
+}
+
+#[test]
+fn guard_the_staleness_detector_still_flags_the_transferred_edge_through_the_service_seam_author_backstop_intact(
+) {
+    // Doctor is silent on transferred edges; `lore stale` must keep
+    // flagging them as the author backstop.
+    use crate::services::staleness_detector::StalenessDetector;
+    use crate::types::output::StaleSignal;
+
+    let atoms = vec![
+        dependency_atom("11111111", &[], &["22222222"]),
+        dependency_atom("22222222", &[], &[]),
+        dependency_atom("33333333", &["22222222"], &[]),
+    ];
+    let resolver = SupersessionResolver::new();
+    let supersession_map = resolver.resolve(&atoms);
+    let active_atoms = resolver.filter_active(&atoms, &supersession_map);
+    let git = MockGitClient::new();
+    let config = LoreConfig::default();
+
+    let reports = StalenessDetector::new(&git, &config).analyze(&active_atoms, &supersession_map);
+
+    let dependent = reports
+        .iter()
+        .find(|report| report.atom.lore_id == "11111111")
+        .expect("dependent atom reported");
+    assert!(dependent
+        .reasons
+        .iter()
+        .any(|reason| reason.signal == StaleSignal::OrphanedDep));
 }

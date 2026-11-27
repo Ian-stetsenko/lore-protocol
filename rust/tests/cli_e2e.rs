@@ -1204,7 +1204,7 @@ fn doctor_reports_checks_and_summary() {
             "Lore-id uniqueness",
             "Reference resolution (supersedes/depends-on)",
             "Reference resolution (related)",
-            "Orphaned dependencies",
+            "Superseded dependencies",
         ]
     );
     assert_eq!(checks[0]["status"], "warning");
@@ -1227,6 +1227,66 @@ fn doctor_reports_checks_and_summary() {
         .stdout(predicate::str::contains(
             "INFO  Reference resolution (related): 1 broken related reference(s) found",
         ));
+}
+
+fn superseded_dependencies_check(repo: &Repo) -> Value {
+    let assert = repo.lore().args(["doctor", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    out["checks"]
+        .as_array()
+        .expect("checks")
+        .iter()
+        .find(|c| c["name"] == "Superseded dependencies")
+        .cloned()
+        .expect("superseded dependencies check")
+}
+
+#[test]
+fn doctor_resolves_a_dependency_through_a_supersession_chain_to_a_live_tail() {
+    let repo = Repo::new();
+    repo.commit("a.md", &atom_message("feat: a", &["Lore-id: 22222222"]));
+    repo.commit(
+        "b.md",
+        &atom_message("feat: b", &["Lore-id: 33333333", "Supersedes: 22222222"]),
+    );
+    repo.commit(
+        "c.md",
+        &atom_message("feat: c", &["Lore-id: 44444444", "Supersedes: 33333333"]),
+    );
+    repo.commit(
+        "d.md",
+        &atom_message("feat: d", &["Lore-id: 11111111", "Depends-on: 22222222"]),
+    );
+
+    let check = superseded_dependencies_check(&repo);
+
+    assert_eq!(check["status"], "ok");
+    assert_eq!(check["message"], "No superseded dependencies found");
+}
+
+#[test]
+fn doctor_flags_a_dependency_whose_supersession_chain_cycles() {
+    let repo = Repo::new();
+    repo.commit(
+        "a.md",
+        &atom_message("feat: a", &["Lore-id: 22222222", "Supersedes: 33333333"]),
+    );
+    repo.commit(
+        "b.md",
+        &atom_message("feat: b", &["Lore-id: 33333333", "Supersedes: 22222222"]),
+    );
+    repo.commit(
+        "c.md",
+        &atom_message("feat: c", &["Lore-id: 11111111", "Depends-on: 22222222"]),
+    );
+
+    let check = superseded_dependencies_check(&repo);
+
+    assert_eq!(check["status"], "info");
+    assert_eq!(
+        check["details"],
+        serde_json::json!(["Atom 11111111 depends on 22222222, which has been superseded"])
+    );
 }
 
 #[test]

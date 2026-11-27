@@ -17,9 +17,22 @@ use crate::interfaces::git_client::{GitClient, LogOptions, RawCommit};
 use crate::types::domain::{LoreAtom, LoreId, LoreTrailers, TrailerKey};
 use crate::types::query::PathQueryOptions;
 use crate::util::constants::is_valid_lore_id;
-use crate::util::Result;
+use crate::util::{LoreError, Result};
 
 use super::trailer_parser::TrailerParser;
+
+/// Values treated as dates without a ref lookup: ISO-dated (2026-01-31...)
+/// or digit-only (a year, a Unix timestamp or 20260131: git reads these as
+/// dates, but rev-parse would match them as an abbreviated commit hash).
+/// Values containing whitespace ("2 weeks ago") or starting with "-" (never
+/// a ref, and must not reach rev-parse as an option) count too; see
+/// [`is_unambiguous_date`].
+static DATE_SHAPES: LazyLock<[Regex; 2]> = LazyLock::new(|| {
+    [
+        Regex::new(r"^\d{4}-\d{2}-\d{2}").expect("valid regex"),
+        Regex::new(r"^\d+$").expect("valid regex"),
+    ]
+});
 
 /// Conventional-commit scope: `type(scope): description`.
 static SCOPE_PATTERN: LazyLock<Regex> =
@@ -91,6 +104,7 @@ impl<'a> AtomRepository<'a> {
         git_log_args: &[String],
         options: &PathQueryOptions,
     ) -> Result<Vec<LoreAtom>> {
+        self.assert_date_bounds(options.since.as_deref(), None)?;
         let mut all_args = self.build_log_args(options);
         all_args.extend(git_log_args.iter().cloned());
         let raw = self.git.log(&all_args, LogOptions::LORE_ONLY)?;
@@ -280,6 +294,7 @@ impl<'a> AtomRepository<'a> {
 
     /// Find all Lore atoms, optionally filtered by date range and count.
     pub fn find_all(&self, options: &FindAllOptions) -> Result<Vec<LoreAtom>> {
+        self.assert_date_bounds(options.since.as_deref(), options.until.as_deref())?;
         let mut args = self.build_base_log_args();
         if options.all_refs {
             args.push("--all".to_owned());
@@ -302,6 +317,7 @@ impl<'a> AtomRepository<'a> {
     /// Find atoms whose subject carries a conventional-commit scope
     /// (`type(scope): description`) equal to `scope`, case-insensitively.
     pub fn find_by_scope(&self, scope: &str, options: &PathQueryOptions) -> Result<Vec<LoreAtom>> {
+        self.assert_date_bounds(options.since.as_deref(), None)?;
         let args = self.build_log_args(options);
         // Git-level scope pushdown (coarse "(scope)" substring grep); the
         // exact conventional-commit scope filter below stays authoritative.
@@ -415,6 +431,30 @@ impl<'a> AtomRepository<'a> {
     }
 
     /// `git log` arguments including optional filters from the query options.
+    /// Reject git refs passed as `--since` / `--until`. git log's `--since`
+    /// only understands dates and silently ignores a ref like `v1.2`,
+    /// returning the whole history; failing loudly points the user at a real
+    /// date instead. Every query method taking a date bound calls this first.
+    fn assert_date_bounds(&self, since: Option<&str>, until: Option<&str>) -> Result<()> {
+        self.assert_date_not_ref("--since", since)?;
+        self.assert_date_not_ref("--until", until)
+    }
+
+    /// Only a git failure of the lookup means "not a ref" (git then reads the
+    /// value as a date); every other error propagates.
+    fn assert_date_not_ref(&self, flag: &str, value: Option<&str>) -> Result<()> {
+        let Some(value) = non_empty(value).filter(|v| !is_unambiguous_date(v)) else {
+            return Ok(());
+        };
+        match self.git.resolve_ref(&format!("{value}^{{commit}}")) {
+            Ok(_) => Err(LoreError::new(format!(
+                "{flag} takes a date, but \"{value}\" is a git ref. Pass a date such as 2026-01-31 or \"2 weeks ago\"."
+            ))),
+            Err(LoreError::Git(_)) => Ok(()),
+            Err(other) => Err(other),
+        }
+    }
+
     fn build_log_args(&self, options: &PathQueryOptions) -> Vec<String> {
         let mut args = self.build_base_log_args();
 
@@ -539,6 +579,14 @@ fn hamming_distance(a: &str, b: &str) -> usize {
 }
 
 /// `Some(s)` only when `s` is present and non-empty (JS truthiness).
+/// Whether a date-bound value can only be a date, so the ref lookup is
+/// skipped (see [`DATE_SHAPES`]).
+fn is_unambiguous_date(value: &str) -> bool {
+    DATE_SHAPES.iter().any(|shape| shape.is_match(value))
+        || value.chars().any(char::is_whitespace)
+        || value.starts_with('-')
+}
+
 fn non_empty(s: Option<&str>) -> Option<&str> {
     s.filter(|s| !s.is_empty())
 }

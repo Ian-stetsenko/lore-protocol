@@ -133,8 +133,8 @@ pub struct PathQueryArgs {
     #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub max_commits: Option<usize>,
 
-    /// Only consider commits since ref/date
-    #[arg(long, value_name = "ref")]
+    /// Only consider commits after this date
+    #[arg(long, value_name = "date")]
     pub since: Option<String>,
 }
 
@@ -174,12 +174,12 @@ pub struct SearchArgs {
     #[arg(long, value_name = "query")]
     pub text: Option<String>,
 
-    /// Only consider commits since ref/date
-    #[arg(long, value_name = "ref")]
+    /// Only consider commits after this date
+    #[arg(long, value_name = "date")]
     pub since: Option<String>,
 
-    /// Upper time/revision bound
-    #[arg(long, value_name = "ref")]
+    /// Only consider commits before this date
+    #[arg(long, value_name = "date")]
     pub until: Option<String>,
 
     /// Include superseded entries
@@ -209,8 +209,8 @@ pub struct LogArgs {
     #[arg(long = "max-commits", value_name = "n", value_parser = parse_positive_int, allow_hyphen_values = true)]
     pub max_commits: Option<usize>,
 
-    /// Only consider commits since ref/date
-    #[arg(long, value_name = "ref")]
+    /// Only consider commits after this date
+    #[arg(long, value_name = "date")]
     pub since: Option<String>,
 }
 

@@ -1055,3 +1055,20 @@ fn parity_for_the_commit_hash_on_unusual_heads() {
     assert_parity(staged_on_a_dotted_branch, cases());
     assert_parity(staged_on_a_detached_head, cases());
 }
+
+#[test]
+fn parity_for_date_bounds_that_are_git_refs() {
+    assert_parity(
+        linear_seeded,
+        both_formats(vec![
+            case(&["log", "--since", "main"]),
+            case(&["log", "--since", "HEAD~1"]),
+            case(&["search", "--until", "main"]),
+            case(&["search", "--since", "2026"]),
+            case(&["search", "--since", "2024-06-01 00:00"]),
+            case(&["context", "src", "--since", "main"]),
+            case(&["context", "src", "--scope", "auth", "--since", "main"]),
+            case(&["log", "--since", "no-such-ref-or-date"]),
+        ]),
+    );
+}

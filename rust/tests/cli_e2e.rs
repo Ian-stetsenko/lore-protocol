@@ -945,6 +945,34 @@ fn scope_query_max_commits_counts_only_commits_in_scope() {
 }
 
 #[test]
+fn since_and_until_reject_git_refs_but_accept_dates() {
+    let repo = seeded_repo();
+    repo.git(&["tag", "v1.2"]);
+
+    repo.lore()
+        .args(["log", "--since", "v1.2"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--since takes a date, but \"v1.2\" is a git ref. Pass a date such as 2026-01-31 or \"2 weeks ago\".",
+        ));
+    repo.lore()
+        .args(["search", "--until", "main"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--until takes a date, but \"main\"",
+        ));
+
+    for date in ["2026-01-01", "2 weeks ago", "yesterday"] {
+        repo.lore()
+            .args(["log", "--since", date])
+            .assert()
+            .success();
+    }
+}
+
+#[test]
 fn superseded_atoms_are_hidden_unless_all() {
     let repo = Repo::new();
     repo.commit("README.md", "chore: initial");

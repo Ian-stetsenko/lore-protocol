@@ -1443,3 +1443,121 @@ mod atom_mapping {
         assert!(!custom.has("Other"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// describe('date bounds reject git refs') (TS v0.8.1)
+// ---------------------------------------------------------------------------
+mod date_bounds {
+    use super::*;
+    use crate::test_support::GitCall;
+    use crate::util::LoreError;
+
+    const SINCE_REF: &str = "--since takes a date, but \"v1.2\" is a git ref. Pass a date such as 2026-01-31 or \"2 weeks ago\".";
+    const UNTIL_REF: &str = "--until takes a date, but \"main\" is a git ref. Pass a date such as 2026-01-31 or \"2 weeks ago\".";
+
+    fn since(value: &str) -> PathQueryOptions {
+        PathQueryOptions {
+            since: Some(value.to_owned()),
+            ..PathQueryOptions::default()
+        }
+    }
+
+    fn ref_lookups(git: &MockGitClient) -> Vec<String> {
+        git.calls()
+            .into_iter()
+            .filter_map(|call| match call {
+                GitCall::ResolveRef(reference) => Some(reference),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn assert_ref_rejected(result: Result<Vec<LoreAtom>>, message: &str, git: &MockGitClient) {
+        let err = result.expect_err("a ref is rejected");
+        assert_eq!(err.to_string(), message);
+        assert_eq!(err.exit_code(), 1);
+        assert_eq!(git.log_call_count(), 0, "git log must not run");
+    }
+
+    #[test]
+    fn find_all_rejects_a_ref_for_since_and_until() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let since = repo.find_all(&FindAllOptions {
+            since: Some("v1.2".to_owned()),
+            ..FindAllOptions::default()
+        });
+        assert_ref_rejected(since, SINCE_REF, &git);
+        let until = repo.find_all(&FindAllOptions {
+            until: Some("main".to_owned()),
+            ..FindAllOptions::default()
+        });
+        assert_ref_rejected(until, UNTIL_REF, &git);
+        assert_eq!(ref_lookups(&git), vec!["v1.2^{commit}", "main^{commit}"]);
+    }
+
+    #[test]
+    fn find_by_target_rejects_a_ref_for_since() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let result = repo.find_by_target(&["--".to_owned(), "src".to_owned()], &since("v1.2"));
+
+        assert_ref_rejected(result, SINCE_REF, &git);
+    }
+
+    #[test]
+    fn find_by_scope_rejects_a_ref_for_since() {
+        let git = MockGitClient::new();
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        assert_ref_rejected(repo.find_by_scope("auth", &since("v1.2")), SINCE_REF, &git);
+    }
+
+    #[test]
+    fn a_git_error_from_the_lookup_means_the_value_is_a_date() {
+        let git = MockGitClient::new();
+        git.set_resolve_ref(|_| Err(LoreError::git("git rev-parse failed: unknown revision")));
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        repo.find_by_target(&[], &since("yesterday"))
+            .expect("passed to git as a date");
+
+        assert_eq!(git.log_calls()[0].0[0], "--since=yesterday");
+    }
+
+    #[test]
+    fn other_lookup_errors_propagate() {
+        let git = MockGitClient::new();
+        git.set_resolve_ref(|_| Err(LoreError::new("boom")));
+        let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+        let err = repo
+            .find_by_target(&[], &since("yesterday"))
+            .expect_err("propagates");
+
+        assert_eq!(err.to_string(), "boom");
+    }
+
+    #[test]
+    fn date_shaped_values_skip_the_lookup() {
+        for value in [
+            "2026-01-31",
+            "2026-01-31T10:00:00Z",
+            "2026",
+            "1767225600",
+            "20260131",
+            "2 weeks ago",
+            "-1",
+            "",
+        ] {
+            let git = MockGitClient::new();
+            let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+            repo.find_by_target(&[], &since(value)).expect(value);
+
+            assert!(ref_lookups(&git).is_empty(), "{value:?} was looked up");
+        }
+    }
+}

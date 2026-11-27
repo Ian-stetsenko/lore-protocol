@@ -5,6 +5,11 @@ import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
 import type { CommitValidationResult, FormattableValidationResult, ValidationIssue } from '../types/output.js';
 import { LoreError } from '../util/errors.js';
+import {
+  EXIT_CODE_SUCCESS,
+  EXIT_CODE_VALIDATION_ERROR,
+  EXIT_CODE_VALIDATION_WARNINGS,
+} from '../util/constants.js';
 import { readFile } from 'node:fs/promises';
 
 interface ValidateCommandOptions {
@@ -20,6 +25,13 @@ interface ValidateCommandOptions {
  * Default: last commit (HEAD~1..HEAD).
  * Accepts a git revision range as argument, or `--from <ref>` for `<ref>..HEAD`.
  * (`--since <ref>`, a deprecated alias of `--from` since 0.7.0, was removed in 0.8.0.)
+ *
+ * Exit codes:
+ * - Range modes (positional range, `--from`, `--last`, default): 1 on errors,
+ *   2 on warnings only, 0 when clean.
+ * - Hook mode (`--commit-msg-file`): 1 on errors, 0 otherwise. Warnings are
+ *   advisory so they never block a commit; pass `--strict` to upgrade them
+ *   to errors (which `[hooks] enforce = true` does).
  */
 export function registerValidateCommand(
   program: Command,
@@ -40,9 +52,10 @@ export function registerValidateCommand(
     .action(async (range: string | undefined, options: ValidateCommandOptions) => {
       const { validator, gitClient, trailerParser, getFormatter } = deps;
 
+      const isHookMode = options.commitMsgFile !== undefined && options.commitMsgFile !== '';
       let rawCommits: readonly RawCommit[];
 
-      if (options.commitMsgFile) {
+      if (isHookMode) {
         // Hook mode: validate a commit message file before the commit exists
         const content = await readFile(options.commitMsgFile, 'utf-8');
         const trailerBlock = trailerParser.extractTrailerBlock(content);
@@ -132,11 +145,23 @@ export function registerValidateCommand(
       const formatter = getFormatter();
       console.log(formatter.formatValidationResult(validationResult));
 
-      // Exit with appropriate code
-      if (totalErrors > 0) {
-        process.exitCode = 1;
-      } else if (totalWarnings > 0) {
-        process.exitCode = 2;
+      const exitCode = resolveExitCode(totalErrors, totalWarnings, isHookMode);
+      if (exitCode !== EXIT_CODE_SUCCESS) {
+        process.exitCode = exitCode;
       }
     });
+}
+
+/**
+ * Map the (post-`--strict`) issue counts to a process exit code.
+ * Hook mode treats warnings as advisory: only errors block the commit.
+ */
+function resolveExitCode(totalErrors: number, totalWarnings: number, isHookMode: boolean): number {
+  if (totalErrors > 0) {
+    return EXIT_CODE_VALIDATION_ERROR;
+  }
+  if (totalWarnings > 0 && !isHookMode) {
+    return EXIT_CODE_VALIDATION_WARNINGS;
+  }
+  return EXIT_CODE_SUCCESS;
 }

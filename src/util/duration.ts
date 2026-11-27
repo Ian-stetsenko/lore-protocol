@@ -6,11 +6,13 @@
  * Pure module: no I/O, safe to use from commands and services alike.
  */
 
+type DurationUnit = 'd' | 'w' | 'm' | 'y';
+
 const DURATION_PATTERN = /^(\d+)(d|w|m|y)$/;
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-const DAYS_PER_UNIT: Readonly<Record<string, number>> = {
+const DAYS_PER_UNIT: Readonly<Record<DurationUnit, number>> = {
   d: 1,
   w: 7,
   m: 30,
@@ -28,5 +30,12 @@ export function parseDurationMs(duration: string): number | null {
     return null;
   }
   const [, amount, unit] = match;
+  if (!isDurationUnit(unit)) {
+    return null;
+  }
   return Number(amount) * DAYS_PER_UNIT[unit] * MS_PER_DAY;
+}
+
+function isDurationUnit(value: string): value is DurationUnit {
+  return Object.hasOwn(DAYS_PER_UNIT, value);
 }

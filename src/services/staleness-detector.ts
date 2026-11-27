@@ -3,12 +3,12 @@ import type { LoreConfig } from '../types/config.js';
 import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { StaleAtomReport, StaleReason } from '../types/output.js';
 import { LORE_ID_PATTERN, STALE_SIGNAL } from '../util/constants.js';
-import { parseDurationMs } from '../util/duration.js';
+import { MS_PER_DAY, parseDurationMs } from '../util/duration.js';
 
 type StaleThresholds = LoreConfig['stale'];
 
-/** Used when the effective olderThan is not a valid duration (config only; CLI input is validated). */
-const FALLBACK_MAX_AGE_MS = parseDurationMs('6m')!;
+/** 6 months; used when the effective olderThan is not a valid duration (config only; CLI input is validated). */
+const FALLBACK_MAX_AGE_MS = 6 * 30 * MS_PER_DAY;
 
 /**
  * Multi-signal staleness detection for Lore atoms.

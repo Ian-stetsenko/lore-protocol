@@ -325,8 +325,8 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/commands/helpers/path-query.ts`
 - **Contains**: `PathQueryDeps` interface, `PathQueryCommandOptions` interface, `executePathQuery()` function, `addPathQueryOptions()` function.
-- **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows.
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, types.
+- **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows. The target is optional: `--scope <name>` takes precedence when given, and with neither a target nor `--scope` it throws `LoreError` (exit 1, `Missing target: pass a <target> path or --scope <name>.`) before any git work.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, `errors.ts`, types.
 - **Dependents**: `context.ts`, `constraints.ts`, `rejected.ts`, `directives.ts`, `tested.ts`.
 
 #### `src/commands/init.ts`
@@ -1172,9 +1172,11 @@ import type { Command } from 'commander';
 import { executePathQuery, addPathQueryOptions, type PathQueryDeps, type PathQueryCommandOptions } from './helpers/path-query.js';
 
 export function registerRisksCommand(program: Command, deps: PathQueryDeps): void {
-  const cmd = program.command('risks <target>').description('Risk assessment for a code region');
+  // [target] is optional: --scope alone is a complete query, and executePathQuery
+  // exits 1 when neither is given.
+  const cmd = program.command('risks [target]').description('Risk assessment for a code region');
   addPathQueryOptions(cmd);
-  cmd.action(async (target: string, options: PathQueryCommandOptions) => {
+  cmd.action(async (target: string | undefined, options: PathQueryCommandOptions) => {
     await executePathQuery(target, options, deps, 'risks', ['Confidence', 'Scope-risk', 'Reversibility']);
   });
 }

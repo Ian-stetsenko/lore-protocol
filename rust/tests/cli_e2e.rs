@@ -1,0 +1,1790 @@
+//! End-to-end tests: run the built `lore` binary against throwaway git
+//! repositories and assert on exit codes, text output and JSON output.
+//!
+//! These complement the unit tests (which mock git) by exercising the real
+//! composition root, the real git CLI and the real formatters together.
+
+mod common;
+
+use std::fs;
+use std::process::Command as Proc;
+
+use assert_cmd::Command;
+use common::{atom_message, Repo, DATE_OLD};
+use predicates::prelude::*;
+use serde_json::Value;
+
+fn json(stdout: &[u8]) -> Value {
+    serde_json::from_slice(stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\n{}", String::from_utf8_lossy(stdout)))
+}
+
+// ---------------------------------------------------------------------------
+// Global behaviour
+// ---------------------------------------------------------------------------
+
+#[test]
+fn version_prints_the_bare_version() {
+    let repo = Repo::new();
+    repo.lore()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("{}\n", env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn no_subcommand_prints_help_and_exits_1() {
+    let repo = Repo::new();
+    repo.lore()
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Usage:"));
+}
+
+#[test]
+fn unknown_command_exits_1() {
+    let repo = Repo::new();
+    repo.lore().arg("frobnicate").assert().code(1);
+}
+
+#[test]
+fn help_lists_every_command() {
+    let repo = Repo::new();
+    let assert = repo.lore().arg("--help").assert().success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    for cmd in [
+        "init",
+        "context",
+        "constraints",
+        "rejected",
+        "directives",
+        "tested",
+        "why",
+        "search",
+        "log",
+        "stale",
+        "trace",
+        "commit",
+        "validate",
+        "squash",
+        "doctor",
+        "hooks",
+    ] {
+        assert!(out.contains(cmd), "help is missing `{cmd}`:\n{out}");
+    }
+}
+
+#[test]
+fn outside_a_repository_git_errors_exit_2() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let gitconfig = dir.path().join(".empty-gitconfig");
+    fs::write(&gitconfig, "").expect("write");
+    let mut cmd = Command::cargo_bin("lore").expect("lore binary built");
+    cmd.current_dir(dir.path())
+        .env("GIT_CONFIG_GLOBAL", gitconfig.display().to_string())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CEILING_DIRECTORIES", dir.path().display().to_string())
+        .arg("log")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("error: git log failed"))
+        .stderr(predicate::str::contains("(exit code 2)"));
+}
+
+#[test]
+fn errors_are_json_when_requested() {
+    let repo = Repo::new();
+    let assert = repo
+        .lore()
+        .args(["trace", "not-an-id", "--json"])
+        .assert()
+        .code(1);
+    let err = json(&assert.get_output().stderr);
+    assert_eq!(err["error"], Value::Bool(true));
+    assert_eq!(err["code"], 1);
+    assert_eq!(err["lore_version"], "1.0");
+    assert!(err["messages"][0]["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Invalid Lore-id format"));
+}
+
+#[test]
+fn invalid_positive_integers_render_through_the_formatter() {
+    let repo = Repo::new();
+    repo.lore()
+        .args(["log", "--limit", "0"])
+        .assert()
+        .code(1)
+        .stderr("error: Expected a positive integer, got \"0\"\n(exit code 1)\n");
+
+    for json_flag in [&["--json"][..], &["--format=json"]] {
+        let assert = repo
+            .lore()
+            .args(["log", "--max-commits", "abc"])
+            .args(json_flag)
+            .assert()
+            .code(1);
+        let err = json(&assert.get_output().stderr);
+        assert_eq!(err["error"], Value::Bool(true));
+        assert_eq!(
+            err["messages"][0]["message"],
+            "Expected a positive integer, got \"abc\""
+        );
+    }
+}
+
+/// A non-UTF-8 argument elsewhere on the command line must not crash the
+/// argv-based error rendering (it once panicked with exit 101).
+#[cfg(unix)]
+#[test]
+fn invalid_positive_integer_with_a_non_utf8_argument_exits_1() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let repo = Repo::new();
+    repo.lore()
+        .args(["log", "--limit", "0", "--"])
+        .arg(OsStr::from_bytes(b"src/\xff.ts"))
+        .assert()
+        .code(1)
+        .stderr("error: Expected a positive integer, got \"0\"\n(exit code 1)\n");
+}
+
+fn keys(value: &Value) -> Vec<&str> {
+    value
+        .as_object()
+        .unwrap_or_else(|| panic!("not an object: {value}"))
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
+/// Key order of every `--json` envelope, as captured from the TypeScript
+/// formatter on origin/main.
+#[test]
+fn json_output_preserves_key_order() {
+    let repo = Repo::new();
+    repo.commit_at(
+        "src/a.ts",
+        &atom_message(
+            "feat(auth): full atom",
+            &[
+                "Lore-id: aaaa1111",
+                "Ticket: T-1",
+                "Related: aaaa1111",
+                "Depends-on: aaaa1111",
+                "Supersedes: cccc0000",
+                "Not-tested: n",
+                "Tested: t",
+                "Directive: d",
+                "Reversibility: clean",
+                "Scope-risk: narrow",
+                "Confidence: low",
+                "Rejected: r | why",
+                "Constraint: c",
+            ],
+        ),
+        DATE_OLD,
+    );
+    repo.commit(
+        "src/a.ts",
+        &atom_message("fix(auth): b", &["Lore-id: bbbb2222", "Related: aaaa1111"]),
+    );
+    let run = |args: &[&str]| {
+        let output = repo.lore().args(args).output().expect("lore runs");
+        let stream = if output.stdout.is_empty() {
+            output.stderr
+        } else {
+            output.stdout
+        };
+        json(&stream)
+    };
+
+    // Query (log; the path queries share the shape).
+    let log = run(&["log", "--json"]);
+    assert_eq!(
+        keys(&log),
+        [
+            "lore_version",
+            "command",
+            "target",
+            "target_type",
+            "meta",
+            "results"
+        ]
+    );
+    assert_eq!(
+        keys(&log["meta"]),
+        ["total_atoms", "filtered_atoms", "oldest", "newest"]
+    );
+    assert_eq!(
+        keys(&log["results"][0]),
+        [
+            "lore_id",
+            "commit",
+            "date",
+            "author",
+            "intent",
+            "body",
+            "trailers",
+            "files_changed",
+            "superseded",
+            "superseded_by"
+        ]
+    );
+    assert_eq!(
+        keys(&log["results"][1]["trailers"]),
+        [
+            "lore_id",
+            "constraint",
+            "rejected",
+            "confidence",
+            "scope_risk",
+            "reversibility",
+            "directive",
+            "tested",
+            "not_tested",
+            "supersedes",
+            "depends_on",
+            "related",
+            "ticket"
+        ]
+    );
+    let context = run(&["context", "src/a.ts", "--json"]);
+    assert_eq!(keys(&context), keys(&log));
+
+    let trace = run(&["trace", "bbbb2222", "--json"]);
+    assert_eq!(keys(&trace), ["lore_version", "root", "edges"]);
+    assert_eq!(
+        keys(&trace["root"]),
+        ["lore_id", "commit", "date", "author", "intent"]
+    );
+    assert_eq!(
+        keys(&trace["edges"][0]),
+        ["from", "to", "relationship", "resolved", "target_atom"]
+    );
+
+    let validate = run(&["validate", "--last", "2", "--json"]);
+    assert_eq!(
+        keys(&validate),
+        ["lore_version", "valid", "summary", "results"]
+    );
+    assert_eq!(
+        keys(&validate["summary"]),
+        ["errors", "warnings", "commits_checked"]
+    );
+    assert_eq!(
+        keys(&validate["results"][0]),
+        ["commit", "lore_id", "valid", "issues"]
+    );
+
+    let doctor = run(&["doctor", "--json"]);
+    assert_eq!(keys(&doctor), ["lore_version", "checks", "summary"]);
+    assert_eq!(
+        keys(&doctor["checks"][0]),
+        ["name", "status", "message", "details"]
+    );
+    assert_eq!(keys(&doctor["summary"]), ["errors", "warnings", "info"]);
+
+    let stale = run(&["stale", "--json"]);
+    assert_eq!(keys(&stale), ["lore_version", "stale_atoms"]);
+    assert_eq!(
+        keys(&stale["stale_atoms"][0]),
+        ["lore_id", "commit", "date", "author", "intent", "reasons"]
+    );
+    assert_eq!(
+        keys(&stale["stale_atoms"][0]["reasons"][0]),
+        ["signal", "description"]
+    );
+
+    let error = run(&["trace", "not-an-id", "--json"]);
+    assert_eq!(keys(&error), ["lore_version", "error", "code", "messages"]);
+    assert_eq!(
+        keys(&error["messages"][0]),
+        ["severity", "field", "message"]
+    );
+
+    repo.write("src/c.ts", "c\n");
+    repo.git(&["add", "-A"]);
+    let success = run(&["commit", "--intent", "feat: c", "--json"]);
+    assert_eq!(
+        keys(&success),
+        [
+            "lore_version",
+            "success",
+            "message",
+            "hash",
+            "loreId",
+            "warnings"
+        ]
+    );
+
+    // Raw stdout, independent of the JSON parser: keys appear in order.
+    let raw = repo
+        .lore()
+        .args(["log", "--json"])
+        .output()
+        .expect("lore runs");
+    let text = String::from_utf8_lossy(&raw.stdout);
+    let positions: Vec<usize> = [
+        "\"lore_version\"",
+        "\"command\"",
+        "\"target\"",
+        "\"target_type\"",
+        "\"meta\"",
+        "\"results\"",
+    ]
+    .iter()
+    .map(|key| text.find(key).unwrap_or_else(|| panic!("{key} missing")))
+    .collect();
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+}
+
+// ---------------------------------------------------------------------------
+// init
+// ---------------------------------------------------------------------------
+
+#[test]
+fn init_creates_config_then_reports_it_exists() {
+    let repo = Repo::new();
+    repo.lore()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created .lore/config.toml with protocol version 1.0",
+        ));
+    let config = fs::read_to_string(repo.path().join(".lore/config.toml")).expect("config");
+    assert!(config.contains("[hooks]"));
+    assert!(config.contains("skip_patterns = [\"^Merge \"]"));
+
+    repo.lore()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Config already exists at .lore/config.toml",
+        ));
+}
+
+#[test]
+fn init_reports_missing_options_on_old_configs() {
+    let repo = Repo::new();
+    repo.write(".lore/config.toml", "[protocol]\nversion = \"1.0\"\n");
+    repo.lore()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("missing new options"))
+        .stdout(predicate::str::contains("[hooks] section"))
+        .stdout(predicate::str::contains("You are using default settings"));
+}
+
+#[test]
+fn init_reports_corrupted_config() {
+    let repo = Repo::new();
+    repo.write(".lore/config.toml", "[protocol\nversion = ");
+    repo.lore()
+        .arg("init")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("corrupted and cannot be parsed"));
+}
+
+// ---------------------------------------------------------------------------
+// commit
+// ---------------------------------------------------------------------------
+
+#[test]
+fn commit_with_flags_writes_trailers() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.write("src/auth.ts", "export const login = () => 1;\n");
+    repo.git(&["add", "-A"]);
+
+    let assert = repo
+        .lore()
+        .args([
+            "commit",
+            "--intent",
+            "feat(auth): add login flow",
+            "--body",
+            "Sessions beat JWT here.",
+            "--constraint",
+            "must support horizontal scaling",
+            "--rejected",
+            "JWT | leaks roles",
+            "--confidence",
+            "high",
+            "--scope-risk",
+            "wide",
+            "--tested",
+            "unit",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["success"], Value::Bool(true));
+    let lore_id = out["loreId"].as_str().expect("loreId");
+    assert_eq!(lore_id.len(), 8);
+    assert!(lore_id.bytes().all(|b| b.is_ascii_hexdigit()));
+    assert!(out["message"]
+        .as_str()
+        .unwrap_or("")
+        .starts_with("Commit created: "));
+
+    let message = repo.git(&["log", "-1", "--format=%B"]);
+    assert!(message.starts_with("feat(auth): add login flow\n\nSessions beat JWT here.\n\n"));
+    assert!(message.contains(&format!("Lore-id: {lore_id}")));
+    assert!(message.contains("Constraint: must support horizontal scaling"));
+    assert!(message.contains("Rejected: JWT | leaks roles"));
+    assert!(message.contains("Tested: unit"));
+    assert!(message.contains("Confidence: high"));
+    assert!(message.contains("Scope-risk: wide"));
+}
+
+#[test]
+fn commit_surfaces_warnings_without_blocking() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let intent = format!("feat: {}", "x".repeat(80));
+
+    repo.write("a.ts", "a\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args(["commit", "--intent", &intent])
+        .assert()
+        .success()
+        .stderr("warning: Intent exceeds 72 characters (got 86)\n");
+
+    repo.write("b.ts", "b\n");
+    repo.git(&["add", "-A"]);
+    let assert = repo
+        .lore()
+        .args(["commit", "--intent", &intent, "--json"])
+        .assert()
+        .success()
+        .stderr("");
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(
+        keys(&out),
+        [
+            "lore_version",
+            "success",
+            "message",
+            "hash",
+            "loreId",
+            "warnings"
+        ]
+    );
+    assert_eq!(out["warnings"][0]["rule"], "intent-length");
+}
+
+#[test]
+fn commit_reads_json_from_stdin() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.write("a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .arg("commit")
+        .write_stdin(
+            r#"{"intent":"fix(core): handle empty input","trailers":{"Constraint":["never panic"],"Reversibility":"clean","Ticket":"ABC-1"}}"#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Commit created: "))
+        .stdout(predicate::str::contains("| Lore-id: "));
+
+    let message = repo.git(&["log", "-1", "--format=%B"]);
+    assert!(message.contains("Constraint: never panic"));
+    assert!(message.contains("Reversibility: clean"));
+    assert!(message.contains("Ticket: ABC-1"));
+}
+
+#[test]
+fn commit_rejects_a_flat_json_schema_and_leaves_head_unchanged() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .arg("commit")
+        .write_stdin(r#"{"intent":"fix: flat","Constraint":["never panic"],"Tested":["unit"]}"#)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Unknown top-level keys in commit input JSON: \"Constraint\", \"Tested\".",
+        ));
+
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head_before);
+}
+
+#[test]
+fn commit_json_input_errors_come_back_as_an_envelope() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+
+    let assert = repo
+        .lore()
+        .args(["--json", "commit"])
+        .write_stdin(r#"{"intent":"fix: typed","trailers":["Constraint: x"]}"#)
+        .assert()
+        .code(1);
+    let err = json(&assert.get_output().stderr);
+    assert_eq!(err["error"], Value::Bool(true));
+    assert_eq!(err["code"], 1);
+    assert_eq!(
+        err["messages"][0]["message"],
+        "\"trailers\" must be an object, got array."
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head_before);
+}
+
+fn commit_count(repo: &Repo) -> String {
+    repo.git(&["rev-list", "--count", "HEAD"]).trim().to_owned()
+}
+
+#[test]
+fn commit_reference_gate_story_dangling_fails_corrected_and_escape_hatch_succeed() {
+    let repo = Repo::new();
+    repo.commit(
+        "seed.md",
+        &atom_message("feat: seed the original decision", &["Lore-id: a1b2c3d4"]),
+    );
+    assert_eq!(commit_count(&repo), "1");
+
+    // A dangling reference fails and creates nothing.
+    repo.write("change-a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "docs: cite the seed",
+            "--supersedes",
+            "deadbeef",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Supersedes references Lore-id deadbeef, which resolves on no ref.",
+        ));
+    assert_eq!(commit_count(&repo), "1");
+
+    // The corrected id resolves and the commit succeeds.
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "docs: cite the seed",
+            "--supersedes",
+            "a1b2c3d4",
+        ])
+        .assert()
+        .success();
+    assert_eq!(commit_count(&repo), "2");
+
+    // The escape hatch commits despite the dangling id.
+    repo.write("change-b.txt", "b\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "docs: bypass the gate",
+            "--supersedes",
+            "deadbeef",
+            "--no-verify-refs",
+        ])
+        .assert()
+        .success();
+    assert_eq!(commit_count(&repo), "3");
+}
+
+#[test]
+fn commit_reference_gate_on_an_unborn_head() {
+    let repo = Repo::new();
+    repo.write("first.txt", "first\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .args(["commit", "--intent", "feat: first", "--related", "deadbeef"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Related references Lore-id deadbeef, which resolves on no ref.",
+        ));
+    // Still unborn: nothing was committed.
+    let head = Proc::new("git")
+        .args(["rev-parse", "--verify", "-q", "HEAD"])
+        .current_dir(repo.path())
+        .envs(repo.env())
+        .output()
+        .expect("git runs");
+    assert!(!head.status.success());
+
+    repo.lore()
+        .args([
+            "commit",
+            "--intent",
+            "feat: first",
+            "--related",
+            "deadbeef",
+            "--no-verify-refs",
+        ])
+        .assert()
+        .success();
+    assert_eq!(commit_count(&repo), "1");
+}
+
+#[test]
+fn commit_without_staged_changes_exits_3() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.lore()
+        .args(["commit", "--intent", "feat: nothing staged"])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("No staged changes"));
+}
+
+#[test]
+fn commit_rejects_invalid_enum_values() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.write("a.txt", "a\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args(["commit", "--intent", "feat: x", "--confidence", "very"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Invalid Confidence value"));
+}
+
+#[test]
+fn commit_no_edit_requires_amend() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.lore()
+        .args(["commit", "--no-edit"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--no-edit can only be used with --amend",
+        ));
+}
+
+#[test]
+fn commit_amend_keeps_the_lore_id() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: first", &["Lore-id: aaaa1111", "Confidence: low"]),
+    );
+    repo.write("src/a.ts", "changed\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .args([
+            "commit",
+            "--amend",
+            "--intent",
+            "feat: first, reworded",
+            "--confidence",
+            "high",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Commit amended: "))
+        .stdout(predicate::str::contains("| Lore-id: aaaa1111"));
+
+    let message = repo.git(&["log", "-1", "--format=%B"]);
+    assert!(message.starts_with("feat: first, reworded"));
+    assert!(message.contains("Lore-id: aaaa1111"));
+    assert!(message.contains("Confidence: high"));
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+}
+
+#[test]
+fn commit_amend_no_edit_passes_through() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: first", &["Lore-id: aaaa1111"]),
+    );
+    repo.write("src/a.ts", "changed\n");
+    repo.git(&["add", "-A"]);
+
+    repo.lore()
+        .args(["commit", "--amend", "--no-edit", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"loreId\": \"aaaa1111\""));
+
+    repo.lore()
+        .args(["commit", "--amend", "--no-edit", "--intent", "x"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--no-edit keeps the existing message unchanged",
+        ));
+}
+
+// ---------------------------------------------------------------------------
+// log / context / constraints / rejected / directives / tested / why
+// ---------------------------------------------------------------------------
+
+fn seeded_repo() -> Repo {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial commit");
+    repo.commit(
+        "src/auth.ts",
+        &atom_message(
+            "feat(auth): add login flow",
+            &[
+                "Lore-id: aaaa1111",
+                "Constraint: sessions must be server-side",
+                "Rejected: JWT | leaks roles",
+                "Confidence: high",
+                "Directive: do not cache sessions [until:2020-01]",
+                "Tested: unit",
+                "Not-tested: redis failover",
+            ],
+        ),
+    );
+    repo.commit(
+        "src/auth.ts",
+        &atom_message(
+            "fix(auth): rotate session ids",
+            &[
+                "Lore-id: bbbb2222",
+                "Constraint: rotate on privilege change",
+                "Confidence: medium",
+                "Related: aaaa1111",
+            ],
+        ),
+    );
+    repo.commit("docs/notes.md", "docs: plain commit without lore");
+    repo
+}
+
+#[test]
+fn log_json_lists_atoms_newest_first_with_files() {
+    let repo = seeded_repo();
+    let assert = repo.lore().args(["log", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["command"], "log");
+    assert_eq!(out["target"], "all");
+    assert_eq!(out["target_type"], "global");
+    let results = out["results"].as_array().expect("results");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["lore_id"], "bbbb2222");
+    assert_eq!(results[1]["lore_id"], "aaaa1111");
+    assert_eq!(
+        results[0]["files_changed"],
+        serde_json::json!(["src/auth.ts"])
+    );
+    assert_eq!(
+        results[0]["trailers"]["related"],
+        serde_json::json!(["aaaa1111"])
+    );
+    assert_eq!(
+        results[1]["trailers"]["not_tested"],
+        serde_json::json!(["redis failover"])
+    );
+    assert_eq!(results[1]["superseded"], Value::Bool(false));
+    assert_eq!(results[1]["superseded_by"], Value::Null);
+    assert_eq!(out["meta"]["total_atoms"], 2);
+    assert_eq!(out["meta"]["filtered_atoms"], 2);
+    assert_eq!(out["meta"]["newest"], "2026-10-01T10:00:00.000Z");
+}
+
+#[test]
+fn log_accepts_paths_and_limit() {
+    let repo = seeded_repo();
+    let assert = repo
+        .lore()
+        .args(["log", "--json", "--", "docs/"])
+        .assert()
+        .success();
+    assert_eq!(
+        json(&assert.get_output().stdout)["results"],
+        serde_json::json!([])
+    );
+
+    let assert = repo
+        .lore()
+        .args(["log", "--limit", "1", "--json", "src/auth.ts"])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["results"].as_array().map(Vec::len), Some(1));
+    assert_eq!(out["meta"]["total_atoms"], 2);
+    assert_eq!(out["meta"]["filtered_atoms"], 1);
+}
+
+#[test]
+fn log_text_output_shows_headers_and_count() {
+    let repo = seeded_repo();
+    repo.lore()
+        .arg("log")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "── bbbb2222 (2026-10-01, lore@example.com) ",
+        ))
+        .stdout(predicate::str::contains(
+            "Constraint: rotate on privilege change",
+        ))
+        .stdout(predicate::str::contains("2 of 2 atoms shown"));
+}
+
+#[test]
+fn constraints_shows_only_constraints_and_context_shows_all() {
+    let repo = seeded_repo();
+    repo.lore()
+        .args(["constraints", "src/auth.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Constraint: sessions must be server-side",
+        ))
+        .stdout(predicate::str::contains("Rejected:").not());
+
+    repo.lore()
+        .args(["context", "src/auth.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Rejected: JWT | leaks roles"))
+        .stdout(predicate::str::contains("Directive: do not cache sessions"));
+
+    repo.lore()
+        .args(["rejected", "src/auth.ts", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"rejected\""))
+        .stdout(predicate::str::contains("\"constraint\"").not());
+
+    repo.lore()
+        .args(["directives", "src/"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Directive:"));
+
+    repo.lore()
+        .args(["coverage", "src/auth.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Tested: unit"))
+        .stdout(predicate::str::contains("Not-tested: redis failover"));
+}
+
+#[test]
+fn path_queries_report_nothing_for_untouched_paths() {
+    let repo = seeded_repo();
+    repo.lore()
+        .args(["context", "docs/notes.md"])
+        .assert()
+        .success()
+        .stdout("No lore atoms found.\n");
+}
+
+#[test]
+fn scope_filter_matches_conventional_commit_scope() {
+    let repo = seeded_repo();
+    let assert = repo
+        .lore()
+        .args(["context", "ignored", "--scope", "auth", "--json"])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["target"], "scope:auth");
+    assert_eq!(out["results"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn path_commands_accept_scope_without_a_target() {
+    let repo = seeded_repo();
+    for name in [
+        "context",
+        "constraints",
+        "rejected",
+        "directives",
+        "tested",
+        "coverage",
+    ] {
+        let assert = repo
+            .lore()
+            .args([name, "--scope", "auth", "--json"])
+            .assert()
+            .success();
+        assert_eq!(
+            json(&assert.get_output().stdout)["target"],
+            "scope:auth",
+            "{name}"
+        );
+    }
+
+    repo.lore()
+        .arg("constraints")
+        .assert()
+        .code(1)
+        .stderr("error: Missing target: pass a <target> path or --scope <name>.\n(exit code 1)\n");
+}
+
+#[test]
+fn scope_query_max_commits_counts_only_commits_in_scope() {
+    // The newest Lore commit is in another scope. With the scope pushed down
+    // to git, --max-commits 1 counts only in-scope commits, so the newest
+    // auth atom is still returned instead of an empty result.
+    let repo = seeded_repo();
+    repo.commit(
+        "src/billing.ts",
+        &atom_message("feat(billing): add invoices", &["Lore-id: cccc3333"]),
+    );
+
+    let assert = repo
+        .lore()
+        .args([
+            "context",
+            "ignored",
+            "--scope",
+            "auth",
+            "--max-commits",
+            "1",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    let results = out["results"].as_array().expect("results");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["lore_id"], "bbbb2222");
+}
+
+#[test]
+fn since_and_until_reject_git_refs_but_accept_dates() {
+    let repo = seeded_repo();
+    repo.git(&["tag", "v1.2"]);
+
+    repo.lore()
+        .args(["log", "--since", "v1.2"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--since takes a date, but \"v1.2\" is a git ref. Pass a date such as 2026-01-31 or \"2 weeks ago\".",
+        ));
+    repo.lore()
+        .args(["search", "--until", "main"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--until takes a date, but \"main\"",
+        ));
+
+    for date in ["2026-01-01", "2 weeks ago", "yesterday"] {
+        repo.lore()
+            .args(["log", "--since", date])
+            .assert()
+            .success();
+    }
+}
+
+#[test]
+fn superseded_atoms_are_hidden_unless_all() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: v1", &["Lore-id: aaaa1111"]),
+    );
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: v2", &["Lore-id: bbbb2222", "Supersedes: aaaa1111"]),
+    );
+
+    let assert = repo
+        .lore()
+        .args(["context", "src/a.ts", "--json"])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["results"].as_array().map(Vec::len), Some(1));
+    assert_eq!(out["results"][0]["lore_id"], "bbbb2222");
+    assert_eq!(out["meta"]["total_atoms"], 2);
+
+    let assert = repo
+        .lore()
+        .args(["context", "src/a.ts", "--all", "--json"])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["results"].as_array().map(Vec::len), Some(2));
+    assert_eq!(out["results"][1]["superseded"], Value::Bool(true));
+    assert_eq!(out["results"][1]["superseded_by"], "bbbb2222");
+
+    repo.lore()
+        .args(["context", "src/a.ts", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(superseded by bbbb2222)"));
+}
+
+#[test]
+fn follow_pulls_in_referenced_atoms() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/core.ts",
+        &atom_message("feat: core", &["Lore-id: aaaa1111"]),
+    );
+    repo.commit(
+        "src/ui.ts",
+        &atom_message("feat: ui", &["Lore-id: bbbb2222", "Depends-on: aaaa1111"]),
+    );
+
+    let assert = repo
+        .lore()
+        .args(["context", "src/ui.ts", "--follow", "--json"])
+        .assert()
+        .success();
+    let ids: Vec<String> = json(&assert.get_output().stdout)["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .map(|r| r["lore_id"].as_str().unwrap_or("").to_owned())
+        .collect();
+    assert_eq!(ids, vec!["bbbb2222", "aaaa1111"]);
+}
+
+#[test]
+fn why_resolves_blame_to_atoms() {
+    let repo = seeded_repo();
+    repo.lore()
+        .args(["why", "src/auth.ts:1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bbbb2222"));
+
+    repo.lore()
+        .args(["why", "src/auth.ts"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Target must be file:line or file:line-line format",
+        ));
+}
+
+// ---------------------------------------------------------------------------
+// search / trace
+// ---------------------------------------------------------------------------
+
+#[test]
+fn search_filters_by_enum_text_and_has() {
+    let repo = seeded_repo();
+    let assert = repo
+        .lore()
+        .args(["search", "--confidence", "high", "--json"])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["target"], "confidence=high");
+    assert_eq!(out["target_type"], "search");
+    assert_eq!(out["results"].as_array().map(Vec::len), Some(1));
+    assert_eq!(out["results"][0]["lore_id"], "aaaa1111");
+
+    let assert = repo
+        .lore()
+        .args(["search", "--text", "rotate", "--json"])
+        .assert()
+        .success();
+    assert_eq!(
+        json(&assert.get_output().stdout)["results"][0]["lore_id"],
+        "bbbb2222"
+    );
+
+    let assert = repo
+        .lore()
+        .args(["search", "--has", "Related", "--json"])
+        .assert()
+        .success();
+    assert_eq!(
+        json(&assert.get_output().stdout)["results"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+
+    let assert = repo
+        .lore()
+        .args(["search", "--author", "nobody@example.com", "--json"])
+        .assert()
+        .success();
+    assert_eq!(
+        json(&assert.get_output().stdout)["results"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn trace_follows_reference_edges() {
+    let repo = seeded_repo();
+    repo.lore()
+        .args(["trace", "bbbb2222"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "bbbb2222 fix(auth): rotate session ids",
+        ))
+        .stdout(predicate::str::contains(
+            "└── [Related] aaaa1111 feat(auth): add login flow",
+        ));
+
+    let assert = repo
+        .lore()
+        .args(["trace", "bbbb2222", "--json"])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["root"]["lore_id"], "bbbb2222");
+    assert_eq!(out["edges"][0]["relationship"], "Related");
+    assert_eq!(out["edges"][0]["resolved"], Value::Bool(true));
+    assert_eq!(out["edges"][0]["target_atom"]["lore_id"], "aaaa1111");
+
+    repo.lore()
+        .args(["trace", "cccc3333"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("not found in commit history"));
+}
+
+#[test]
+fn trace_max_depth_bounds_edge_depth_and_rejects_invalid_values() {
+    let repo = seeded_repo();
+    let edges = |depth: &str| {
+        let assert = repo
+            .lore()
+            .args(["trace", "bbbb2222", "--max-depth", depth, "--json"])
+            .assert()
+            .success();
+        json(&assert.get_output().stdout)["edges"]
+            .as_array()
+            .map(Vec::len)
+    };
+    assert_eq!(edges("0"), Some(0));
+    assert_eq!(edges("1"), Some(1));
+
+    for bad in ["x", "-1", "1.5"] {
+        repo.lore()
+            .args(["trace", "bbbb2222", "--max-depth", bad])
+            .assert()
+            .code(1)
+            .stderr(format!(
+                "error: Expected a non-negative integer, got \"{bad}\"\n(exit code 1)\n"
+            ));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// validate
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_exit_codes_follow_severity() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: valid atom", &["Lore-id: aaaa1111"]),
+    );
+    repo.lore()
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("✓ aaaa1111"))
+        .stdout(predicate::str::contains("1 commits checked, all valid"));
+
+    // Warning only: a dangling reference.
+    repo.commit(
+        "src/b.ts",
+        &atom_message(
+            "feat: dangling",
+            &["Lore-id: bbbb2222", "Related: ffff9999"],
+        ),
+    );
+    repo.lore()
+        .arg("validate")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("[reference-exists]"))
+        .stdout(predicate::str::contains("1 warnings"));
+    repo.lore().args(["validate", "--strict"]).assert().code(1);
+
+    // Error: no Lore-id.
+    repo.commit("src/c.ts", "feat: forgot the trailers");
+    let assert = repo.lore().args(["validate", "--json"]).assert().code(1);
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(out["valid"], Value::Bool(false));
+    assert_eq!(out["summary"]["errors"], 1);
+    assert_eq!(out["results"][0]["issues"][0]["rule"], "lore-id-present");
+
+    // Ranges and --last.
+    repo.lore()
+        .args(["validate", "--last", "3"])
+        .assert()
+        .code(1);
+    repo.lore()
+        .args(["validate", "HEAD~3..HEAD~2"])
+        .assert()
+        .success();
+}
+
+/// The `invalid-enum` messages `lore validate` reports for HEAD.
+fn invalid_enum_messages(repo: &Repo) -> Vec<String> {
+    let assert = repo.lore().args(["validate", "--json"]).assert();
+    let out = json(&assert.get_output().stdout);
+    out["results"][0]["issues"]
+        .as_array()
+        .expect("issues")
+        .iter()
+        .filter(|issue| issue["rule"] == "invalid-enum")
+        .map(|issue| {
+            assert_eq!(issue["severity"], "error");
+            issue["message"].as_str().expect("message").to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn validate_reports_invalid_enum_values_from_history() {
+    const CONFIDENCE: &str = "Expected one of: low, medium, high";
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+
+    repo.commit(
+        "a.ts",
+        &atom_message(
+            "fix: unknown",
+            &["Lore-id: 1111aaaa", "Confidence: very-high"],
+        ),
+    );
+    assert_eq!(
+        invalid_enum_messages(&repo),
+        vec![format!(
+            "Invalid Confidence value: \"very-high\". {CONFIDENCE}"
+        )]
+    );
+    repo.lore().arg("validate").assert().code(1);
+    // Query output is unchanged: the parsed atom has no confidence.
+    let log = repo.lore().args(["log", "--json"]).assert().success();
+    let atoms = json(&log.get_output().stdout);
+    let trailers = &atoms["results"][0]["trailers"];
+    assert_eq!(atoms["results"][0]["lore_id"], "1111aaaa");
+    assert!(trailers.is_object());
+    assert!(trailers.get("confidence").is_none());
+
+    repo.commit(
+        "b.ts",
+        &atom_message(
+            "fix: two",
+            &["Lore-id: 4444aaaa", "Confidence: High", "Scope-risk: huge"],
+        ),
+    );
+    assert_eq!(
+        invalid_enum_messages(&repo),
+        vec![
+            format!("Invalid Confidence value: \"High\". {CONFIDENCE}"),
+            "Invalid Scope-risk value: \"huge\". Expected one of: narrow, moderate, wide"
+                .to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn validate_from_matches_the_equivalent_positional_range() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.git(&["branch", "base"]);
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: first", &["Lore-id: aaaa1111"]),
+    );
+    repo.commit(
+        "src/b.ts",
+        &atom_message("feat: second", &["Lore-id: bbbb2222"]),
+    );
+
+    let from = repo
+        .lore()
+        .args(["validate", "--from", "base", "--json"])
+        .assert()
+        .success();
+    let positional = repo
+        .lore()
+        .args(["validate", "base..HEAD", "--json"])
+        .assert()
+        .success();
+    let from_out = json(&from.get_output().stdout);
+    assert_eq!(from_out["summary"]["commits_checked"], 2);
+    assert_eq!(from_out, json(&positional.get_output().stdout));
+}
+
+#[test]
+fn validate_rejects_the_removed_since_flag() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.lore()
+        .args(["validate", "--since", "HEAD"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("--since"));
+}
+
+#[test]
+fn validate_rejects_a_range_combined_with_from() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.lore()
+        .args(["validate", "HEAD~1..HEAD", "--from", "HEAD"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Conflicting range specifiers: positional range \"HEAD~1..HEAD\" and --from HEAD. Pass one or the other.",
+        ));
+}
+
+#[test]
+fn validate_commit_msg_file_mode_for_hooks() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.write(
+        "msg-ok.txt",
+        "feat: hook message\n\nLore-id: abcdef12\nConfidence: high\n",
+    );
+    repo.write("msg-bad.txt", "feat: hook message without trailers\n");
+
+    repo.lore()
+        .args(["validate", "--commit-msg-file", "msg-ok.txt"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("✓ abcdef12"));
+
+    repo.lore()
+        .args(["validate", "--commit-msg-file", "msg-bad.txt"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::starts_with("\u{2717} (pending)\n"))
+        .stdout(predicate::str::contains("Lore-id trailer is missing"));
+}
+
+#[test]
+fn validate_commit_msg_file_treats_warnings_as_advisory() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    // A dangling reference is a warning, never an error.
+    repo.write(
+        "msg-warn.txt",
+        "feat: hook message\n\nLore-id: abcdef12\nRelated: ffff9999\n",
+    );
+
+    repo.lore()
+        .args(["validate", "--commit-msg-file", "msg-warn.txt"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[reference-exists]"))
+        .stdout(predicate::str::contains("1 warnings"));
+
+    repo.lore()
+        .args(["validate", "--commit-msg-file", "msg-warn.txt", "--strict"])
+        .assert()
+        .code(1);
+}
+
+// ---------------------------------------------------------------------------
+// stale / squash / doctor
+// ---------------------------------------------------------------------------
+
+#[test]
+fn stale_reports_old_and_low_confidence_atoms() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit_at(
+        "src/old.ts",
+        &atom_message(
+            "feat: old decision",
+            &["Lore-id: aaaa1111", "Confidence: low"],
+        ),
+        DATE_OLD,
+    );
+    repo.commit(
+        "src/new.ts",
+        &atom_message(
+            "feat: fresh decision",
+            &["Lore-id: bbbb2222", "Confidence: high"],
+        ),
+    );
+
+    let assert = repo.lore().args(["stale", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    let stale = out["stale_atoms"].as_array().expect("stale_atoms");
+    assert_eq!(stale.len(), 1);
+    assert_eq!(stale[0]["lore_id"], "aaaa1111");
+    let signals: Vec<&str> = stale[0]["reasons"]
+        .as_array()
+        .expect("reasons")
+        .iter()
+        .map(|r| r["signal"].as_str().unwrap_or(""))
+        .collect();
+    assert!(signals.contains(&"age"), "{signals:?}");
+    assert!(signals.contains(&"low-confidence"), "{signals:?}");
+
+    repo.lore()
+        .args(["stale", "--low-confidence"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("STALE  aaaa1111 (2024-01-01)"))
+        .stdout(predicate::str::contains(
+            "Atom is marked as Confidence: low",
+        ));
+
+    repo.lore()
+        .args(["stale", "src/new.ts"])
+        .assert()
+        .success()
+        .stdout("No stale atoms found.\n");
+}
+
+#[test]
+fn stale_flags_override_the_config_thresholds() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit(
+        "src/a.ts",
+        &atom_message("feat: recent", &["Lore-id: aaaa1111"]),
+    );
+    // The default 6m threshold does not flag a recent atom; the flag does.
+    repo.lore()
+        .arg("stale")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No stale atoms found."));
+    repo.lore()
+        .args(["stale", "--older-than", "1d"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(threshold: 1d)"));
+
+    repo.lore()
+        .args(["stale", "--older-than", "30"])
+        .assert()
+        .code(1)
+        .stderr("error: Expected a duration like 30d, 2w, 6m or 1y, got \"30\"\n(exit code 1)\n");
+    repo.lore()
+        .args(["stale", "--drift", "-1"])
+        .assert()
+        .code(1)
+        .stderr("error: Expected a non-negative integer, got \"-1\"\n(exit code 1)\n");
+}
+
+#[test]
+fn squash_merges_atoms_in_a_range() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit("README.md", "chore: no lore here");
+    // Distinct dates: the merged intent comes from the newest atom.
+    repo.commit_at(
+        "src/a.ts",
+        &atom_message(
+            "feat: step one",
+            &[
+                "Lore-id: aaaa1111",
+                "Constraint: keep it small",
+                "Confidence: high",
+            ],
+        ),
+        "2026-09-01T10:00:00+00:00",
+    );
+    repo.commit(
+        "src/b.ts",
+        &atom_message(
+            "feat: step two",
+            &[
+                "Lore-id: bbbb2222",
+                "Constraint: no new deps",
+                "Confidence: low",
+                "Depends-on: aaaa1111",
+            ],
+        ),
+    );
+
+    let assert = repo
+        .lore()
+        .args(["squash", "HEAD~2..HEAD"])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(out.starts_with("feat: step two\n\nLore-id: "), "{out}");
+    // Array trailers are unioned in git order (newest first), as in TS.
+    assert!(
+        out.contains("Constraint: no new deps\nConstraint: keep it small\n"),
+        "{out}"
+    );
+    assert!(out.contains("Confidence: low"));
+    assert!(
+        !out.contains("Depends-on: aaaa1111"),
+        "internal refs are dropped: {out}"
+    );
+
+    repo.lore()
+        .args(["squash", "HEAD~1..HEAD", "--intent", "feat: merged"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("feat: merged\n"));
+
+    repo.lore()
+        .args(["squash", "HEAD~3..HEAD~2"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "No Lore atoms found in the specified range.",
+        ));
+}
+
+#[test]
+fn doctor_reports_checks_and_summary() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.commit("src/a.ts", &atom_message("feat: a", &["Lore-id: aaaa1111"]));
+    repo.commit(
+        "src/b.ts",
+        &atom_message("feat: b", &["Lore-id: bbbb2222", "Related: cccc3333"]),
+    );
+
+    let assert = repo.lore().args(["doctor", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    let checks = out["checks"].as_array().expect("checks");
+    let names: Vec<&str> = checks.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Config file",
+            "Lore-id uniqueness",
+            "Reference resolution (supersedes/depends-on)",
+            "Reference resolution (related)",
+            "Superseded dependencies",
+        ]
+    );
+    assert_eq!(checks[0]["status"], "warning");
+    assert_eq!(checks[1]["status"], "ok");
+    // A dangling Related is informational; the warning class stays ok.
+    assert_eq!(checks[2]["status"], "ok");
+    assert_eq!(checks[3]["status"], "info");
+    assert_eq!(out["summary"]["warnings"], 1);
+    assert_eq!(out["summary"]["info"], 1);
+    assert_eq!(out["summary"]["errors"], 0);
+
+    repo.lore().arg("init").assert().success();
+    repo.lore()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "OK  Config file: Found and parsed",
+        ))
+        .stdout(predicate::str::contains(
+            "INFO  Reference resolution (related): 1 broken related reference(s) found",
+        ));
+}
+
+fn superseded_dependencies_check(repo: &Repo) -> Value {
+    let assert = repo.lore().args(["doctor", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    out["checks"]
+        .as_array()
+        .expect("checks")
+        .iter()
+        .find(|c| c["name"] == "Superseded dependencies")
+        .cloned()
+        .expect("superseded dependencies check")
+}
+
+#[test]
+fn doctor_resolves_a_dependency_through_a_supersession_chain_to_a_live_tail() {
+    let repo = Repo::new();
+    repo.commit("a.md", &atom_message("feat: a", &["Lore-id: 22222222"]));
+    repo.commit(
+        "b.md",
+        &atom_message("feat: b", &["Lore-id: 33333333", "Supersedes: 22222222"]),
+    );
+    repo.commit(
+        "c.md",
+        &atom_message("feat: c", &["Lore-id: 44444444", "Supersedes: 33333333"]),
+    );
+    repo.commit(
+        "d.md",
+        &atom_message("feat: d", &["Lore-id: 11111111", "Depends-on: 22222222"]),
+    );
+
+    let check = superseded_dependencies_check(&repo);
+
+    assert_eq!(check["status"], "ok");
+    assert_eq!(check["message"], "No superseded dependencies found");
+}
+
+#[test]
+fn doctor_flags_a_dependency_whose_supersession_chain_cycles() {
+    let repo = Repo::new();
+    repo.commit(
+        "a.md",
+        &atom_message("feat: a", &["Lore-id: 22222222", "Supersedes: 33333333"]),
+    );
+    repo.commit(
+        "b.md",
+        &atom_message("feat: b", &["Lore-id: 33333333", "Supersedes: 22222222"]),
+    );
+    repo.commit(
+        "c.md",
+        &atom_message("feat: c", &["Lore-id: 11111111", "Depends-on: 22222222"]),
+    );
+
+    let check = superseded_dependencies_check(&repo);
+
+    assert_eq!(check["status"], "info");
+    assert_eq!(
+        check["details"],
+        serde_json::json!(["Atom 11111111 depends on 22222222, which has been superseded"])
+    );
+}
+
+#[test]
+fn doctor_accepts_a_reference_to_an_atom_that_lives_only_on_a_side_branch() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial commit");
+    // Side branch carries the referenced atom (branch-only id bbbb2222).
+    repo.git(&["checkout", "-q", "-b", "side-branch"]);
+    repo.commit(
+        "side/referenced.md",
+        &atom_message("feat: referenced atom", &["Lore-id: bbbb2222"]),
+    );
+    // Back on main: an atom referencing the side-branch-only id.
+    repo.git(&["checkout", "-q", "main"]);
+    repo.commit(
+        "docs/referencing.md",
+        &atom_message(
+            "feat: referencing atom",
+            &["Lore-id: aaaa1111", "Related: bbbb2222"],
+        ),
+    );
+
+    // Setup validity: the branch-only log scan does not see bbbb2222.
+    let log = repo.lore().args(["log", "--json"]).assert().success();
+    let logged = json(&log.get_output().stdout);
+    let ids: Vec<&str> = logged["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .filter_map(|a| a["lore_id"].as_str())
+        .collect();
+    assert_eq!(ids, ["aaaa1111"]);
+
+    let assert = repo.lore().args(["doctor", "--json"]).assert().success();
+    let out = json(&assert.get_output().stdout);
+    let checks = out["checks"].as_array().expect("checks");
+    let references = checks
+        .iter()
+        .find(|c| c["name"] == "Reference resolution (supersedes/depends-on)")
+        .expect("reference check");
+    assert_eq!(references["status"], "ok");
+    assert_eq!(
+        references["message"],
+        "All references resolve to existing atoms"
+    );
+    assert_eq!(references["details"], Value::Array(Vec::new()));
+    assert!(checks
+        .iter()
+        .all(|c| c["name"] != "Reference resolution (related)"));
+}
+
+// ---------------------------------------------------------------------------
+// hooks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hooks_install_update_and_uninstall() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let hook = repo.path().join(".git/hooks/commit-msg");
+
+    repo.lore()
+        .args(["hooks", "install"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Lore commit-msg hook installed at",
+        ));
+    let script = fs::read_to_string(&hook).expect("hook written");
+    assert!(script.starts_with("#!/usr/bin/env bash\n# LORE-MANAGED-HOOK"));
+    assert!(script.contains("lore validate --commit-msg-file \"$COMMIT_MSG_FILE\" --strict"));
+    assert!(script.contains("^Merge "));
+
+    repo.lore()
+        .args(["hooks", "install"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Lore commit-msg hook updated."));
+
+    repo.lore()
+        .args(["hooks", "uninstall"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Lore commit-msg hook removed."));
+    assert!(!hook.exists());
+
+    repo.lore()
+        .args(["hooks", "uninstall"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No commit-msg hook found. Nothing to remove.",
+        ));
+}
+
+#[test]
+fn hooks_install_refuses_foreign_hook_without_force() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    repo.write(".git/hooks/commit-msg", "#!/bin/sh\necho custom\n");
+
+    repo.lore()
+        .args(["hooks", "install"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Use --force to overwrite"));
+
+    repo.lore()
+        .args(["hooks", "install", "--force"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Existing hook backed up to"));
+    assert!(repo.path().join(".git/hooks/commit-msg.bak").exists());
+
+    repo.lore().args(["hooks", "uninstall"]).assert().success();
+    repo.write(".git/hooks/commit-msg", "#!/bin/sh\necho custom\n");
+    repo.lore()
+        .args(["hooks", "uninstall"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("was not installed by Lore"));
+}

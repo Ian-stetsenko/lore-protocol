@@ -4,7 +4,7 @@ import { parse as parseToml } from 'smol-toml';
 import type { IConfigLoader } from '../interfaces/config-loader.js';
 import type { LoreConfig } from '../types/config.js';
 import { DEFAULT_CONFIG } from '../types/config.js';
-import { CONFIG_DIR, CONFIG_FILENAME } from '../util/constants.js';
+import { CONFIG_DIR, CONFIG_FILENAME, GIT_MARKER } from '../util/constants.js';
 
 type ConfigSection = keyof LoreConfig;
 
@@ -41,7 +41,8 @@ const VALID_OUTPUT_FORMATS = new Set(['text', 'json']);
 
 /**
  * Loads and merges .lore/config.toml files.
- * Walks up the directory tree for monorepo support.
+ * Walks up the directory tree for monorepo support, stopping at the git
+ * work-tree root (the nearest ancestor holding a `.git` entry).
  *
  * GRASP: Pure Fabrication -- filesystem access abstracted from domain.
  * SOLID: OCP -- adding a new config section requires only a DEFAULT_CONFIG entry
@@ -76,27 +77,44 @@ export class ConfigLoader implements IConfigLoader {
   }
 
   /**
-   * Walk up directories collecting .lore/config.toml paths.
+   * Collect .lore/config.toml paths within the discovery boundary.
    * Returns nearest-first order. Stops after first match when stopAtFirst is true.
    */
   private async walkConfigPaths(startPath: string, stopAtFirst = false): Promise<string[]> {
     const paths: string[] = [];
-    let dir = await this.resolveStartDir(startPath);
-    const root = parsePath(dir).root;
 
-    while (true) {
+    for (const dir of await this.collectSearchDirs(startPath)) {
       const configPath = join(dir, CONFIG_DIR, CONFIG_FILENAME);
       if (await this.fileExists(configPath)) {
         paths.push(configPath);
-        if (stopAtFirst) return paths;
+        if (stopAtFirst) break;
       }
-
-      const parentDir = dirname(dir);
-      if (parentDir === dir || dir === root) break;
-      dir = parentDir;
     }
 
     return paths;
+  }
+
+  /**
+   * Directories searched for config, nearest-first: the start directory up
+   * to and including the nearest ancestor holding a `.git` entry. The entry
+   * may be a directory or a file, so worktrees and submodules bound the walk
+   * at their own root. With no `.git` anywhere above, only the start
+   * directory is searched -- config from unrelated ancestors (e.g. a home
+   * directory) never leaks into a non-repo invocation.
+   */
+  private async collectSearchDirs(startPath: string): Promise<string[]> {
+    const startDir = await this.resolveStartDir(startPath);
+    const dirs: string[] = [];
+    let dir = startDir;
+
+    while (true) {
+      dirs.push(dir);
+      if (await this.fileExists(join(dir, GIT_MARKER))) return dirs;
+
+      const parentDir = dirname(dir);
+      if (parentDir === dir) return [startDir];
+      dir = parentDir;
+    }
   }
 
   /**

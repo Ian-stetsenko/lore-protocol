@@ -47,6 +47,8 @@ export const DEFAULT_STALE_DRIFT_THRESHOLD = 20;
 
 export const CONFIG_FILENAME = 'config.toml';
 export const CONFIG_DIR = '.lore';
+/** Work-tree root marker that bounds config discovery (directory or file). */
+export const GIT_MARKER = '.git';
 
 export const STALE_SIGNAL = {
   AGE: 'age',

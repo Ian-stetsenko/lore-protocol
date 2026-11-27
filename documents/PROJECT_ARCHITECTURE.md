@@ -241,7 +241,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/services/config-loader.ts`
 - **Contains**: `ConfigLoader` class.
-- **Single Responsibility**: Loads `.lore/config.toml` files, walks up the directory tree for monorepo support, merges multiple config files (child overrides parent), and fills in defaults.
+- **Single Responsibility**: Loads `.lore/config.toml` files, walks up the directory tree for monorepo support, merges multiple config files (child overrides parent, per section), and fills in defaults. Discovery is bounded by the git work-tree root: the walk includes the nearest ancestor containing a `.git` entry (directory or file, so linked worktrees and submodules stop at their own root) and goes no further. With no `.git` anywhere above the start path, only `<start>/.lore/config.toml` is read. The same boundary applies to `loadForPath()` and `findConfigPath()`; it is detected from the `.git` marker on disk, not by running git.
 - **Dependencies**: `IConfigLoader`, `LoreConfig`, `constants.ts`, Node.js `fs`, `path`, `smol-toml`.
 - **Dependents**: `main.ts`, `doctor.ts`.
 - **Key methods**: `loadForPath()`, `loadFromFile()`, `findConfigPath()`.
@@ -835,7 +835,7 @@ CONFIG_FILENAME = 'config.toml'  (src/util/constants.ts, line 48)
 
 ### Monorepo Merging
 
-`ConfigLoader.loadForPath()` (line 28) walks **up the directory tree** from the target path to the filesystem root, collecting all `.lore/config.toml` files found along the way.
+`ConfigLoader.loadForPath()` walks **up the directory tree** from the target path to the git work-tree root, collecting all `.lore/config.toml` files found along the way. The walk includes the nearest ancestor that contains a `.git` entry (a directory, or a file in linked worktrees and submodules) and stops there; config files above the repository root are never merged. If no `.git` exists anywhere above the target, only the target directory's own `.lore/config.toml` is read. `findConfigPath()` uses the same boundary.
 
 Multiple config files are merged with **child overrides parent**. The files are ordered nearest-to-farthest, reversed, and merged parent-first so the nearest config wins.
 

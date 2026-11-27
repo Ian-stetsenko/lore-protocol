@@ -29,6 +29,19 @@ describe('ConfigLoader', () => {
     return configPath;
   }
 
+  /**
+   * Mark a directory as a git work-tree root: a `.git` directory, or a
+   * `.git` file as in linked worktrees and submodules.
+   */
+  async function markRepoRoot(dir: string, kind: 'dir' | 'file' = 'dir'): Promise<void> {
+    await mkdir(dir, { recursive: true });
+    if (kind === 'dir') {
+      await mkdir(join(dir, '.git'), { recursive: true });
+    } else {
+      await writeFile(join(dir, '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n', 'utf-8');
+    }
+  }
+
   describe('loadFromFile', () => {
     it('should parse a valid TOML config file', async () => {
       const configPath = await createConfigFile(tempDir, `
@@ -182,6 +195,7 @@ defaultFormat = "invalid"
     });
 
     it('should find config in a parent directory', async () => {
+      await markRepoRoot(tempDir);
       await createConfigFile(tempDir, '[protocol]\nversion = "1.0"');
 
       const childDir = join(tempDir, 'subdir', 'nested');
@@ -199,6 +213,7 @@ defaultFormat = "invalid"
     });
 
     it('should find the nearest config when multiple exist', async () => {
+      await markRepoRoot(tempDir);
       // Parent config
       await createConfigFile(tempDir, '[protocol]\nversion = "parent"');
 
@@ -209,6 +224,40 @@ defaultFormat = "invalid"
       const result = await loader.findConfigPath(childDir);
 
       expect(result).toBe(join(childDir, '.lore', 'config.toml'));
+    });
+
+    it('should ignore a config above the git work-tree root', async () => {
+      await createConfigFile(tempDir, '[protocol]\nversion = "outside"');
+      const repoDir = join(tempDir, 'repo');
+      await markRepoRoot(repoDir);
+      const childDir = join(repoDir, 'src');
+      await mkdir(childDir, { recursive: true });
+
+      const result = await loader.findConfigPath(childDir);
+
+      expect(result).toBeNull();
+    });
+
+    it('should treat a .git file (worktree or submodule) as the boundary', async () => {
+      await createConfigFile(tempDir, '[protocol]\nversion = "superproject"');
+      const submoduleDir = join(tempDir, 'vendor', 'lib');
+      await markRepoRoot(submoduleDir, 'file');
+      await createConfigFile(submoduleDir, '[protocol]\nversion = "submodule"');
+      const childDir = join(submoduleDir, 'src');
+      await mkdir(childDir, { recursive: true });
+
+      const result = await loader.findConfigPath(childDir);
+
+      expect(result).toBe(join(submoduleDir, '.lore', 'config.toml'));
+    });
+
+    it('should search only the start directory when no .git exists above it', async () => {
+      await createConfigFile(tempDir, '[protocol]\nversion = "parent"');
+      const childDir = join(tempDir, 'nested');
+      await mkdir(childDir, { recursive: true });
+
+      expect(await loader.findConfigPath(childDir)).toBeNull();
+      expect(await loader.findConfigPath(tempDir)).toBe(join(tempDir, '.lore', 'config.toml'));
     });
   });
 
@@ -235,6 +284,7 @@ olderThan = "1y"
     });
 
     it('should merge child config over parent config', async () => {
+      await markRepoRoot(tempDir);
       // Parent config: sets protocol and stale
       await createConfigFile(tempDir, `
 [protocol]
@@ -263,6 +313,7 @@ driftThreshold = 10
     });
 
     it('should handle three-level config hierarchy', async () => {
+      await markRepoRoot(tempDir);
       // Grandparent: protocol
       await createConfigFile(tempDir, `
 [protocol]
@@ -303,6 +354,7 @@ driftThreshold = 5
     });
 
     it('should use shallow merge at section level', async () => {
+      await markRepoRoot(tempDir);
       // Parent: full trailers section
       await createConfigFile(tempDir, `
 [trailers]
@@ -326,6 +378,7 @@ custom = []
     });
 
     it('should handle subdirectory that is deeper than config', async () => {
+      await markRepoRoot(tempDir);
       await createConfigFile(tempDir, `
 [protocol]
 version = "1.5"
@@ -337,6 +390,67 @@ version = "1.5"
       const config = await loader.loadForPath(deepDir);
 
       expect(config.protocol.version).toBe('1.5');
+    });
+
+    it('should not merge config from above the git work-tree root', async () => {
+      await createConfigFile(tempDir, `
+[protocol]
+version = "outside"
+
+[validation]
+strict = true
+`);
+      const repoDir = join(tempDir, 'repo');
+      await markRepoRoot(repoDir);
+      await createConfigFile(repoDir, `
+[stale]
+olderThan = "30d"
+`);
+      const childDir = join(repoDir, 'packages', 'app');
+      await mkdir(childDir, { recursive: true });
+
+      const config = await loader.loadForPath(childDir);
+
+      expect(config.stale.olderThan).toBe('30d');
+      expect(config.protocol).toEqual(DEFAULT_CONFIG.protocol);
+      expect(config.validation).toEqual(DEFAULT_CONFIG.validation);
+    });
+
+    it('should stop at a .git file and merge only configs inside it', async () => {
+      await createConfigFile(tempDir, '[protocol]\nversion = "superproject"');
+      const worktreeDir = join(tempDir, 'wt');
+      await markRepoRoot(worktreeDir, 'file');
+      await createConfigFile(worktreeDir, '[stale]\nolderThan = "7d"');
+      const childDir = join(worktreeDir, 'src');
+      await createConfigFile(childDir, '[stale]\ndriftThreshold = 3');
+
+      const config = await loader.loadForPath(childDir);
+
+      expect(config.stale.driftThreshold).toBe(3);
+      expect(config.protocol).toEqual(DEFAULT_CONFIG.protocol);
+    });
+
+    it('should read only the start directory config when no .git exists', async () => {
+      await createConfigFile(tempDir, '[protocol]\nversion = "parent"');
+      const childDir = join(tempDir, 'nested');
+      await createConfigFile(childDir, '[stale]\nolderThan = "7d"');
+
+      const config = await loader.loadForPath(childDir);
+
+      expect(config.stale.olderThan).toBe('7d');
+      expect(config.protocol).toEqual(DEFAULT_CONFIG.protocol);
+    });
+
+    it('should resolve a file start path to its directory before bounding', async () => {
+      await markRepoRoot(tempDir);
+      await createConfigFile(tempDir, '[protocol]\nversion = "repo"');
+      const filePath = join(tempDir, 'src', 'index.ts');
+      await mkdir(join(tempDir, 'src'), { recursive: true });
+      await writeFile(filePath, '', 'utf-8');
+
+      const config = await loader.loadForPath(filePath);
+
+      expect(config.protocol.version).toBe('repo');
     });
   });
 });

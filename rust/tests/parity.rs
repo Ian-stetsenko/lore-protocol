@@ -851,10 +851,11 @@ fn parity_for_errors_and_usage() {
         case(&["log", "--limit", "0", "--format", "json"]),
         case(&["log", "--limit", "0", "--format=json"]),
     ]);
+    // Both binaries report the same release.
+    cases.push(case(&["--version"]));
     cases.extend(
         [
-            &["--version"][..],
-            &["--help"],
+            &["--help"][..],
             &[],
             &["no-such-command"],
             &["validate", "--since", "HEAD"],

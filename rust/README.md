@@ -1,9 +1,9 @@
 # Lore CLI (Rust)
 
 Native implementation of the [Lore CLI](../README.md). It is a parity port of
-the TypeScript implementation in `../src`: same commands, same flags, same
-text and JSON output, same exit codes, same `.lore/config.toml`, same hook
-script. The protocol is unchanged; only the runtime is.
+the TypeScript implementation in `../src`, at parity with TS v0.8.1: same
+commands, same flags, same text and JSON output, same exit codes, same
+`.lore/config.toml`, same hook script. The protocol is unchanged; only the runtime is.
 
 ## Why a native binary
 

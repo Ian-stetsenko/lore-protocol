@@ -390,6 +390,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/validate.ts`
 - **Contains**: `registerValidateCommand()` function.
 - **Single Responsibility**: Validates commits for Lore protocol compliance. Supports revision range, `--from`, `--last`, and `--strict` modes (the deprecated `--since` alias of `--from` was removed in 0.8.0).
+- **Exit codes**: range modes exit 1 on errors, 2 on warnings only, 0 when clean. Hook mode (`--commit-msg-file`) exits 1 on errors and 0 otherwise, so warnings are advisory; `--strict` (added by `[hooks] enforce = true`) upgrades them to blocking errors.
 - **Dependencies**: `Validator`, `IGitClient`, `IOutputFormatter`, types.
 
 #### `src/commands/squash.ts`

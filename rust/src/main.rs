@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use clap::error::ErrorKind;
 use clap::Parser;
 
-use lore::cli::{Cli, Command};
+use lore::cli::{Cli, Command, InvalidPositiveInt};
 use lore::commands::helpers::path_query::PathQueryDeps;
 use lore::commands::path_queries::PathQueryKind;
 use lore::commands::{self, Io};
@@ -63,8 +63,12 @@ fn run() -> i32 {
 }
 
 /// Commander parity: `--help`/`--version` exit 0 (bare version string);
-/// every usage error exits 1.
+/// every usage error exits 1. An invalid positive integer is not a usage
+/// error in TS: it renders through the output formatter.
 fn handle_parse_error(err: clap::Error) -> i32 {
+    if let Some(invalid) = invalid_positive_int(&err) {
+        return report_argv_error(&invalid.to_string());
+    }
     match err.kind() {
         ErrorKind::DisplayVersion => {
             println!("{}", env!("CARGO_PKG_VERSION"));
@@ -257,24 +261,49 @@ fn dispatch(cli: &Cli, io_streams: &mut Io<'_>) -> lore::util::Result<i32> {
 }
 
 fn make_formatter(cli: &Cli, stdout_is_tty: bool) -> Box<dyn OutputFormatter> {
-    if cli.wants_json() {
+    select_formatter(cli.wants_json(), cli.no_color, stdout_is_tty)
+}
+
+/// JSON when requested; otherwise text, coloured only on a terminal and
+/// when neither `--no-color` nor `NO_COLOR` asks for plain output.
+fn select_formatter(is_json: bool, no_color: bool, is_tty: bool) -> Box<dyn OutputFormatter> {
+    if is_json {
         Box::new(JsonFormatter::new())
     } else {
-        let color = !cli.no_color && stdout_is_tty && std::env::var_os("NO_COLOR").is_none();
+        let color = !no_color && is_tty && std::env::var_os("NO_COLOR").is_none();
         Box::new(TextFormatter::new(color))
     }
+}
+
+fn invalid_positive_int(err: &clap::Error) -> Option<&InvalidPositiveInt> {
+    use std::error::Error as _;
+    if err.kind() != ErrorKind::ValueValidation {
+        return None;
+    }
+    err.source()?.downcast_ref::<InvalidPositiveInt>()
+}
+
+/// Render an error raised before the options parsed, choosing JSON exactly
+/// as TS's top-level handler does: a literal `--json` or `--format=json`.
+/// Reads the raw OS arguments: a non-UTF-8 argument must not panic.
+fn report_argv_error(message: &str) -> i32 {
+    let has_arg = |flag: &str| std::env::args_os().any(|arg| arg == flag);
+    let formatter = select_formatter(
+        has_arg("--json") || has_arg("--format=json"),
+        has_arg("--no-color"),
+        io::stderr().is_terminal(),
+    );
+    eprintln!(
+        "{}",
+        formatter.format_error(1, &[ErrorMessage::error(message)])
+    );
+    1
 }
 
 /// Render a failure through the formatter implied by the parsed options and
 /// return its exit code.
 fn report_error(cli: &Cli, err: &LoreError) -> i32 {
-    let formatter: Box<dyn OutputFormatter> = if cli.wants_json() {
-        Box::new(JsonFormatter::new())
-    } else {
-        let color =
-            !cli.no_color && io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-        Box::new(TextFormatter::new(color))
-    };
+    let formatter = select_formatter(cli.wants_json(), cli.no_color, io::stderr().is_terminal());
 
     let messages: Vec<ErrorMessage> = match err {
         LoreError::Validation { issues, .. } => issues

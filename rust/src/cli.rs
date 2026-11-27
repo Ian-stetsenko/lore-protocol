@@ -98,10 +98,26 @@ pub enum Command {
     Hooks(HooksArgs),
 }
 
+/// A `--limit` / `--max-commits` value that is not a strict positive integer.
+///
+/// Typed so the entry point can tell it from clap's own usage errors: TS's
+/// parser threw a plain `Error` that its top-level handler rendered through
+/// the output formatter (a JSON envelope under `--json`), not usage text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidPositiveInt(String);
+
+impl std::fmt::Display for InvalidPositiveInt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Expected a positive integer, got \"{}\"", self.0)
+    }
+}
+
+impl std::error::Error for InvalidPositiveInt {}
+
 /// Parse a CLI value as a strict positive integer; rejects non-numeric
 /// trailing characters and zero.
-pub fn parse_positive_int(value: &str) -> Result<usize, String> {
-    let err = || format!("Expected a positive integer, got \"{value}\"");
+pub fn parse_positive_int(value: &str) -> Result<usize, InvalidPositiveInt> {
+    let err = || InvalidPositiveInt(value.to_owned());
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
         return Err(err());
     }
@@ -482,7 +498,7 @@ mod tests {
         assert!(parse_positive_int("-1").is_err());
         assert!(parse_positive_int("").is_err());
         assert_eq!(
-            parse_positive_int("abc").unwrap_err(),
+            parse_positive_int("abc").unwrap_err().to_string(),
             "Expected a positive integer, got \"abc\""
         );
         assert!(Cli::try_parse_from(["lore", "log", "--limit", "0"]).is_err());

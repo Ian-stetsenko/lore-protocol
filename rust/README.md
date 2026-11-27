@@ -39,7 +39,31 @@ cargo test                     # unit tests + git integration tests
 Unit tests mirror the TypeScript suite case-for-case and live next to each
 module in `src/<module>/tests.rs`. Integration tests under `tests/` drive the
 real `git` binary against throwaway repositories and run the built `lore`
-executable end to end.
+executable end to end. Their hermetic git fixtures live in `tests/common`.
+
+### Differential parity
+
+`tests/parity.rs` runs this binary and the TypeScript CLI on identical
+repositories (fixed identities and dates, so both get the same commit hashes)
+and compares exit codes, stdout and stderr byte for byte, then the state each
+CLI left behind: every commit message, `git status --porcelain`,
+`.lore/config.toml` and the commit-msg hook. It covers all 16
+commands in text and `--json` modes. It is skipped unless `LORE_TS_CLI`
+points at a built TypeScript CLI:
+
+```sh
+npm ci && npm run build        # in the repository root
+cd rust
+LORE_TS_CLI="$PWD/../dist/main.js" cargo test --test parity
+```
+
+The `parity` job in `.github/workflows/rust.yml` runs it on every change to
+either implementation. It is advisory (`continue-on-error`) until the Rust
+binary replaces the TypeScript CLI; see the Rust Parity section of
+`CONTRIBUTING.md`. Normalised before comparing: Lore-ids and commit hashes
+that a case generated (anything already in the fixture history, such as the
+Lore-id an amend must keep, is compared exactly), the repository path, the
+JSON parse-error suffix, and clap's usage and help text (exit code only).
 
 ## Layout
 
@@ -77,6 +101,16 @@ Where the two implementations differ it is deliberate and listed here.
 - **Usage errors.** Unknown flags and missing arguments exit with code 1, as
   Commander did, and `--help` and `--version` exit 0. The usage and help text
   itself is clap's, not Commander's, so only the exit codes are identical.
+  An invalid `--limit` / `--max-commits` value is not a usage error in
+  either CLI: it renders through the output formatter (a JSON envelope when
+  the arguments contain `--json` or `--format=json`), as in TS.
+- **Non-numeric counts.** `validate --last`, `trace --max-depth` and
+  `stale --drift` reject a non-numeric value with exit 1. TS 0.8.0 parses
+  these with a bare `parseInt`, so `--last abc` silently becomes `NaN`, falls
+  back to the default and exits 0, and `--last 3x` means 3. `trace
+  --max-depth` moves to exact parity with the 0.8.1 port: TS #90 parses it
+  with `parseNonNegativeInt`, which accepts 0 and renders its error through
+  the formatter, so Rust needs the same typed-error treatment as `--limit`.
 - **Config arrays.** Array options in `.lore/config.toml` (for example
   `trailers.required`) keep only their string elements. The TypeScript loader
   kept the array as-is, untyped, so a non-string element reached the code that

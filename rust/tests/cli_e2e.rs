@@ -4,111 +4,19 @@
 //! These complement the unit tests (which mock git) by exercising the real
 //! composition root, the real git CLI and the real formatters together.
 
+mod common;
+
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command as Proc;
 
 use assert_cmd::Command;
+use common::{atom_message, Repo, DATE_OLD};
 use predicates::prelude::*;
 use serde_json::Value;
-use tempfile::TempDir;
-
-const DATE_RECENT: &str = "2026-10-01T10:00:00+00:00";
-const DATE_OLD: &str = "2024-01-01T10:00:00+00:00";
-
-struct Repo {
-    dir: TempDir,
-    gitconfig: PathBuf,
-}
-
-impl Repo {
-    fn new() -> Repo {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let gitconfig = dir.path().join(".empty-gitconfig");
-        fs::write(&gitconfig, "").expect("write gitconfig");
-        let repo = Repo { dir, gitconfig };
-        repo.git(&["init", "-q"]);
-        repo.git(&["symbolic-ref", "HEAD", "refs/heads/main"]);
-        repo
-    }
-
-    fn path(&self) -> &Path {
-        self.dir.path()
-    }
-
-    fn env(&self) -> Vec<(&'static str, String)> {
-        vec![
-            ("GIT_CONFIG_GLOBAL", self.gitconfig.display().to_string()),
-            ("GIT_CONFIG_NOSYSTEM", "1".into()),
-            ("GIT_AUTHOR_NAME", "Lore Test".into()),
-            ("GIT_AUTHOR_EMAIL", "lore@example.com".into()),
-            ("GIT_COMMITTER_NAME", "Lore Test".into()),
-            ("GIT_COMMITTER_EMAIL", "lore@example.com".into()),
-            ("LORE_NO_UPDATE_CHECK", "1".into()),
-        ]
-    }
-
-    fn git(&self, args: &[&str]) -> String {
-        self.git_at(args, DATE_RECENT)
-    }
-
-    fn git_at(&self, args: &[&str], date: &str) -> String {
-        let output = Proc::new("git")
-            .args(args)
-            .current_dir(self.path())
-            .envs(self.env())
-            .env("GIT_AUTHOR_DATE", date)
-            .env("GIT_COMMITTER_DATE", date)
-            .output()
-            .expect("git runs");
-        assert!(
-            output.status.success(),
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    }
-
-    fn write(&self, rel: &str, content: &str) {
-        let full = self.path().join(rel);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).expect("mkdir");
-        }
-        fs::write(full, content).expect("write file");
-    }
-
-    /// Write `file`, stage everything and commit with `message` (which may
-    /// contain a trailer block). Returns the new HEAD hash.
-    fn commit(&self, file: &str, message: &str) -> String {
-        self.commit_at(file, message, DATE_RECENT)
-    }
-
-    fn commit_at(&self, file: &str, message: &str, date: &str) -> String {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        self.write(file, &format!("{message}\n{stamp}\n"));
-        self.git_at(&["add", "-A"], date);
-        self.git_at(&["commit", "-q", "-m", message], date);
-        self.git_at(&["rev-parse", "HEAD"], date).trim().to_owned()
-    }
-
-    fn lore(&self) -> Command {
-        let mut cmd = Command::cargo_bin("lore").expect("lore binary built");
-        cmd.current_dir(self.path()).envs(self.env());
-        cmd
-    }
-}
 
 fn json(stdout: &[u8]) -> Value {
     serde_json::from_slice(stdout)
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\n{}", String::from_utf8_lossy(stdout)))
-}
-
-fn atom_message(subject: &str, trailers: &[&str]) -> String {
-    format!("{subject}\n\n{}", trailers.join("\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +108,48 @@ fn errors_are_json_when_requested() {
         .as_str()
         .unwrap_or("")
         .contains("Invalid Lore-id format"));
+}
+
+#[test]
+fn invalid_positive_integers_render_through_the_formatter() {
+    let repo = Repo::new();
+    repo.lore()
+        .args(["log", "--limit", "0"])
+        .assert()
+        .code(1)
+        .stderr("error: Expected a positive integer, got \"0\"\n(exit code 1)\n");
+
+    for json_flag in [&["--json"][..], &["--format=json"]] {
+        let assert = repo
+            .lore()
+            .args(["log", "--max-commits", "abc"])
+            .args(json_flag)
+            .assert()
+            .code(1);
+        let err = json(&assert.get_output().stderr);
+        assert_eq!(err["error"], Value::Bool(true));
+        assert_eq!(
+            err["messages"][0]["message"],
+            "Expected a positive integer, got \"abc\""
+        );
+    }
+}
+
+/// A non-UTF-8 argument elsewhere on the command line must not crash the
+/// argv-based error rendering (it once panicked with exit 101).
+#[cfg(unix)]
+#[test]
+fn invalid_positive_integer_with_a_non_utf8_argument_exits_1() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let repo = Repo::new();
+    repo.lore()
+        .args(["log", "--limit", "0", "--"])
+        .arg(OsStr::from_bytes(b"src/\xff.ts"))
+        .assert()
+        .code(1)
+        .stderr("error: Expected a positive integer, got \"0\"\n(exit code 1)\n");
 }
 
 fn keys(value: &Value) -> Vec<&str> {

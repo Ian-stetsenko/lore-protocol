@@ -7,131 +7,68 @@
 //! report the cross-ref duplicate. A Lore-id that exists only on a side
 //! branch must still resolve via the `--all` fallback.
 
-use std::fs;
-use std::path::Path;
-use std::process::Command as Proc;
+mod common;
 
-use assert_cmd::Command;
+use common::Repo;
 use lore::services::atom_repository::AtomRepository;
 use lore::services::git_client::ProcessGitClient;
 use lore::services::trailer_parser::TrailerParser;
 use serde_json::Value;
-use tempfile::TempDir;
 
 /// Fixed past date for every commit unless overridden per commit.
 const PAST_DATE: &str = "2024-06-01T00:00:00Z";
 const FUTURE_DATE: &str = "2030-01-01T00:00:00Z";
 
 struct Fixture {
-    root: TempDir,
+    repo: Repo,
     legit: String,
     side: String,
 }
 
-/// Isolates git from the developer's global config (signing, hooks, templates).
-fn git_env(root: &Path) -> Vec<(&'static str, String)> {
-    let empty_config = root.join(".empty-gitconfig");
-    if !empty_config.exists() {
-        fs::write(&empty_config, "").expect("write config");
-    }
-    vec![
-        ("GIT_CONFIG_GLOBAL", empty_config.display().to_string()),
-        ("GIT_CONFIG_NOSYSTEM", "1".to_owned()),
-        ("GIT_AUTHOR_NAME", "Lore Test".to_owned()),
-        ("GIT_AUTHOR_EMAIL", "lore@example.com".to_owned()),
-        ("GIT_COMMITTER_NAME", "Lore Test".to_owned()),
-        ("GIT_COMMITTER_EMAIL", "lore@example.com".to_owned()),
-        ("LORE_NO_UPDATE_CHECK", "1".to_owned()),
-    ]
-}
-
-fn git(root: &Path, args: &[&str], date: &str) -> String {
-    let output = Proc::new("git")
-        .args(args)
-        .current_dir(root)
-        .envs(git_env(root))
-        .env("GIT_AUTHOR_DATE", date)
-        .env("GIT_COMMITTER_DATE", date)
-        .output()
-        .expect("git runs");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn init_repo(root: &Path) {
-    git(root, &["init", "-q"], PAST_DATE);
-    git(
-        root,
-        &["symbolic-ref", "HEAD", "refs/heads/main"],
-        PAST_DATE,
-    );
-}
-
-fn commit(root: &Path, file: &str, message: &str, date: &str) -> String {
-    let full = root.join(file);
-    if let Some(parent) = full.parent() {
-        fs::create_dir_all(parent).expect("mkdir");
-    }
-    fs::write(&full, format!("{message}\n")).expect("write");
-    git(root, &["add", "-A"], date);
-    git(root, &["commit", "-q", "-m", message], date);
-    git(root, &["rev-parse", "HEAD"], date).trim().to_owned()
-}
-
 impl Fixture {
     fn new() -> Fixture {
-        let root = tempfile::tempdir().expect("tempdir");
-        let path = root.path();
-        init_repo(path);
+        let repo = Repo::new();
 
         // Non-Lore base commit on main.
-        commit(path, "README.md", "chore: initial commit", PAST_DATE);
+        repo.commit_at("README.md", "chore: initial commit", PAST_DATE);
 
         // Side branch carries a future-dated poison atom sharing the Lore-id.
-        git(path, &["checkout", "-q", "-b", "poison-branch"], PAST_DATE);
-        commit(
-            path,
+        repo.git(&["checkout", "-q", "-b", "poison-branch"]);
+        repo.commit_at(
             "poison/decision.md",
             "feat: poison atom\n\nLore-id: deadbeef\nConfidence: high",
             FUTURE_DATE,
         );
 
         // Back on main: the legitimate atom with the same Lore-id, older date.
-        git(path, &["checkout", "-q", "main"], PAST_DATE);
-        let legit = commit(
-            path,
+        repo.git(&["checkout", "-q", "main"]);
+        let legit = repo.commit_at(
             "docs/decision.md",
             "feat: legit atom\n\nLore-id: deadbeef\nConfidence: high",
             PAST_DATE,
         );
 
         // Another side branch with a Lore-id that only exists off main.
-        git(path, &["checkout", "-q", "-b", "side-branch"], PAST_DATE);
-        let side = commit(
-            path,
+        repo.git(&["checkout", "-q", "-b", "side-branch"]);
+        let side = repo.commit_at(
             "side/decision.md",
             "feat: side atom\n\nLore-id: cafe1234\nConfidence: high",
             PAST_DATE,
         );
 
         // Final state: on main, both side branches ahead of it.
-        git(path, &["checkout", "-q", "main"], PAST_DATE);
-        Fixture { root, legit, side }
+        repo.git(&["checkout", "-q", "main"]);
+        Fixture { repo, legit, side }
     }
 
     fn client(&self) -> ProcessGitClient {
-        ProcessGitClient::new(Some(self.root.path().to_path_buf()))
+        ProcessGitClient::new(Some(self.repo.path().to_path_buf()))
     }
 
     fn lore_json(&self, args: &[&str]) -> Value {
-        let output = Command::cargo_bin("lore")
-            .expect("lore binary built")
-            .current_dir(self.root.path())
-            .envs(git_env(self.root.path()))
+        let output = self
+            .repo
+            .lore()
             .args(args)
             .arg("--json")
             .output()
@@ -227,8 +164,7 @@ fn indexes_head_reachable_and_side_branch_only_ids_head_winning_shared_ones() {
 
 #[test]
 fn return_null_and_an_empty_index_instead_of_failing() {
-    let fresh = tempfile::tempdir().expect("tempdir");
-    init_repo(fresh.path());
+    let fresh = Repo::new();
     let client = ProcessGitClient::new(Some(fresh.path().to_path_buf()));
     let parser = TrailerParser::new();
     let repo = AtomRepository::new(&client, &parser, Vec::new());

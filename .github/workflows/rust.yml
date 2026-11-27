@@ -5,11 +5,23 @@ on:
     branches: [main]
     paths:
       - 'rust/**'
+      # The parity job compares against the TypeScript CLI built from here.
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsup.config.ts'
       - '.github/workflows/rust.yml'
   push:
     branches: [main]
     paths:
       - 'rust/**'
+      # The parity job compares against the TypeScript CLI built from here.
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsup.config.ts'
       - '.github/workflows/rust.yml'
 
 env:
@@ -68,3 +80,28 @@ jobs:
           workspaces: rust
       - run: cargo check --all-targets
         working-directory: rust
+
+  parity:
+    name: parity with the TypeScript CLI
+    needs: check
+    runs-on: ubuntu-latest
+    # Advisory until the Rust binary replaces the TypeScript CLI: a TS PR that
+    # changes behaviour must not go red here. It brings a Rust port or a
+    # `rust-parity` follow-up issue instead (see CONTRIBUTING.md).
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo test --test parity
+        working-directory: rust
+        env:
+          LORE_TS_CLI: ${{ github.workspace }}/dist/main.js

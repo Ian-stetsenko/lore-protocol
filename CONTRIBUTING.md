@@ -145,6 +145,14 @@ npx vitest run tests/services/trailer-parser.test.ts
 - **Clear description.** Explain *what* changed and *why*. If it closes an issue, reference it.
 - **Small diffs preferred.** If your change is large, consider splitting it into a stack of PRs.
 
+## Rust Parity
+
+A native Rust port of the CLI lives in `rust/` and is meant to behave identically. The `parity` job in `.github/workflows/rust.yml` builds this TypeScript CLI and compares both implementations byte for byte (`rust/tests/parity.rs`).
+
+- **Parity is advisory for now.** The Rust binary is not released yet, so a parity failure does not block a TypeScript PR.
+- **Changing TypeScript behaviour?** Either open a Rust port PR alongside it, or file a follow-up issue labelled `rust-parity` describing the change.
+- **Parity becomes blocking** once the Rust binary replaces the TypeScript CLI.
+
 ## Code Style
 
 - **Prettier** handles formatting. Run `npm run format` before committing.

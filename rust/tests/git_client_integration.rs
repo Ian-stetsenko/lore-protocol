@@ -2,110 +2,58 @@
 //! that cannot be asserted through a mocked `GitClient`: how git itself
 //! interprets the arguments `ProcessGitClient` builds.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+mod common;
 
+use std::fs;
+use std::path::PathBuf;
+
+use common::{git_available, Repo};
 use lore::interfaces::git_client::{GitClient, LogOptions};
 use lore::services::git_client::ProcessGitClient;
-use tempfile::TempDir;
 
 struct Fixture {
-    root: TempDir,
-    env: Vec<(&'static str, String)>,
+    repo: Repo,
     initial: String,
     atom: String,
     no_space: String,
     body_mention: String,
 }
 
-fn git_available() -> bool {
-    Command::new("git")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 impl Fixture {
     fn new() -> Fixture {
-        let root = tempfile::tempdir().expect("tempdir");
-        // Isolate from the developer's global config (signing, hooks, templates).
-        let empty_config = root.path().join(".empty-gitconfig");
-        fs::write(&empty_config, "").expect("write config");
-        let env = vec![
-            ("GIT_CONFIG_GLOBAL", empty_config.display().to_string()),
-            ("GIT_CONFIG_NOSYSTEM", "1".to_owned()),
-            ("GIT_AUTHOR_NAME", "Lore Test".to_owned()),
-            ("GIT_AUTHOR_EMAIL", "lore@example.com".to_owned()),
-            ("GIT_COMMITTER_NAME", "Lore Test".to_owned()),
-            ("GIT_COMMITTER_EMAIL", "lore@example.com".to_owned()),
-        ];
-        let mut f = Fixture {
-            root,
-            env,
-            initial: String::new(),
-            atom: String::new(),
-            no_space: String::new(),
-            body_mention: String::new(),
-        };
-        f.git(f.root.path(), &["init", "-q"]);
-        f.git(f.root.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
-
-        f.initial = f.commit("README.md", "chore: initial commit");
-        f.atom = f.commit(
+        let repo = Repo::new();
+        let initial = repo.commit("README.md", "chore: initial commit");
+        let atom = repo.commit(
             "project/src/file.ts",
             "feat: first atom\n\nLore-id: aaaa1111\nConfidence: high",
         );
-        f.no_space = f.commit(
+        let no_space = repo.commit(
             "project/src/other.ts",
             "feat: no-space trailer\n\nLore-id:bbbb2222",
         );
-        f.body_mention = f.commit(
+        let body_mention = repo.commit(
             "project/src/file.ts",
             "docs: mentions an id in the body\n\nLore-id: cccc3333 appears here but this paragraph is not the trailer block.\n\nSigned-off-by: Lore Test <lore@example.com>",
         );
-        f
-    }
-
-    fn git(&self, cwd: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(cwd)
-            .envs(self.env.iter().cloned())
-            .output()
-            .expect("git runs");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).into_owned()
+        Fixture {
+            repo,
+            initial,
+            atom,
+            no_space,
+            body_mention,
+        }
     }
 
     fn commit(&self, file: &str, message: &str) -> String {
-        let full = self.root.path().join(file);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).expect("mkdir");
-        }
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        fs::write(&full, format!("{message}\n{stamp}\n")).expect("write");
-        self.git(self.root.path(), &["add", "-A"]);
-        self.git(self.root.path(), &["commit", "-q", "-m", message]);
-        self.git(self.root.path(), &["rev-parse", "HEAD"])
-            .trim()
-            .to_owned()
+        self.repo.commit(file, message)
     }
 
     fn client(&self) -> ProcessGitClient {
-        ProcessGitClient::new(Some(self.root.path().to_path_buf()))
+        ProcessGitClient::new(Some(self.repo.path().to_path_buf()))
     }
 
     fn subdir_client(&self, sub: &str) -> ProcessGitClient {
-        let path: PathBuf = self.root.path().join(sub);
+        let path: PathBuf = self.repo.path().join(sub);
         ProcessGitClient::new(Some(path))
     }
 }
@@ -118,9 +66,11 @@ fn with_fixture(body: impl FnOnce(&Fixture)) {
         return;
     }
     let fixture = Fixture::new();
-    // SAFETY-ish: tests in this binary run in threads of one process; the
-    // variables are identical across tests, so concurrent sets are benign.
-    for (k, v) in &fixture.env {
+    // SAFETY-ish: tests in this binary run in threads of one process. The
+    // variables match across tests except the global config path, and every
+    // such config is empty (git ignores one that is already gone), so
+    // concurrent sets are benign.
+    for (k, v) in fixture.repo.env() {
         std::env::set_var(k, v);
     }
     body(&fixture);
@@ -319,7 +269,7 @@ fn blame_commit_and_repo_queries_work_end_to_end() {
         let client = f.client();
         assert!(client.is_inside_repo());
         let root = PathBuf::from(client.repo_root().expect("root"));
-        assert_eq!(root.canonicalize().ok(), f.root.path().canonicalize().ok());
+        assert_eq!(root.canonicalize().ok(), f.repo.path().canonicalize().ok());
 
         let blame = client
             .blame("project/src/file.ts", 1, Some(1))
@@ -330,8 +280,8 @@ fn blame_commit_and_repo_queries_work_end_to_end() {
         assert_eq!(blame[0].content, "docs: mentions an id in the body");
 
         assert!(!client.has_staged_changes());
-        fs::write(f.root.path().join("new.txt"), "x\n").expect("write");
-        f.git(f.root.path(), &["add", "new.txt"]);
+        fs::write(f.repo.path().join("new.txt"), "x\n").expect("write");
+        f.repo.git(&["add", "new.txt"]);
         assert!(client.has_staged_changes());
 
         let result = client

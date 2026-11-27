@@ -938,21 +938,37 @@ mod lore_id_index {
         assert_eq!(git.log_call_count(), 2);
     }
 
-    /// Deliberate deviation from TS (which caches the rejected promise):
-    /// a failed build is not cached, so the next call retries git.
     #[test]
-    fn should_not_cache_a_failed_index_build() {
+    fn should_rebuild_after_a_failed_build_instead_of_memoizing_the_rejection() {
         let git = MockGitClient::new();
-        git.set_log_error("boom");
+        let atom = lore_commit_with_hash("head", "aaaa1111");
+        let call = std::cell::Cell::new(0);
+        git.set_log(move |_, _| {
+            call.set(call.get() + 1);
+            if call.get() == 2 {
+                return Err(crate::util::LoreError::Git(
+                    "transient git failure".to_owned(),
+                ));
+            }
+            Ok(if call.get() < 4 {
+                Vec::new()
+            } else {
+                vec![atom.clone()]
+            })
+        });
         let repo = AtomRepository::new(&git, &PARSER, vec![]);
 
-        assert!(repo.lore_id_index().is_err());
-
-        git.set_log_result(vec![lore_commit("aaaa1111")]);
+        // First build: the authoritative --all pass fails; the error reaches
+        // the caller. Nothing is cached, so the second call rebuilds instead
+        // of returning the memoized failure.
+        let err = repo.lore_id_index().expect_err("first build fails");
+        assert_eq!(err.to_string(), "transient git failure");
         let index = repo.lore_id_index().unwrap();
 
-        assert_eq!(index.len(), 1);
-        // Each build is two passes (HEAD, then --all).
+        assert_eq!(
+            index.get("aaaa1111").map(|a| a.commit_hash.as_str()),
+            Some("head")
+        );
         assert_eq!(git.log_call_count(), 4);
     }
 }

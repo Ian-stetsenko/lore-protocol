@@ -152,10 +152,8 @@ impl<'a> AtomRepository<'a> {
     /// shadow the current branch (issue #57). Within each pass, newest-first
     /// insertion with first-wins keeps the atom a grep-based lookup returns.
     ///
-    /// Deviation from TS: the TypeScript implementation caches the promise
-    /// and therefore also caches a *rejected* build (every later call fails
-    /// the same way). Here only a successful build is cached; a failed git
-    /// call is retried on the next request.
+    /// Only a successful build is cached; after a failed build the next call
+    /// rebuilds instead of returning the same error.
     pub fn lore_id_index(&self) -> Result<Rc<LoreIdIndex>> {
         if let Some(index) = self.lore_index.borrow().as_ref() {
             return Ok(Rc::clone(index));

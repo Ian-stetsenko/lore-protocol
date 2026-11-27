@@ -111,9 +111,10 @@ Where the two implementations differ it is deliberate and listed here.
   `--limit` and `--max-commits` match TS exactly: a strict parser whose error
   renders through the output formatter, and a value starting with `-`
   (`--max-depth -1`) is taken as the value, as Commander does. One edge
-  remains: Commander claims the global `--json` / `--format` options before
-  the subcommand sees them, so `--limit --json` is "argument missing" usage
-  text in TS and an invalid-value error in Rust (exit 1 in both).
+  remains: Commander claims any global option (`--json`, `--format`,
+  `--no-color`, `--no-update-notifier`) before the subcommand sees it, so
+  `--limit --json` is "argument missing" usage text in TS and an
+  invalid-value error in Rust (exit 1 in both).
 - **Config arrays.** Array options in `.lore/config.toml` (for example
   `trailers.required`) keep only their string elements. The TypeScript loader
   kept the array as-is, untyped, so a non-string element reached the code that

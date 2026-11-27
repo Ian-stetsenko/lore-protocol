@@ -208,9 +208,6 @@ impl ConfigLoader for TomlConfigLoader {
     }
 }
 
-/// Resolve a start path to the directory to begin walking from: a file
-/// starts from its parent; a non-existent path with an extension is
-/// treated as a file.
 /// Directories searched for config, nearest first: the start directory up to
 /// and including the nearest ancestor holding a `.git` entry. The entry may
 /// be a directory or a file, so worktrees and submodules bound the walk at
@@ -234,6 +231,9 @@ fn collect_search_dirs(start_path: &Path) -> Result<Vec<PathBuf>> {
     }
 }
 
+/// Resolve a start path to the directory to begin walking from: a file
+/// starts from its parent; a non-existent path with an extension is
+/// treated as a file.
 fn resolve_start_dir(start_path: &Path) -> Result<PathBuf> {
     let resolved = if start_path.as_os_str().is_empty() {
         std::env::current_dir()?

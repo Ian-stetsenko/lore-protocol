@@ -430,7 +430,6 @@ impl<'a> AtomRepository<'a> {
         Vec::new()
     }
 
-    /// `git log` arguments including optional filters from the query options.
     /// Reject git refs passed as `--since` / `--until`. git log's `--since`
     /// only understands dates and silently ignores a ref like `v1.2`,
     /// returning the whole history; failing loudly points the user at a real
@@ -455,6 +454,7 @@ impl<'a> AtomRepository<'a> {
         }
     }
 
+    /// `git log` arguments including optional filters from the query options.
     fn build_log_args(&self, options: &PathQueryOptions) -> Vec<String> {
         let mut args = self.build_base_log_args();
 
@@ -578,7 +578,6 @@ fn hamming_distance(a: &str, b: &str) -> usize {
     a.chars().zip(b.chars()).filter(|(x, y)| x != y).count()
 }
 
-/// `Some(s)` only when `s` is present and non-empty (JS truthiness).
 /// Whether a date-bound value can only be a date, so the ref lookup is
 /// skipped (see [`DATE_SHAPES`]).
 fn is_unambiguous_date(value: &str) -> bool {
@@ -587,6 +586,7 @@ fn is_unambiguous_date(value: &str) -> bool {
         || value.starts_with('-')
 }
 
+/// `Some(s)` only when `s` is present and non-empty (JS truthiness).
 fn non_empty(s: Option<&str>) -> Option<&str> {
     s.filter(|s| !s.is_empty())
 }

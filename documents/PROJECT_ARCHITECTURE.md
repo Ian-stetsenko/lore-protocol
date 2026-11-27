@@ -63,7 +63,7 @@ graph TD
 |-------|-----------|----------------|
 | Types | `src/types/` | Domain models, config schema, query/output types. Pure data definitions with zero logic. |
 | Interfaces | `src/interfaces/` | Contracts for volatile dependencies (git, config loader, output formatting, terminal prompt). |
-| Utilities | `src/util/` | Constants and error types. No behavior, no dependencies on services. |
+| Utilities | `src/util/` | Constants, error types, and small pure helpers (e.g. duration parsing). No I/O in the pure helpers, no dependencies on services. |
 | Services | `src/services/` | Business logic: parsing, querying, validation, staleness detection, commit building. |
 | Formatters | `src/formatters/` | `IOutputFormatter` implementations (text with chalk, JSON). |
 | Commands | `src/commands/` | CLI command registration. Thin orchestrators that call services and output via formatters. |
@@ -174,6 +174,12 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependencies**: `domain.ts` (type imports only).
 - **Dependents**: `TrailerParser`, `PathResolver`, `AtomRepository`, `SupersessionResolver`, `CommitBuilder`, `StalenessDetector`, `Validator`, `init.ts`, `search.ts`, `trace.ts`, `doctor.ts`, `why.ts`.
 
+#### `src/util/duration.ts`
+- **Contains**: `parseDurationMs()` function, `MS_PER_DAY` constant.
+- **Single Responsibility**: Pure parsing of staleness duration strings (`^\d+(d|w|m|y)$`: days, weeks, 30-day months, 365-day years) into milliseconds. Returns `null` for invalid input, so each caller picks its own policy.
+- **Dependencies**: None.
+- **Dependents**: `StalenessDetector` (falls back to 6 months for an invalid config value), `option-parsers.ts` (`parseDurationOption` rejects an invalid `--older-than`).
+
 ### Services Layer
 
 #### `src/services/trailer-parser.ts`
@@ -217,9 +223,9 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/services/staleness-detector.ts`
 - **Contains**: `StalenessDetector` class.
 - **Single Responsibility**: Multi-signal staleness analysis. Checks five signals: age, drift (commits since atom), low confidence, expired `[until:...]` hints in directives, and orphaned dependencies.
-- **Dependencies**: `IGitClient`, `LoreConfig`, `domain.ts`, `output.ts`, `constants.ts`.
+- **Dependencies**: `IGitClient`, `LoreConfig`, `domain.ts`, `output.ts`, `constants.ts`, `duration.ts`.
 - **Dependents**: `stale.ts`, `main.ts`.
-- **Key methods**: `analyze()`.
+- **Key methods**: `analyze(atoms, supersessionMap, overrides?)`. `overrides` is a `Partial<LoreConfig['stale']>`; each defined field replaces the config threshold (`stale --older-than` / `--drift` pass theirs), and reason descriptions print the effective value, e.g. `(threshold: 30d)`.
 
 #### `src/services/commit-builder.ts`
 - **Contains**: `CommitInput` interface, `CommitBuilder` class.
@@ -327,8 +333,15 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/helpers/path-query.ts`
 - **Contains**: `PathQueryDeps` interface, `PathQueryCommandOptions` interface, `executePathQuery()` function, `addPathQueryOptions()` function.
 - **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows. The target is optional: `--scope <name>` takes precedence when given, and with neither a target nor `--scope` it throws `LoreError` (exit 1, `Missing target: pass a <target> path or --scope <name>.`) before any git work.
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, `errors.ts`, types.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, `option-parsers.ts`, `errors.ts`, types.
 - **Dependents**: `context.ts`, `constraints.ts`, `rejected.ts`, `directives.ts`, `tested.ts`.
+
+#### `src/commands/helpers/option-parsers.ts`
+- **Contains**: `parsePositiveInt()`, `parseNonNegativeInt()`, `parseDurationOption()` Commander option coercers.
+- **Single Responsibility**: Strict validation of CLI option values. The integer parsers accept digits only (one shared pattern; no sign, decimal point or trailing characters); `parseDurationOption` accepts `^\d+(d|w|m|y)$` and returns the string unchanged. Each throws a plain `Error` (e.g. `Expected a non-negative integer, got "x"`, `Expected a duration like 30d, 2w, 6m or 1y, got "x"`) that propagates out of `parseAsync` to `main.ts`'s JSON-aware handler (exit 1).
+- **Dependencies**: `duration.ts`.
+- **Dependents**: `path-query.ts`, `log.ts`, `search.ts`, `trace.ts`, `stale.ts`.
+- **Directive**: New Commander coercers belong here, and must throw rather than return a sentinel such as `NaN`.
 
 #### `src/commands/init.ts`
 - **Contains**: `registerInitCommand()` function.
@@ -368,22 +381,23 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/search.ts`
 - **Contains**: `registerSearchCommand()` function, `applySearchFilters()`, `atomHasTrailer()`, `atomMatchesText()`, `buildSearchTargetDescription()` helper functions.
 - **Single Responsibility**: Cross-cutting search across all Lore atoms with filters (confidence, scope-risk, reversibility, has-trailer, author, scope, text, date range).
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `IOutputFormatter`, types, `constants.ts`.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `IOutputFormatter`, `option-parsers.ts`, types, `constants.ts`.
 
 #### `src/commands/log.ts`
 - **Contains**: `registerLogCommand()` function.
 - **Single Responsibility**: Lore-enriched git log. Shows all Lore-enriched commits, optionally filtered by path (passed after `--`).
-- **Dependencies**: `AtomRepository`, `IOutputFormatter`, types.
+- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `option-parsers.ts`, types.
 
 #### `src/commands/stale.ts`
 - **Contains**: `registerStaleCommand()` function.
-- **Single Responsibility**: Orchestrates staleness detection. Optionally scoped to a target path. Filters by CLI-level staleness signal options.
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `StalenessDetector`, `PathResolver`, `IOutputFormatter`, types.
+- **Single Responsibility**: Orchestrates staleness detection. Optionally scoped to a target path. `--older-than` / `--drift` override the config thresholds and also select which signals are reported.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `StalenessDetector`, `PathResolver`, `IOutputFormatter`, `option-parsers.ts`, types.
 
 #### `src/commands/trace.ts`
 - **Contains**: `registerTraceCommand()` function.
 - **Single Responsibility**: BFS traversal of the decision chain starting from a Lore-id, following `Supersedes`, `Depends-on`, and `Related` references.
-- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `errors.ts`, `constants.ts`.
+- **Depth rule**: The root is depth 0 and an edge's depth is its source depth + 1. `--max-depth N` (default 10, parsed by `parseNonNegativeInt`) lists exactly the edges whose source depth is less than N, so N=0 shows the root alone. The bound is checked when an atom is dequeued; each atom is expanded once, and edges back to an already-visited atom (cycles) are still listed.
+- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `option-parsers.ts`, `errors.ts`, `constants.ts`.
 
 #### `src/commands/commit.ts`
 - **Contains**: `registerCommitCommand()` function plus input-parsing and interactive-collection helpers.

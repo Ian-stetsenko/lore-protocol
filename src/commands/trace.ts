@@ -5,11 +5,16 @@ import type { LoreAtom, LoreId } from '../types/domain.js';
 import type { FormattableTraceResult, TraceEdge } from '../types/output.js';
 import { LoreError } from '../util/errors.js';
 import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
+import { parseNonNegativeInt } from './helpers/option-parsers.js';
 
 /**
  * Register the `lore trace <lore-id>` command.
  * Finds an atom by Lore-id, then BFS through all references to build
  * a tree of edges showing the decision chain.
+ *
+ * Depth: the root is depth 0 and an edge's depth is its source depth + 1.
+ * `--max-depth N` lists exactly the edges whose source depth is < N, so
+ * N=0 shows the root alone.
  */
 export function registerTraceCommand(
   program: Command,
@@ -21,7 +26,7 @@ export function registerTraceCommand(
   program
     .command('trace <lore-id>')
     .description('Follow decision chain from a starting atom')
-    .option('--max-depth <n>', 'Maximum BFS traversal depth', parseInt, 10)
+    .option('--max-depth <n>', 'Maximum number of edge levels to follow', parseNonNegativeInt, 10)
     .action(async (loreId: string, options: { maxDepth: number }) => {
       const { atomRepository, getFormatter } = deps;
 
@@ -58,6 +63,9 @@ export function registerTraceCommand(
 
       while (queue.length > 0) {
         const entry = queue.shift()!;
+        if (entry.depth >= maxDepth) {
+          continue;
+        }
         const currentAtom = entry.atom;
 
         for (const key of REFERENCE_TRAILER_KEYS) {
@@ -80,9 +88,9 @@ export function registerTraceCommand(
               targetAtom,
             });
 
-            // Continue BFS if this is a new atom we haven't visited
-            // and we haven't exceeded the depth limit
-            if (!visited.has(refId) && targetAtom && entry.depth + 1 <= maxDepth) {
+            // Enqueue each atom once; the depth bound is enforced at dequeue.
+            // Edges back to visited atoms (cycles) are still listed above.
+            if (!visited.has(refId) && targetAtom) {
               visited.add(refId);
               queue.push({ atom: targetAtom, depth: entry.depth + 1 });
             }

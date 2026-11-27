@@ -7,7 +7,7 @@ import type { LoreAtom } from '../types/domain.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
-import { parsePositiveInt } from './helpers/path-query.js';
+import { parsePositiveInt } from './helpers/option-parsers.js';
 
 interface LogCommandOptions {
   readonly limit?: number;

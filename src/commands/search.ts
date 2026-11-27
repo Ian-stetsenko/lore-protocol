@@ -8,7 +8,7 @@ import type { SearchOptions, QueryResult } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
-import { parsePositiveInt } from './helpers/path-query.js';
+import { parsePositiveInt } from './helpers/option-parsers.js';
 
 interface SearchCommandOptions {
   readonly confidence?: string;

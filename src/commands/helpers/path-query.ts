@@ -8,19 +8,8 @@ import type { TrailerKey, LoreAtom, SupersessionStatus } from '../../types/domai
 import type { PathQueryOptions, QueryResult, TargetType } from '../../types/query.js';
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
+import { parsePositiveInt } from './option-parsers.js';
 import { LoreError } from '../../util/errors.js';
-
-/** Parse a CLI value as a strict positive integer; rejects non-numeric trailing chars. */
-export function parsePositiveInt(value: string): number {
-  if (!/^\d+$/.test(value)) {
-    throw new Error(`Expected a positive integer, got "${value}"`);
-  }
-  const n = Number(value);
-  if (n < 1) {
-    throw new Error(`Expected a positive integer, got "${value}"`);
-  }
-  return n;
-}
 
 export interface PathQueryDeps {
   readonly atomRepository: AtomRepository;

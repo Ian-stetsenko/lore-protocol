@@ -8,18 +8,8 @@ import type { TrailerKey, LoreAtom, SupersessionStatus } from '../../types/domai
 import type { PathQueryOptions, QueryResult, TargetType } from '../../types/query.js';
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
-
-/** Parse a CLI value as a strict positive integer; rejects non-numeric trailing chars. */
-export function parsePositiveInt(value: string): number {
-  if (!/^\d+$/.test(value)) {
-    throw new Error(`Expected a positive integer, got "${value}"`);
-  }
-  const n = Number(value);
-  if (n < 1) {
-    throw new Error(`Expected a positive integer, got "${value}"`);
-  }
-  return n;
-}
+import { parsePositiveInt } from './option-parsers.js';
+import { LoreError } from '../../util/errors.js';
 
 export interface PathQueryDeps {
   readonly atomRepository: AtomRepository;
@@ -47,7 +37,7 @@ export interface PathQueryCommandOptions {
  * GoF: Template Method (via composition, not inheritance).
  */
 export async function executePathQuery(
-  target: string,
+  target: string | undefined,
   options: PathQueryCommandOptions,
   deps: PathQueryDeps,
   commandName: string,
@@ -65,7 +55,7 @@ export async function executePathQuery(
     since: options.since ?? null,
   };
 
-  // Step 1: Resolve target or use --scope
+  // Step 1: Resolve target or use --scope (--scope wins when both are given)
   let atoms: LoreAtom[];
   let targetType: TargetType | 'search' | 'global';
   let targetDisplay: string;
@@ -74,6 +64,8 @@ export async function executePathQuery(
     atoms = await atomRepository.findByScope(queryOptions.scope, queryOptions);
     targetType = 'global';
     targetDisplay = `scope:${queryOptions.scope}`;
+  } else if (!target) {
+    throw new LoreError('Missing target: pass a <target> path or --scope <name>.', 1);
   } else {
     const parsedTarget = pathResolver.parseTarget(target);
     const gitLogArgs = pathResolver.toGitLogArgs(parsedTarget);
@@ -136,5 +128,5 @@ export function addPathQueryOptions(cmd: Command): Command {
     .option('--author <email>', 'Filter by commit author')
     .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
-    .option('--since <ref>', 'Only consider commits since ref/date');
+    .option('--since <date>', 'Only consider commits after this date');
 }

@@ -8,7 +8,7 @@ import type { SearchOptions, QueryResult } from '../types/query.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
-import { parsePositiveInt } from './helpers/path-query.js';
+import { parsePositiveInt } from './helpers/option-parsers.js';
 
 interface SearchCommandOptions {
   readonly confidence?: string;
@@ -48,8 +48,8 @@ export function registerSearchCommand(
     .option('--author <email>', 'Filter by commit author')
     .option('--scope <name>', 'Filter by conventional commit scope')
     .option('--text <query>', 'Full-text search across intent, body, and trailer values')
-    .option('--since <ref>', 'Only consider commits since ref/date')
-    .option('--until <ref>', 'Upper time/revision bound')
+    .option('--since <date>', 'Only consider commits after this date')
+    .option('--until <date>', 'Only consider commits before this date')
     .option('--all', 'Include superseded entries')
     .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)

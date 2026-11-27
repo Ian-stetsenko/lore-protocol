@@ -1,10 +1,12 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { readFile } from 'node:fs/promises';
 import { Command } from 'commander';
 import { registerValidateCommand } from '../../../src/commands/validate.js';
 import type { Validator } from '../../../src/services/validator.js';
 import type { IGitClient, RawCommit } from '../../../src/interfaces/git-client.js';
 import type { IOutputFormatter } from '../../../src/interfaces/output-formatter.js';
 import type { TrailerParser } from '../../../src/services/trailer-parser.js';
+import type { CommitValidationResult, ValidationIssue } from '../../../src/types/output.js';
 
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn().mockResolvedValue('feat: hook commit\n\nLore-id: abcd1234'),
@@ -38,8 +40,11 @@ interface Harness {
   consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 }
 
-function buildHarness(commits: readonly RawCommit[] = []): Harness {
-  const validate = vi.fn().mockResolvedValue([]);
+function buildHarness(
+  commits: readonly RawCommit[] = [],
+  validationResults: readonly CommitValidationResult[] = [],
+): Harness {
+  const validate = vi.fn().mockResolvedValue(validationResults);
   const validator = { validate } as unknown as Validator;
 
   const log = vi.fn().mockResolvedValue(commits);
@@ -58,6 +63,7 @@ function buildHarness(commits: readonly RawCommit[] = []): Harness {
       (_code: number, messages: readonly { severity: string; message: string }[]) =>
         messages.map((m) => `${m.severity}: ${m.message}`).join('\n'),
     ),
+    formatWarnings: vi.fn(() => ''),
   } as IOutputFormatter;
 
   const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -149,5 +155,88 @@ describe('registerValidateCommand (issue #69 --from; --since removed in 0.8.0)',
     const last = buildHarness();
     await last.program.parseAsync(['node', 'lore', 'validate', '--last', '3']);
     expect(last.log).toHaveBeenCalledWith(['-3']);
+  });
+});
+
+function makeResult(issues: readonly ValidationIssue[]): CommitValidationResult {
+  return {
+    commit: '(pending)',
+    loreId: 'abcd1234',
+    valid: !issues.some((issue) => issue.severity === 'error'),
+    issues,
+  };
+}
+
+const WARNING: ValidationIssue = {
+  severity: 'warning',
+  rule: 'missing-lore-id',
+  message: 'example warning',
+};
+
+const ERROR: ValidationIssue = {
+  severity: 'error',
+  rule: 'invalid-enum',
+  message: 'example error',
+};
+
+describe('registerValidateCommand exit codes', () => {
+  beforeEach(() => {
+    vi.mocked(readFile).mockResolvedValue('feat: hook commit\n\nLore-id: abcd1234');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    process.exitCode = undefined;
+  });
+
+  it('exits 0 in hook mode when there are only warnings (warnings are advisory)', async () => {
+    const h = buildHarness([], [makeResult([WARNING])]);
+
+    await h.program.parseAsync(['node', 'lore', 'validate', '--commit-msg-file', 'MSG']);
+
+    expect(process.exitCode).toBeUndefined();
+    expect(h.consoleLogSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('exits 1 in hook mode when there are errors', async () => {
+    const h = buildHarness([], [makeResult([ERROR, WARNING])]);
+
+    await h.program.parseAsync(['node', 'lore', 'validate', '--commit-msg-file', 'MSG']);
+
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits 1 in hook mode with --strict when there are only warnings', async () => {
+    const h = buildHarness([], [makeResult([WARNING])]);
+
+    await h.program.parseAsync([
+      'node', 'lore', 'validate', '--commit-msg-file', 'MSG', '--strict',
+    ]);
+
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits 0 in hook mode when clean', async () => {
+    const h = buildHarness([], [makeResult([])]);
+
+    await h.program.parseAsync(['node', 'lore', 'validate', '--commit-msg-file', 'MSG']);
+
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('still exits 2 in range mode when there are only warnings', async () => {
+    const h = buildHarness([makeRawCommit('c'.repeat(40))], [makeResult([WARNING])]);
+
+    await h.program.parseAsync(['node', 'lore', 'validate', '--from', 'main']);
+
+    expect(process.exitCode).toBe(2);
+  });
+
+  it('still exits 1 in range mode when there are errors', async () => {
+    const h = buildHarness([makeRawCommit('d'.repeat(40))], [makeResult([ERROR])]);
+
+    await h.program.parseAsync(['node', 'lore', 'validate', '--last', '2']);
+
+    expect(process.exitCode).toBe(1);
   });
 });

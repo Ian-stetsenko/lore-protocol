@@ -3,7 +3,7 @@ import { executePathQuery, addPathQueryOptions, type PathQueryDeps, type PathQue
 import { mergeOptions } from './helpers/merge-options.js';
 
 /**
- * Register the `lore rejected <target>` command.
+ * Register the `lore rejected [target]` command.
  * Shows only Rejected trailers.
  */
 export function registerRejectedCommand(
@@ -11,12 +11,12 @@ export function registerRejectedCommand(
   deps: PathQueryDeps,
 ): void {
   const cmd = program
-    .command('rejected <target>')
+    .command('rejected [target]')
     .description('Previously rejected alternatives for a code region');
 
   addPathQueryOptions(cmd);
 
-  cmd.action(async (target: string, _options: PathQueryCommandOptions, command: Command) => {
+  cmd.action(async (target: string | undefined, _options: PathQueryCommandOptions, command: Command) => {
     const options = mergeOptions<PathQueryCommandOptions>(command);
     await executePathQuery(target, options, deps, 'rejected', ['Rejected']);
   });

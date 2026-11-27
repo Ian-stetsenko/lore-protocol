@@ -7,7 +7,7 @@ import type { LoreAtom } from '../types/domain.js';
 import type { FormattableQueryResult } from '../types/output.js';
 import { mergeOptions } from './helpers/merge-options.js';
 import { buildQueryMeta } from './helpers/build-query-meta.js';
-import { parsePositiveInt } from './helpers/path-query.js';
+import { parsePositiveInt } from './helpers/option-parsers.js';
 
 interface LogCommandOptions {
   readonly limit?: number;
@@ -33,7 +33,7 @@ export function registerLogCommand(
     .description('Lore-enriched git log')
     .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
-    .option('--since <ref>', 'Only consider commits since ref/date')
+    .option('--since <date>', 'Only consider commits after this date')
     .action(async (paths: string[], _options: LogCommandOptions, command: Command) => {
       const options = mergeOptions<LogCommandOptions>(command);
       const { atomRepository, supersessionResolver, getFormatter } = deps;

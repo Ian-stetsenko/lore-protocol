@@ -63,7 +63,7 @@ graph TD
 |-------|-----------|----------------|
 | Types | `src/types/` | Domain models, config schema, query/output types. Pure data definitions with zero logic. |
 | Interfaces | `src/interfaces/` | Contracts for volatile dependencies (git, config loader, output formatting, terminal prompt). |
-| Utilities | `src/util/` | Constants and error types. No behavior, no dependencies on services. |
+| Utilities | `src/util/` | Constants, error types, and small pure helpers (e.g. duration parsing). No I/O in the pure helpers, no dependencies on services. |
 | Services | `src/services/` | Business logic: parsing, querying, validation, staleness detection, commit building. |
 | Formatters | `src/formatters/` | `IOutputFormatter` implementations (text with chalk, JSON). |
 | Commands | `src/commands/` | CLI command registration. Thin orchestrators that call services and output via formatters. |
@@ -174,6 +174,12 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Dependencies**: `domain.ts` (type imports only).
 - **Dependents**: `TrailerParser`, `PathResolver`, `AtomRepository`, `SupersessionResolver`, `CommitBuilder`, `StalenessDetector`, `Validator`, `init.ts`, `search.ts`, `trace.ts`, `doctor.ts`, `why.ts`.
 
+#### `src/util/duration.ts`
+- **Contains**: `parseDurationMs()` function, `MS_PER_DAY` constant.
+- **Single Responsibility**: Pure parsing of staleness duration strings (`^\d+(d|w|m|y)$`: days, weeks, 30-day months, 365-day years) into milliseconds. Returns `null` for invalid input, so each caller picks its own policy.
+- **Dependencies**: None.
+- **Dependents**: `StalenessDetector` (falls back to 6 months for an invalid config value), `option-parsers.ts` (`parseDurationOption` rejects an invalid `--older-than`).
+
 ### Services Layer
 
 #### `src/services/trailer-parser.ts`
@@ -181,7 +187,8 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 - **Single Responsibility**: Parses raw trailer text (multi-line `Key: Value` format) into structured `LoreTrailers` objects, and serializes back. Also detects whether text contains Lore trailers and extracts trailer blocks from full commit messages.
 - **Dependencies**: `domain.ts`, `constants.ts`.
 - **Dependents**: `AtomRepository`, `CommitBuilder`, `Validator`, `why.ts`, `main.ts`.
-- **Key methods**: `parse()`, `serialize()`, `containsLoreTrailers()`, `extractTrailerBlock()`.
+- **Key methods**: `parse()`, `serialize()`, `containsLoreTrailers()`, `extractTrailerBlock()`, `findInvalidEnumValues()`.
+- **Enum handling**: `parse()` drops enum values it does not recognise (they become `null`), so query output never shows them. `findInvalidEnumValues()` reads the raw block and returns each Confidence / Scope-risk / Reversibility line whose trimmed value is not allowed (case-sensitive, empty reported as `""`), in document order; `Validator` Rule 4 (`invalid-enum`) is built on it.
 
 #### `src/services/path-resolver.ts`
 - **Contains**: `PathResolver` class.
@@ -200,9 +207,11 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/services/atom-repository.ts`
 - **Contains**: `AtomRepository` class.
 - **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal. Lore-id lookups prefer HEAD-reachable matches and consult other refs only on a miss.
-- **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`.
+- **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`, `errors.ts`.
 - **Dependents**: Commands (`context`, `constraints`, `rejected`, `directives`, `tested`, `search`, `log`, `stale`, `trace`, `squash`, `doctor`), `Validator`, `main.ts`.
 - **Key methods**: `findByTarget()`, `findByLoreId()`, `findByRange()`, `findAll()`, `findByScope()`, `resolveFollowLinks()`.
+- **Date bounds (`assertDateBounds`)**: `findAll()`, `findByTarget()` and `findByScope()` first check `since` / `until`, because git log's `--since` silently ignores a ref. A value shaped like a date skips the lookup: ISO-prefixed (`^\d{4}-\d{2}-\d{2}`), digit-only (a year, Unix timestamp or `20260131`, which would otherwise match an abbreviated commit hash), containing whitespace (`"2 weeks ago"`), or starting with `-`. Anything else is resolved with `resolveRef("<v>^{commit}")`. A hit throws `LoreError` (exit 1) with a "takes a date" hint; a `GitError` means the value is passed to git as a date.
+- **Directive**: Every new query method that accepts `since` / `until` must call `assertDateBounds()` before building git log arguments.
 
 #### `src/services/supersession-resolver.ts`
 - **Contains**: `SupersessionResolver` class.
@@ -214,9 +223,9 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/services/staleness-detector.ts`
 - **Contains**: `StalenessDetector` class.
 - **Single Responsibility**: Multi-signal staleness analysis. Checks five signals: age, drift (commits since atom), low confidence, expired `[until:...]` hints in directives, and orphaned dependencies.
-- **Dependencies**: `IGitClient`, `LoreConfig`, `domain.ts`, `output.ts`, `constants.ts`.
+- **Dependencies**: `IGitClient`, `LoreConfig`, `domain.ts`, `output.ts`, `constants.ts`, `duration.ts`.
 - **Dependents**: `stale.ts`, `main.ts`.
-- **Key methods**: `analyze()`.
+- **Key methods**: `analyze(atoms, supersessionMap, overrides?)`. `overrides` is a `Partial<LoreConfig['stale']>`; each defined field replaces the config threshold (`stale --older-than` / `--drift` pass theirs), and reason descriptions print the effective value, e.g. `(threshold: 30d)`.
 
 #### `src/services/commit-builder.ts`
 - **Contains**: `CommitInput` interface, `CommitBuilder` class.
@@ -241,7 +250,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/services/config-loader.ts`
 - **Contains**: `ConfigLoader` class.
-- **Single Responsibility**: Loads `.lore/config.toml` files, walks up the directory tree for monorepo support, merges multiple config files (child overrides parent), and fills in defaults.
+- **Single Responsibility**: Loads `.lore/config.toml` files, walks up the directory tree for monorepo support, merges multiple config files (child overrides parent, per section), and fills in defaults. Discovery is bounded by the git work-tree root: the walk includes the nearest ancestor containing a `.git` entry (directory or file, so linked worktrees and submodules stop at their own root) and goes no further. With no `.git` anywhere above the start path, only `<start>/.lore/config.toml` is read. The same boundary applies to `loadForPath()` and `findConfigPath()`; it is detected from the `.git` marker on disk, not by running git.
 - **Dependencies**: `IConfigLoader`, `LoreConfig`, `constants.ts`, Node.js `fs`, `path`, `smol-toml`.
 - **Dependents**: `main.ts`, `doctor.ts`.
 - **Key methods**: `loadForPath()`, `loadFromFile()`, `findConfigPath()`.
@@ -323,9 +332,16 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 
 #### `src/commands/helpers/path-query.ts`
 - **Contains**: `PathQueryDeps` interface, `PathQueryCommandOptions` interface, `executePathQuery()` function, `addPathQueryOptions()` function.
-- **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows.
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, types.
+- **Single Responsibility**: Shared pipeline for path-scoped query commands. Implements a resolve -> query -> follow -> supersession -> filter -> format pipeline. Parameterized by `visibleTrailers` to control which trailers each command shows. The target is optional: `--scope <name>` takes precedence when given, and with neither a target nor `--scope` it throws `LoreError` (exit 1, `Missing target: pass a <target> path or --scope <name>.`) before any git work.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `PathResolver`, `IOutputFormatter`, `LoreConfig`, `option-parsers.ts`, `errors.ts`, types.
 - **Dependents**: `context.ts`, `constraints.ts`, `rejected.ts`, `directives.ts`, `tested.ts`.
+
+#### `src/commands/helpers/option-parsers.ts`
+- **Contains**: `parsePositiveInt()`, `parseNonNegativeInt()`, `parseDurationOption()` Commander option coercers.
+- **Single Responsibility**: Strict validation of CLI option values. The integer parsers accept digits only (one shared pattern; no sign, decimal point or trailing characters); `parseDurationOption` accepts `^\d+(d|w|m|y)$` and returns the string unchanged. Each throws a plain `Error` (e.g. `Expected a non-negative integer, got "x"`, `Expected a duration like 30d, 2w, 6m or 1y, got "x"`) that propagates out of `parseAsync` to `main.ts`'s JSON-aware handler (exit 1).
+- **Dependencies**: `duration.ts`.
+- **Dependents**: `path-query.ts`, `log.ts`, `search.ts`, `trace.ts`, `stale.ts`.
+- **Directive**: New Commander coercers belong here, and must throw rather than return a sentinel such as `NaN`.
 
 #### `src/commands/init.ts`
 - **Contains**: `registerInitCommand()` function.
@@ -365,31 +381,34 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/search.ts`
 - **Contains**: `registerSearchCommand()` function, `applySearchFilters()`, `atomHasTrailer()`, `atomMatchesText()`, `buildSearchTargetDescription()` helper functions.
 - **Single Responsibility**: Cross-cutting search across all Lore atoms with filters (confidence, scope-risk, reversibility, has-trailer, author, scope, text, date range).
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `IOutputFormatter`, types, `constants.ts`.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `IOutputFormatter`, `option-parsers.ts`, types, `constants.ts`.
 
 #### `src/commands/log.ts`
 - **Contains**: `registerLogCommand()` function.
 - **Single Responsibility**: Lore-enriched git log. Shows all Lore-enriched commits, optionally filtered by path (passed after `--`).
-- **Dependencies**: `AtomRepository`, `IOutputFormatter`, types.
+- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `option-parsers.ts`, types.
 
 #### `src/commands/stale.ts`
 - **Contains**: `registerStaleCommand()` function.
-- **Single Responsibility**: Orchestrates staleness detection. Optionally scoped to a target path. Filters by CLI-level staleness signal options.
-- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `StalenessDetector`, `PathResolver`, `IOutputFormatter`, types.
+- **Single Responsibility**: Orchestrates staleness detection. Optionally scoped to a target path. `--older-than` / `--drift` override the config thresholds and also select which signals are reported.
+- **Dependencies**: `AtomRepository`, `SupersessionResolver`, `StalenessDetector`, `PathResolver`, `IOutputFormatter`, `option-parsers.ts`, types.
 
 #### `src/commands/trace.ts`
 - **Contains**: `registerTraceCommand()` function.
 - **Single Responsibility**: BFS traversal of the decision chain starting from a Lore-id, following `Supersedes`, `Depends-on`, and `Related` references.
-- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `errors.ts`, `constants.ts`.
+- **Depth rule**: The root is depth 0 and an edge's depth is its source depth + 1. `--max-depth N` (default 10, parsed by `parseNonNegativeInt`) lists exactly the edges whose source depth is less than N, so N=0 shows the root alone. The bound is checked when an atom is dequeued; each atom is expanded once, and edges back to an already-visited atom (cycles) are still listed.
+- **Dependencies**: `AtomRepository`, `IOutputFormatter`, `option-parsers.ts`, `errors.ts`, `constants.ts`.
 
 #### `src/commands/commit.ts`
 - **Contains**: `registerCommitCommand()` function plus input-parsing and interactive-collection helpers.
 - **Single Responsibility**: Creates Lore-enriched commits. Supports four input modes: stdin JSON (default), file JSON, CLI flags, and interactive prompts.
+- **Warnings**: validation warnings never block the commit. Builder warnings (`intent-length`, `message-length`, non-strict `required-trailer`) and the `reference-check-skipped` warning (Lore-id index could not be built) go through `formatWarnings`: `warning:` lines on stderr in text mode. The JSON success document always carries a `warnings` array of `{ severity, rule, message }`, which is `[]` when there are none, including on `--amend --no-edit`.
 - **Dependencies**: `CommitBuilder`, `IGitClient`, `IOutputFormatter`, `IPrompt`, `errors.ts`, `constants.ts`.
 
 #### `src/commands/validate.ts`
 - **Contains**: `registerValidateCommand()` function.
 - **Single Responsibility**: Validates commits for Lore protocol compliance. Supports revision range, `--from`, `--last`, and `--strict` modes (the deprecated `--since` alias of `--from` was removed in 0.8.0).
+- **Exit codes**: range modes exit 1 on errors, 2 on warnings only, 0 when clean. Hook mode (`--commit-msg-file`) exits 1 on errors and 0 otherwise, so warnings are advisory; `--strict` (added by `[hooks] enforce = true`) upgrades them to blocking errors.
 - **Dependencies**: `Validator`, `IGitClient`, `IOutputFormatter`, types.
 
 #### `src/commands/squash.ts`
@@ -835,7 +854,7 @@ CONFIG_FILENAME = 'config.toml'  (src/util/constants.ts, line 48)
 
 ### Monorepo Merging
 
-`ConfigLoader.loadForPath()` (line 28) walks **up the directory tree** from the target path to the filesystem root, collecting all `.lore/config.toml` files found along the way.
+`ConfigLoader.loadForPath()` walks **up the directory tree** from the target path to the git work-tree root, collecting all `.lore/config.toml` files found along the way. The walk includes the nearest ancestor that contains a `.git` entry (a directory, or a file in linked worktrees and submodules) and stops there; config files above the repository root are never merged. If no `.git` exists anywhere above the target, only the target directory's own `.lore/config.toml` is read. `findConfigPath()` uses the same boundary. Bare repositories and `GIT_DIR`/`GIT_WORK_TREE` setups have no `.git` entry at the work-tree root, so in those cases the config loader falls back to reading only the start directory.
 
 Multiple config files are merged with **child overrides parent**. The files are ordered nearest-to-farthest, reversed, and merged parent-first so the nearest config wins.
 
@@ -945,6 +964,7 @@ classDiagram
 | 0 | `EXIT_CODE_SUCCESS` | Success |
 | 1 | `EXIT_CODE_VALIDATION_ERROR` | Validation error, invalid input, or not-found |
 | 2 | `EXIT_CODE_GIT_ERROR` | Git command failed |
+| 2 | `EXIT_CODE_VALIDATION_WARNINGS` | `lore validate` range modes: warnings only (never in hook mode) |
 | 3 | `EXIT_CODE_NO_STAGED_CHANGES` | `lore commit` invoked without staged changes |
 
 ### Propagation Flow
@@ -972,6 +992,11 @@ Both `TextFormatter` and `JsonFormatter` implement `formatError(code, messages)`
 
 - **Text**: `error: <message>` in red, `warning: <message>` in yellow, dim `(exit code N)`.
 - **JSON**: `{ "lore_version": "1.0", "error": true, "code": N, "messages": [...] }`.
+
+Advisory warnings on a command that still succeeds use `formatWarnings(messages)` instead, never `formatError(0, ...)`:
+
+- **Text**: one `warning: <message>` line per entry (identical to `formatError(0, ...)`), which the command prints to stderr only when the string is non-empty.
+- **JSON**: returns `''`, so nothing is written to stderr; the warnings travel in the command's success payload (e.g. the `warnings` array of `lore commit`). This keeps a `{"error": true}` document off stderr on a successful run.
 
 ---
 
@@ -1170,9 +1195,11 @@ import type { Command } from 'commander';
 import { executePathQuery, addPathQueryOptions, type PathQueryDeps, type PathQueryCommandOptions } from './helpers/path-query.js';
 
 export function registerRisksCommand(program: Command, deps: PathQueryDeps): void {
-  const cmd = program.command('risks <target>').description('Risk assessment for a code region');
+  // [target] is optional: --scope alone is a complete query, and executePathQuery
+  // exits 1 when neither is given.
+  const cmd = program.command('risks [target]').description('Risk assessment for a code region');
   addPathQueryOptions(cmd);
-  cmd.action(async (target: string, options: PathQueryCommandOptions) => {
+  cmd.action(async (target: string | undefined, options: PathQueryCommandOptions) => {
     await executePathQuery(target, options, deps, 'risks', ['Confidence', 'Scope-risk', 'Reversibility']);
   });
 }

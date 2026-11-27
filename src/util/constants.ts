@@ -36,6 +36,13 @@ export const CONFIDENCE_VALUES = ['low', 'medium', 'high'] as const;
 export const SCOPE_RISK_VALUES = ['narrow', 'moderate', 'wide'] as const;
 export const REVERSIBILITY_VALUES = ['clean', 'migration-needed', 'irreversible'] as const;
 
+/** Allowed values for each enum trailer, in documented order. */
+export const ENUM_ALLOWED_VALUES: Readonly<Record<EnumTrailerKey, readonly string[]>> = {
+  Confidence: CONFIDENCE_VALUES,
+  'Scope-risk': SCOPE_RISK_VALUES,
+  Reversibility: REVERSIBILITY_VALUES,
+};
+
 export const LORE_ID_PATTERN = /^[0-9a-f]{8}$/;
 export const LORE_ID_LENGTH = 8;
 
@@ -47,6 +54,8 @@ export const DEFAULT_STALE_DRIFT_THRESHOLD = 20;
 
 export const CONFIG_FILENAME = 'config.toml';
 export const CONFIG_DIR = '.lore';
+/** Work-tree root marker that bounds config discovery (directory or file). */
+export const GIT_MARKER = '.git';
 
 export const STALE_SIGNAL = {
   AGE: 'age',
@@ -60,6 +69,8 @@ export type StaleSignal = typeof STALE_SIGNAL[keyof typeof STALE_SIGNAL];
 
 export const EXIT_CODE_SUCCESS = 0;
 export const EXIT_CODE_VALIDATION_ERROR = 1;
+/** `lore validate` range modes: warnings only, no errors. */
+export const EXIT_CODE_VALIDATION_WARNINGS = 2;
 export const EXIT_CODE_GIT_ERROR = 2;
 export const EXIT_CODE_NO_STAGED_CHANGES = 3;
 

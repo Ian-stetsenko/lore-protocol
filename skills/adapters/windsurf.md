@@ -19,10 +19,11 @@ lore directives <path> --json
 
 ## When Committing
 
-Stage changes with `git add`, then pipe JSON to `lore commit`:
+Stage changes with `git add`, then pass JSON to `lore commit`:
 
 ```sh
-echo '{
+lore commit <<'EOF'
+{
   "intent": "fix: handle null user in auth middleware",
   "body": "Previously threw 500 on null user. Now returns 401.",
   "trailers": {
@@ -33,8 +34,13 @@ echo '{
     "Tested": ["null user returns 401", "valid user still works"],
     "Not-tested": ["concurrent request race condition"]
   }
-}' | lore commit
+}
+EOF
 ```
+
+Use a quoted heredoc (`<<'EOF'`) or `lore commit --file msg.json` (works in any shell, including PowerShell). Avoid `echo '...' |`: one apostrophe in the text ends the shell string.
+
+Extra trailers such as `Co-Authored-By` go **inside** `trailers` (any key not listed in the schema is kept as a custom trailer). Never append them after the generated message: only the last paragraph is read as the trailer block, so a separate `Co-Authored-By` paragraph hides the Lore trailers.
 
 ### JSON Schema
 

@@ -257,6 +257,72 @@ describe('TrailerParser', () => {
     });
   });
 
+  describe('findInvalidEnumValues', () => {
+    it('should return an empty list when all enum values are valid', () => {
+      const raw = [
+        'Lore-id: abcd1234',
+        'Confidence: high',
+        'Scope-risk: narrow',
+        'Reversibility: migration-needed',
+      ].join('\n');
+      expect(parser.findInvalidEnumValues(raw)).toEqual([]);
+    });
+
+    it('should return an empty list when no enum trailers are present', () => {
+      expect(parser.findInvalidEnumValues('Lore-id: abcd1234\nConstraint: x')).toEqual([]);
+      expect(parser.findInvalidEnumValues('')).toEqual([]);
+    });
+
+    it('should report an unknown value with its trimmed text', () => {
+      expect(parser.findInvalidEnumValues('Confidence:   very-high  ')).toEqual([
+        { key: 'Confidence', value: 'very-high' },
+      ]);
+    });
+
+    it('should match case-sensitively', () => {
+      expect(parser.findInvalidEnumValues('Confidence: High')).toEqual([
+        { key: 'Confidence', value: 'High' },
+      ]);
+    });
+
+    it('should report an empty value as ""', () => {
+      expect(parser.findInvalidEnumValues('Scope-risk:')).toEqual([
+        { key: 'Scope-risk', value: '' },
+      ]);
+    });
+
+    it('should report every invalid line in document order, including repeats', () => {
+      const raw = [
+        'Lore-id: abcd1234',
+        'Reversibility: maybe',
+        'Confidence: high',
+        'Scope-risk: huge',
+        'Confidence: certain',
+      ].join('\n');
+      expect(parser.findInvalidEnumValues(raw)).toEqual([
+        { key: 'Reversibility', value: 'maybe' },
+        { key: 'Scope-risk', value: 'huge' },
+        { key: 'Confidence', value: 'certain' },
+      ]);
+    });
+
+    it('should include continuation lines in the value', () => {
+      expect(parser.findInvalidEnumValues('Confidence: very\n  high')).toEqual([
+        { key: 'Confidence', value: 'very high' },
+      ]);
+    });
+
+    it('should ignore non-enum trailers with enum-like values', () => {
+      expect(parser.findInvalidEnumValues('Constraint: High\nX-Confidence: bogus')).toEqual([]);
+    });
+
+    it('should not change what parse() returns for the same block', () => {
+      const raw = 'Lore-id: abcd1234\nConfidence: very-high';
+      parser.findInvalidEnumValues(raw);
+      expect(parser.parse(raw, []).Confidence).toBeNull();
+    });
+  });
+
   describe('serialize', () => {
     it('should serialize Lore-id', () => {
       const trailers = makeTrailers({ 'Lore-id': 'abcd1234' });

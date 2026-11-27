@@ -10,6 +10,10 @@ import type {
 } from '../types/output.js';
 import type { LoreAtom, TrailerKey } from '../types/domain.js';
 
+/** A full or abbreviated git object name; anything else is a placeholder label. */
+const GIT_HASH_PATTERN = /^[0-9a-f]{8,}$/;
+const SHORT_HASH_LENGTH = 8;
+
 export class TextFormatter implements IOutputFormatter {
   private readonly c: ChalkInstance;
 
@@ -65,7 +69,7 @@ export class TextFormatter implements IOutputFormatter {
       const icon = commitResult.valid
         ? this.c.green('\u2713')
         : this.c.red('\u2717');
-      const label = commitResult.loreId ?? commitResult.commit.slice(0, 8);
+      const label = commitResult.loreId ?? this.formatCommitLabel(commitResult.commit);
       lines.push(`${icon} ${label}`);
 
       for (const issue of commitResult.issues) {
@@ -93,6 +97,14 @@ export class TextFormatter implements IOutputFormatter {
     lines.push(summaryParts.join(', '));
 
     return lines.join('\n');
+  }
+
+  /**
+   * Abbreviate a git hash to its first 8 characters; print any other value
+   * (such as hook mode's `(pending)` placeholder) in full.
+   */
+  private formatCommitLabel(commit: string): string {
+    return GIT_HASH_PATTERN.test(commit) ? commit.slice(0, SHORT_HASH_LENGTH) : commit;
   }
 
   formatStalenessResult(data: FormattableStalenessResult): string {
@@ -213,6 +225,11 @@ export class TextFormatter implements IOutputFormatter {
     }
 
     return lines.join('\n');
+  }
+
+  /** One `warning: <message>` line per entry, identical to formatError(0, ...). */
+  formatWarnings(messages: readonly ErrorMessage[]): string {
+    return this.formatError(0, messages);
   }
 
   private formatAtomHeader(atom: LoreAtom, superseded: boolean): string {

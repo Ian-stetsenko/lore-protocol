@@ -165,3 +165,86 @@ describe('GitClient.countCommitsSince from a subdirectory (issue #60)', () => {
     expect(await fromSubdir.countCommitsSince('project/src/file.ts', hashes.atom)).toBe(1);
   });
 });
+
+describe('GitClient.commit hash', () => {
+  const HERMETIC_KEYS = [
+    'GIT_CONFIG_GLOBAL',
+    'GIT_CONFIG_NOSYSTEM',
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_COMMITTER_EMAIL',
+  ] as const;
+  const savedEnv: Partial<Record<(typeof HERMETIC_KEYS)[number], string | undefined>> = {};
+  let commitRoot: string;
+
+  /** Stage a fresh change so the next GitClient.commit has something to record. */
+  const stage = (file: string): void => {
+    writeFileSync(join(commitRoot, file), `${file}\n${Date.now()}\n`);
+    git(commitRoot, 'add', '-A');
+  };
+
+  const shortHead = (): string => git(commitRoot, 'rev-parse', '--short', 'HEAD').trim();
+
+  beforeAll(() => {
+    // GitClient.exec inherits process.env (only cwd is pinned), so the
+    // hermetic identity must hold for GitClient-driven commits too.
+    for (const key of HERMETIC_KEYS) {
+      savedEnv[key] = process.env[key];
+      process.env[key] = env[key];
+    }
+    commitRoot = mkdtempSync(join(tmpdir(), 'lore-git-commit-'));
+    git(commitRoot, 'init', '-q', '-b', 'main');
+  });
+
+  afterAll(() => {
+    for (const key of HERMETIC_KEYS) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
+      }
+    }
+    rmSync(commitRoot, { recursive: true, force: true });
+  });
+
+  // Tests run in order: each builds on the history the previous one left.
+  it('returns the hash of a root commit ("[main (root-commit) abc1234]")', async () => {
+    stage('root.txt');
+
+    const result = await new GitClient(commitRoot).commit('chore: root commit');
+
+    expect(result.hash).not.toBe('');
+    expect(result.hash).toBe(shortHead());
+  });
+
+  it('returns the hash on a branch whose name contains a dot', async () => {
+    git(commitRoot, 'checkout', '-q', '-b', 'release/v0.8.1');
+    stage('release.txt');
+
+    const result = await new GitClient(commitRoot).commit('chore: release prep');
+
+    expect(result.hash).not.toBe('');
+    expect(result.hash).toBe(shortHead());
+  });
+
+  it('returns the hash on a detached HEAD', async () => {
+    git(commitRoot, 'checkout', '-q', '--detach');
+    stage('detached.txt');
+
+    const result = await new GitClient(commitRoot).commit('chore: detached commit');
+
+    expect(result.hash).not.toBe('');
+    expect(result.hash).toBe(shortHead());
+  });
+
+  it('returns the rewritten hash after --amend --no-edit', async () => {
+    const before = shortHead();
+    stage('amended.txt');
+
+    const result = await new GitClient(commitRoot).commit('', { amend: true, noEdit: true });
+
+    expect(result.hash).toBe(shortHead());
+    expect(result.hash).not.toBe(before);
+  });
+});

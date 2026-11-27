@@ -116,12 +116,12 @@ lore search --text "session" --confidence high
 |---------|-------------|
 | `lore init` | Initialize `.lore/` config in repository |
 | `lore commit` | Create a Lore-enriched commit |
-| `lore context <target>` | Full lore summary for a code region |
-| `lore constraints <target>` | Active constraints for a code region |
-| `lore rejected <target>` | Previously rejected alternatives for a code region |
-| `lore directives <target>` | Active forward-looking warnings for a code region |
-| `lore tested <target>` | Test coverage: what was and was not verified |
-| `lore coverage <target>` | Alias for `tested` (matches paper Figure 2) |
+| `lore context [target]` | Full lore summary for a code region |
+| `lore constraints [target]` | Active constraints for a code region |
+| `lore rejected [target]` | Previously rejected alternatives for a code region |
+| `lore directives [target]` | Active forward-looking warnings for a code region |
+| `lore tested [target]` | Test coverage: what was and was not verified |
+| `lore coverage [target]` | Alias for `tested` (matches paper Figure 2) |
 | `lore why <target>` | Line-level blame with Lore context (`file:line` or `file:line-line`) |
 | `lore search` | Search across all lore with filters |
 | `lore log` | Lore-enriched git log |
@@ -140,7 +140,7 @@ lore search --text "session" --confidence high
 | `--no-color` | Disable colored output |
 | `--no-update-notifier` | Disable update notification |
 | `--limit <n>` | Limit number of results |
-| `--since <ref>` | Only consider commits since ref/date (not on `validate`: use `--from <ref>` there) |
+| `--since <date>` | Only consider commits after this date, e.g. `2026-01-31` or `"2 weeks ago"`; a git ref is rejected (not on `validate`: use `--from <ref>` there) |
 
 ## Trailer Vocabulary
 
@@ -254,14 +254,16 @@ Pre-built instruction files ship with the package in `skills/`. Copy one file in
 
 | Agent | Command |
 |-------|---------|
-| **Claude Code** | `cat node_modules/lore-protocol/skills/adapters/claude-code.md >> CLAUDE.md` |
-| **Cursor** | `cp node_modules/lore-protocol/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
-| **GitHub Copilot** | `cat node_modules/lore-protocol/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
-| **Windsurf** | `cat node_modules/lore-protocol/skills/adapters/windsurf.md >> .windsurfrules` |
+| **Claude Code** | `cat "$(npm root -g)"/lore-protocol/skills/adapters/claude-code.md >> CLAUDE.md` |
+| **Cursor** | `cp "$(npm root -g)"/lore-protocol/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
+| **GitHub Copilot** | `cat "$(npm root -g)"/lore-protocol/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
+| **Windsurf** | `cat "$(npm root -g)"/lore-protocol/skills/adapters/windsurf.md >> .windsurfrules` |
 | **Aider** | See `skills/adapters/aider.md` |
 | **Other** | Paste `skills/adapters/generic.md` into your agent's system prompt |
 
-Each adapter teaches the agent to: query `lore constraints`/`rejected`/`directives` before modifying code, respect what it finds, and write Lore-enriched commits via JSON stdin. See `skills/README.md` for details.
+Each adapter teaches the agent to: query `lore constraints`/`rejected`/`directives` before modifying code, respect what it finds, and write Lore-enriched commits from JSON input. See `skills/README.md` for details.
+
+The paths above assume a global install (`npm install -g lore-protocol`). For a project-local install, use `node_modules/lore-protocol/skills/...` instead.
 
 ## Paper
 

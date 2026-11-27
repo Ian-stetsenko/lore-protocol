@@ -17,6 +17,7 @@ describe('registerInitCommand', () => {
     formatStalenessResult: vi.fn(),
     formatTraceResult: vi.fn(),
     formatDoctorResult: vi.fn(),
+    formatWarnings: vi.fn(() => ''),
   };
 
   let consoleLogSpy: any;

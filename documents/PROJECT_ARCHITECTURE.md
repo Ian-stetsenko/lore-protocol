@@ -571,7 +571,7 @@ Each command calls `executePathQuery()` with its specific `visibleTrailers` para
 ### L -- Liskov Substitution Principle
 
 **Followed well:**
-- `TextFormatter` and `JsonFormatter` are fully substitutable for `IOutputFormatter`. All seven interface methods are implemented by both.
+- `TextFormatter` and `JsonFormatter` are fully substitutable for `IOutputFormatter`. All eight interface methods are implemented by both.
 - `GitClient` fully implements `IGitClient`. All nine methods are present with correct signatures.
 - `ConfigLoader` fully implements `IConfigLoader`. All three methods are present.
 - `TerminalPrompt` fully implements `IPrompt`. All five methods are present.
@@ -813,7 +813,7 @@ sequenceDiagram
     participant TP as TrailerParser
     participant FMT as Formatter
 
-    Agent->>CLI: echo '{"intent":"..."}' | lore commit
+    Agent->>CLI: lore commit (JSON on stdin from a quoted heredoc, or --file msg.json)
     CLI->>CMD: route to commit action
 
     CMD->>GC: hasStagedChanges()
@@ -1044,8 +1044,8 @@ tests/
 - `ConfigLoader` -- file loading, directory walking, merging, defaults.
 
 **Unit-tested formatters** (2 files):
-- `TextFormatter` -- all seven `IOutputFormatter` methods.
-- `JsonFormatter` -- all seven `IOutputFormatter` methods.
+- `TextFormatter` -- all eight `IOutputFormatter` methods.
+- `JsonFormatter` -- all eight `IOutputFormatter` methods.
 
 ### Mock Boundaries
 
@@ -1271,7 +1271,7 @@ If you need a new cross-reference trailer (beyond `Supersedes`, `Depends-on`, `R
 
 The `skills/` directory ships with the npm package and contains:
 
-- `lore-agent-instructions.md` -- Universal reference (192 lines): protocol overview, query workflow, trailer semantics, JSON commit schema, end-to-end example
+- `lore-agent-instructions.md` -- Universal reference (212 lines): protocol overview, query workflow, trailer semantics, JSON commit schema, end-to-end example
 - `adapters/` -- Platform-specific drop-in files for Claude Code, Cursor, GitHub Copilot, Windsurf, Aider, and generic system prompts
 - `README.md` -- Setup guide with copy commands per platform
 

@@ -60,6 +60,8 @@ export type StaleSignal = typeof STALE_SIGNAL[keyof typeof STALE_SIGNAL];
 
 export const EXIT_CODE_SUCCESS = 0;
 export const EXIT_CODE_VALIDATION_ERROR = 1;
+/** `lore validate` range modes: warnings only, no errors. */
+export const EXIT_CODE_VALIDATION_WARNINGS = 2;
 export const EXIT_CODE_GIT_ERROR = 2;
 export const EXIT_CODE_NO_STAGED_CHANGES = 3;
 

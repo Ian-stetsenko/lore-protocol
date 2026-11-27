@@ -5,6 +5,11 @@ import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
 import type { CommitValidationResult, FormattableValidationResult, ValidationIssue } from '../types/output.js';
 import { LoreError } from '../util/errors.js';
+import {
+  EXIT_CODE_SUCCESS,
+  EXIT_CODE_VALIDATION_ERROR,
+  EXIT_CODE_VALIDATION_WARNINGS,
+} from '../util/constants.js';
 import { readFile } from 'node:fs/promises';
 
 interface ValidateCommandOptions {
@@ -47,10 +52,10 @@ export function registerValidateCommand(
     .action(async (range: string | undefined, options: ValidateCommandOptions) => {
       const { validator, gitClient, trailerParser, getFormatter } = deps;
 
-      const isHookMode = Boolean(options.commitMsgFile);
+      const isHookMode = options.commitMsgFile !== undefined && options.commitMsgFile !== '';
       let rawCommits: readonly RawCommit[];
 
-      if (options.commitMsgFile) {
+      if (isHookMode) {
         // Hook mode: validate a commit message file before the commit exists
         const content = await readFile(options.commitMsgFile, 'utf-8');
         const trailerBlock = trailerParser.extractTrailerBlock(content);
@@ -141,7 +146,7 @@ export function registerValidateCommand(
       console.log(formatter.formatValidationResult(validationResult));
 
       const exitCode = resolveExitCode(totalErrors, totalWarnings, isHookMode);
-      if (exitCode !== 0) {
+      if (exitCode !== EXIT_CODE_SUCCESS) {
         process.exitCode = exitCode;
       }
     });
@@ -153,10 +158,10 @@ export function registerValidateCommand(
  */
 function resolveExitCode(totalErrors: number, totalWarnings: number, isHookMode: boolean): number {
   if (totalErrors > 0) {
-    return 1;
+    return EXIT_CODE_VALIDATION_ERROR;
   }
   if (totalWarnings > 0 && !isHookMode) {
-    return 2;
+    return EXIT_CODE_VALIDATION_WARNINGS;
   }
-  return 0;
+  return EXIT_CODE_SUCCESS;
 }

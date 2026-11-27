@@ -326,6 +326,25 @@ fn invalid_enums(repo: &Repo) {
     );
 }
 
+/// A config at the outer root and a nested repository below it: discovery
+/// from inside `inner/` must stop at `inner/.git` and never see the outer
+/// config.
+fn nested_repository(repo: &Repo) {
+    linear_seeded(repo);
+    repo.write(".lore/config.toml", "[trailers]\nrequired = [\"Ticket\"]\n");
+    repo.write("inner/a.md", "inner\n");
+    repo.git(&["-C", "inner", "init", "-q"]);
+    repo.git(&["-C", "inner", "add", "-A"]);
+    repo.git(&[
+        "-C",
+        "inner",
+        "commit",
+        "-q",
+        "-m",
+        "feat: inner atom\n\nLore-id: 1234abcd",
+    ]);
+}
+
 /// A repository with one staged file, ready for `lore commit`.
 fn staged(repo: &Repo) {
     linear_seeded(repo);
@@ -990,6 +1009,18 @@ fn parity_for_invalid_enum_values() {
             case(&["validate", "--last", "3", "--strict"]),
             case(&["log"]),
             case(&["search", "--confidence", "high"]),
+        ]),
+    );
+}
+
+#[test]
+fn parity_for_config_discovery_bounded_by_the_work_tree_root() {
+    assert_parity(
+        nested_repository,
+        both_formats(vec![
+            case(&["validate"]),
+            case(&["validate"]).cwd("inner"),
+            case(&["doctor"]).cwd("inner"),
         ]),
     );
 }

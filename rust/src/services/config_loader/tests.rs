@@ -8,7 +8,16 @@ fn loader() -> TomlConfigLoader {
     TomlConfigLoader::new()
 }
 
+/// A temporary work tree: its root holds a `.git` directory, which bounds
+/// config discovery, so parent-walk tests stay inside it.
 fn temp() -> TempDir {
+    let tmp = tempdir().expect("temp dir");
+    std::fs::create_dir(tmp.path().join(GIT_MARKER)).expect("mkdir .git");
+    tmp
+}
+
+/// A temporary directory with no `.git` entry in it.
+fn temp_outside_a_repository() -> TempDir {
     tempdir().expect("temp dir")
 }
 
@@ -619,5 +628,88 @@ older_than = "30d"
         let result = loader().load_for_path(&child_dir);
 
         assert!(matches!(result, Err(LoreError::Toml(_))));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// describe('discovery boundary') (TS v0.8.1: stop at the git work-tree root)
+// ---------------------------------------------------------------------------
+mod discovery_boundary {
+    use super::*;
+
+    /// `<outer>/.lore/config.toml` above a repository at `<outer>/repo`.
+    fn config_above_a_repository(git_entry_is_file: bool) -> (TempDir, PathBuf) {
+        let outer = temp_outside_a_repository();
+        create_config_file(outer.path(), "[protocol]\nversion = \"outer\"");
+        let repo = outer.path().join("repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        if git_entry_is_file {
+            std::fs::write(
+                repo.join(GIT_MARKER),
+                "gitdir: /elsewhere/.git/worktrees/repo\n",
+            )
+            .unwrap();
+        } else {
+            std::fs::create_dir(repo.join(GIT_MARKER)).unwrap();
+        }
+        (outer, repo)
+    }
+
+    #[test]
+    fn ignores_config_above_the_git_root_in_find_config_path() {
+        let (_outer, repo) = config_above_a_repository(false);
+
+        assert_eq!(loader().find_config_path(&repo.join("src")).unwrap(), None);
+    }
+
+    #[test]
+    fn ignores_config_above_the_git_root_in_load_for_path() {
+        let (_outer, repo) = config_above_a_repository(false);
+
+        let config = loader().load_for_path(&repo.join("src")).unwrap();
+
+        assert_eq!(config, LoreConfig::default());
+    }
+
+    #[test]
+    fn still_reads_config_at_the_git_root() {
+        let (_outer, repo) = config_above_a_repository(false);
+        let config_path = create_config_file(&repo, "[protocol]\nversion = \"repo\"");
+
+        assert_eq!(
+            loader().find_config_path(&repo.join("src")).unwrap(),
+            Some(config_path)
+        );
+        let config = loader().load_for_path(&repo.join("src")).unwrap();
+        assert_eq!(config.protocol.version, "repo");
+    }
+
+    #[test]
+    fn a_git_file_bounds_the_walk_at_its_own_root() {
+        let (_outer, repo) = config_above_a_repository(true);
+
+        assert_eq!(loader().find_config_path(&repo.join("src")).unwrap(), None);
+    }
+
+    #[test]
+    fn reads_only_the_start_directory_when_no_git_entry_exists() {
+        let outer = temp_outside_a_repository();
+        create_config_file(outer.path(), "[protocol]\nversion = \"outer\"");
+        let child = outer.path().join("child");
+        std::fs::create_dir_all(&child).unwrap();
+
+        assert_eq!(loader().find_config_path(&child).unwrap(), None);
+        let own = create_config_file(&child, "[protocol]\nversion = \"child\"");
+        assert_eq!(loader().find_config_path(&child).unwrap(), Some(own));
+    }
+
+    #[test]
+    fn resolves_a_file_start_path_to_its_directory_before_bounding() {
+        let outer = temp_outside_a_repository();
+        let config_path = create_config_file(outer.path(), "[protocol]\nversion = \"1.0\"");
+        let file = outer.path().join("notes.md");
+        std::fs::write(&file, "hi").unwrap();
+
+        assert_eq!(loader().find_config_path(&file).unwrap(), Some(config_path));
     }
 }

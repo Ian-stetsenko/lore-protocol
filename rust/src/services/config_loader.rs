@@ -1,7 +1,8 @@
 //! Loads and merges `.lore/config.toml` files.
 //!
-//! Walks up the directory tree for monorepo support: every config found is
-//! merged parent-first so the nearest file wins. Merging happens at the
+//! Walks up the directory tree for monorepo support, stopping at the git
+//! work-tree root (the nearest ancestor holding a `.git` entry): every config
+//! found is merged parent-first so the nearest file wins. Merging happens at the
 //! SECTION level (a child `[stale]` table replaces the parent's `[stale]`
 //! table entirely), mirroring the TypeScript spread merge.
 
@@ -14,7 +15,7 @@ use crate::types::config::{
     CliConfig, FollowConfig, HooksConfig, LoreConfig, OutputConfig, OutputFormat, ProtocolConfig,
     StaleConfig, TrailersConfig, ValidationConfig,
 };
-use crate::util::constants::{CONFIG_DIR, CONFIG_FILENAME};
+use crate::util::constants::{CONFIG_DIR, CONFIG_FILENAME, GIT_MARKER};
 use crate::util::Result;
 
 /// Filesystem-backed [`ConfigLoader`] for TOML configuration.
@@ -26,24 +27,18 @@ impl TomlConfigLoader {
         TomlConfigLoader
     }
 
-    /// Walk up from `start_path` collecting `.lore/config.toml` paths,
+    /// Collect `.lore/config.toml` paths within the discovery boundary,
     /// nearest first. Stops after the first hit when `stop_at_first`.
     fn walk_config_paths(&self, start_path: &Path, stop_at_first: bool) -> Result<Vec<PathBuf>> {
         let mut paths = Vec::new();
-        let mut dir = resolve_start_dir(start_path)?;
 
-        loop {
+        for dir in collect_search_dirs(start_path)? {
             let config_path = dir.join(CONFIG_DIR).join(CONFIG_FILENAME);
             if config_path.exists() {
                 paths.push(config_path);
                 if stop_at_first {
-                    return Ok(paths);
+                    break;
                 }
-            }
-
-            match dir.parent() {
-                Some(parent) if parent != dir => dir = parent.to_path_buf(),
-                _ => break,
             }
         }
 
@@ -216,6 +211,29 @@ impl ConfigLoader for TomlConfigLoader {
 /// Resolve a start path to the directory to begin walking from: a file
 /// starts from its parent; a non-existent path with an extension is
 /// treated as a file.
+/// Directories searched for config, nearest first: the start directory up to
+/// and including the nearest ancestor holding a `.git` entry. The entry may
+/// be a directory or a file, so worktrees and submodules bound the walk at
+/// their own root. With no `.git` anywhere above, only the start directory is
+/// searched, so config from unrelated ancestors (e.g. a home directory) never
+/// leaks into a non-repo invocation.
+fn collect_search_dirs(start_path: &Path) -> Result<Vec<PathBuf>> {
+    let start_dir = resolve_start_dir(start_path)?;
+    let mut dirs = Vec::new();
+    let mut dir = start_dir.as_path();
+
+    loop {
+        dirs.push(dir.to_path_buf());
+        if dir.join(GIT_MARKER).exists() {
+            return Ok(dirs);
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent,
+            _ => return Ok(vec![start_dir]),
+        }
+    }
+}
+
 fn resolve_start_dir(start_path: &Path) -> Result<PathBuf> {
     let resolved = if start_path.as_os_str().is_empty() {
         std::env::current_dir()?

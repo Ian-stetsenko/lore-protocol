@@ -37,6 +37,8 @@ pub const DEFAULT_STALE_DRIFT_THRESHOLD: usize = 20;
 
 pub const CONFIG_FILENAME: &str = "config.toml";
 pub const CONFIG_DIR: &str = ".lore";
+/// Work-tree root marker that bounds config discovery (directory or file).
+pub const GIT_MARKER: &str = ".git";
 
 pub const EXIT_CODE_SUCCESS: i32 = 0;
 pub const EXIT_CODE_VALIDATION_ERROR: i32 = 1;

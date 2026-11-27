@@ -108,12 +108,12 @@ lore search --text "session" --confidence high
 |---------|-------------|
 | `lore init` | Initialize `.lore/` config in repository |
 | `lore commit` | Create a Lore-enriched commit |
-| `lore context <target>` | Full lore summary for a code region |
-| `lore constraints <target>` | Active constraints for a code region |
-| `lore rejected <target>` | Previously rejected alternatives for a code region |
-| `lore directives <target>` | Active forward-looking warnings for a code region |
-| `lore tested <target>` | Test coverage: what was and was not verified |
-| `lore coverage <target>` | Alias for `tested` (matches paper Figure 2) |
+| `lore context [target]` | Full lore summary for a code region |
+| `lore constraints [target]` | Active constraints for a code region |
+| `lore rejected [target]` | Previously rejected alternatives for a code region |
+| `lore directives [target]` | Active forward-looking warnings for a code region |
+| `lore tested [target]` | Test coverage: what was and was not verified |
+| `lore coverage [target]` | Alias for `tested` (matches paper Figure 2) |
 | `lore why <target>` | Line-level blame with Lore context (`file:line` or `file:line-line`) |
 | `lore search` | Search across all lore with filters |
 | `lore log` | Lore-enriched git log |

@@ -8,6 +8,7 @@ import type { TrailerKey, LoreAtom, SupersessionStatus } from '../../types/domai
 import type { PathQueryOptions, QueryResult, TargetType } from '../../types/query.js';
 import type { FormattableQueryResult } from '../../types/output.js';
 import { buildQueryMeta } from './build-query-meta.js';
+import { LoreError } from '../../util/errors.js';
 
 /** Parse a CLI value as a strict positive integer; rejects non-numeric trailing chars. */
 export function parsePositiveInt(value: string): number {
@@ -47,7 +48,7 @@ export interface PathQueryCommandOptions {
  * GoF: Template Method (via composition, not inheritance).
  */
 export async function executePathQuery(
-  target: string,
+  target: string | undefined,
   options: PathQueryCommandOptions,
   deps: PathQueryDeps,
   commandName: string,
@@ -65,7 +66,7 @@ export async function executePathQuery(
     since: options.since ?? null,
   };
 
-  // Step 1: Resolve target or use --scope
+  // Step 1: Resolve target or use --scope (--scope wins when both are given)
   let atoms: LoreAtom[];
   let targetType: TargetType | 'search' | 'global';
   let targetDisplay: string;
@@ -74,6 +75,8 @@ export async function executePathQuery(
     atoms = await atomRepository.findByScope(queryOptions.scope, queryOptions);
     targetType = 'global';
     targetDisplay = `scope:${queryOptions.scope}`;
+  } else if (!target) {
+    throw new LoreError('Missing target: pass a <target> path or --scope <name>.', 1);
   } else {
     const parsedTarget = pathResolver.parseTarget(target);
     const gitLogArgs = pathResolver.toGitLogArgs(parsedTarget);

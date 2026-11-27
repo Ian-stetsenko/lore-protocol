@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use common::{git_available, Repo};
-use lore::interfaces::git_client::{GitClient, LogOptions};
+use lore::interfaces::git_client::{CommitOptions, GitClient, LogOptions};
 use lore::services::git_client::ProcessGitClient;
 
 struct Fixture {
@@ -312,5 +312,77 @@ fn git_failures_surface_as_git_errors() {
             .expect_err("unknown ref fails");
         assert_eq!(err.exit_code(), 2);
         assert!(err.to_string().starts_with("git rev-parse failed:"));
+    });
+}
+
+// ---- commit hash via rev-parse (TS v0.8.1) ----------------------------------
+
+/// Commits a fresh file through the client and asserts the reported hash is
+/// `git rev-parse --short HEAD`.
+fn assert_commit_reports_the_short_head(repo: &Repo, options: CommitOptions) {
+    let client = ProcessGitClient::new(Some(repo.path().to_path_buf()));
+    if !options.no_edit {
+        repo.write("next.txt", "next\n");
+        repo.git(&["add", "-A"]);
+    }
+    let result = client
+        .commit("feat: next\n\nLore-id: eeee5555", options)
+        .expect("commit");
+    let short_head = repo
+        .git(&["rev-parse", "--short", "HEAD"])
+        .trim()
+        .to_owned();
+    assert!(!result.hash.is_empty());
+    assert_eq!(result.hash, short_head);
+}
+
+/// A bare repository fixture for the hash cases, with the isolated git
+/// environment applied to the test process (see `with_fixture`).
+fn with_repo(body: impl FnOnce(&Repo)) {
+    if !git_available() {
+        eprintln!("git not available; skipping integration test");
+        return;
+    }
+    let repo = Repo::new();
+    for (k, v) in repo.env() {
+        std::env::set_var(k, v);
+    }
+    body(&repo);
+}
+
+#[test]
+fn commit_reports_the_hash_of_a_root_commit() {
+    with_repo(|repo| assert_commit_reports_the_short_head(repo, CommitOptions::default()));
+}
+
+#[test]
+fn commit_reports_the_hash_on_a_dotted_branch_name() {
+    with_repo(|repo| {
+        repo.commit("README.md", "chore: initial");
+        repo.git(&["checkout", "-q", "-b", "release/v0.8.1"]);
+        assert_commit_reports_the_short_head(repo, CommitOptions::default());
+    });
+}
+
+#[test]
+fn commit_reports_the_hash_on_a_detached_head() {
+    with_repo(|repo| {
+        repo.commit("README.md", "chore: initial");
+        repo.git(&["checkout", "-q", "--detach"]);
+        assert_commit_reports_the_short_head(repo, CommitOptions::default());
+    });
+}
+
+#[test]
+fn commit_reports_the_hash_of_an_amend_no_edit() {
+    with_repo(|repo| {
+        repo.commit("README.md", "chore: initial");
+        assert_commit_reports_the_short_head(
+            repo,
+            CommitOptions {
+                amend: true,
+                no_edit: true,
+            },
+        );
     });
 }

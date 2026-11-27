@@ -291,29 +291,6 @@ mod parse_files_changed_output {
     }
 }
 
-mod commit_hash_extraction {
-    use super::*;
-
-    #[test]
-    fn extracts_the_short_hash_from_git_commit_output() {
-        let caps = COMMIT_HASH_PATTERN
-            .captures("[main abc1234] feat: thing\n 1 file changed")
-            .unwrap();
-        assert_eq!(&caps[1], "abc1234");
-
-        let caps = COMMIT_HASH_PATTERN
-            .captures("[feature/my-branch (root-commit) 0123abc] init")
-            .map(|c| c[1].to_owned());
-        // "(root-commit)" breaks the `[\w/-]+\s+hash]` shape, as in TS.
-        assert_eq!(caps, None);
-
-        let caps = COMMIT_HASH_PATTERN
-            .captures("[rust/port-c deadbee] msg")
-            .unwrap();
-        assert_eq!(&caps[1], "deadbee");
-    }
-}
-
 mod log_args {
     use super::*;
 

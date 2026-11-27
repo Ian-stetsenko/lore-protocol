@@ -357,6 +357,22 @@ fn staged_on_unborn(repo: &Repo) {
     repo.git(&["add", "-A"]);
 }
 
+/// Staged changes on a branch whose name has a dot, and on a detached HEAD:
+/// git's `[branch hash]` summary line takes a different shape in each.
+fn staged_on_a_dotted_branch(repo: &Repo) {
+    linear_seeded(repo);
+    repo.git(&["checkout", "-q", "-b", "release/v0.8.1"]);
+    repo.write("src/new.ts", "new\n");
+    repo.git(&["add", "-A"]);
+}
+
+fn staged_on_a_detached_head(repo: &Repo) {
+    linear_seeded(repo);
+    repo.git(&["checkout", "-q", "--detach"]);
+    repo.write("src/new.ts", "new\n");
+    repo.git(&["add", "-A"]);
+}
+
 /// A ref pointing at a missing object: `git log --all` fails, so the Lore-id
 /// index cannot be built and the reference checks take their skip path.
 fn with_dangling_ref(repo: &Repo) {
@@ -1023,4 +1039,16 @@ fn parity_for_config_discovery_bounded_by_the_work_tree_root() {
             case(&["doctor"]).cwd("inner"),
         ]),
     );
+}
+
+#[test]
+fn parity_for_the_commit_hash_on_unusual_heads() {
+    let cases = || {
+        both_formats(vec![case(&["commit", "--intent", "feat: x"])])
+            .into_iter()
+            .map(|c| c.compare(Compare::GeneratedIds))
+            .collect::<Vec<_>>()
+    };
+    assert_parity(staged_on_a_dotted_branch, cases());
+    assert_parity(staged_on_a_detached_head, cases());
 }

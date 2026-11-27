@@ -60,10 +60,6 @@ fn escape_ere(value: &str) -> String {
 static BLAME_HASH_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([0-9a-f]{40})\s").expect("valid regex"));
 
-/// `[branch abc1234] subject` line printed by `git commit`.
-static COMMIT_HASH_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[[\w/-]+\s+([0-9a-f]+)\]").expect("valid regex"));
-
 /// Start of a commit block in default-format `git log` output.
 static COMMIT_BLOCK_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^commit [0-9a-f]{40}").expect("valid regex"));
@@ -407,13 +403,15 @@ impl GitClient for ProcessGitClient {
         } else {
             args.extend(["-m", message]);
         }
-        let stdout = self.exec(&args)?;
+        self.exec(&args)?;
 
-        // Git prints something like: [main abc1234] commit message
-        let hash = COMMIT_HASH_PATTERN
-            .captures(&stdout)
-            .map(|c| c[1].to_owned())
-            .unwrap_or_default();
+        // Ask git for the new HEAD instead of scraping the `[branch hash]`
+        // summary line, whose shape varies (root commits, detached HEAD,
+        // branch names with dots). --short uses the same abbreviation.
+        let hash = self
+            .exec(&["rev-parse", "--short", "HEAD"])?
+            .trim()
+            .to_owned();
 
         Ok(CommitResult {
             hash,

@@ -678,24 +678,56 @@ describe('lore commit reference validation robustness', () => {
       formatter,
     });
 
+    vi.mocked(formatter.formatWarnings).mockReturnValue('rendered warnings');
+
     await runCommitCommand(['--supersedes', 'deadbeef'], deps);
 
-    // "Could not check" is distinct from "check failed": one pinned warning
-    // through the formatter to stderr, then the commit proceeds.
-    expect(consoleError).toHaveBeenCalledTimes(1);
-    expect(formatter.formatError).toHaveBeenCalledTimes(1);
-    const [code, messages] = vi.mocked(formatter.formatError).mock.calls[0];
-    expect(code).toBe(0);
-    expect(messages).toEqual([
+    // "Could not check" is distinct from "check failed": one pinned
+    // warning issue through formatWarnings to stderr, then the commit
+    // proceeds. It never goes through the error renderer.
+    expect(formatter.formatError).not.toHaveBeenCalled();
+    expect(formatter.formatWarnings).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(formatter.formatWarnings).mock.calls[0][0]).toEqual([
       {
         severity: 'warning',
+        rule: 'reference-check-skipped',
         message: 'validation skipped: the Lore-id index could not be built',
       },
     ]);
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith('rendered warnings');
     expect(deps.commitBuilder.build).toHaveBeenCalledTimes(1);
     expect(deps.gitClient.commit).toHaveBeenCalledTimes(1);
     // The near-match pass never runs after the index build failed.
     expect(atomRepository.findNearMatchIds).not.toHaveBeenCalled();
+  });
+
+  it('carries the skipped-check warning in the JSON payload without an error document on stderr', async () => {
+    const atomRepository = createMockAtomRepository();
+    vi.mocked(atomRepository.resolveReferenceIds).mockRejectedValue(
+      new GitError('git log failed: transient index build failure'),
+    );
+    const deps = createDeps({
+      atomRepository,
+      resolvedInput: withReference('Supersedes', ['deadbeef']),
+      formatter: new JsonFormatter(),
+    });
+    const consoleLog = vi.mocked(console.log);
+
+    await runCommitCommand(['--supersedes', 'deadbeef'], deps);
+
+    expect(consoleError).not.toHaveBeenCalled();
+    const payload = JSON.parse(String(consoleLog.mock.calls[consoleLog.mock.calls.length - 1][0]));
+    expect(payload.success).toBe(true);
+    expect(payload.error).toBeUndefined();
+    expect(payload.warnings).toEqual([
+      {
+        severity: 'warning',
+        rule: 'reference-check-skipped',
+        message: 'validation skipped: the Lore-id index could not be built',
+      },
+    ]);
+    expect(deps.gitClient.commit).toHaveBeenCalledTimes(1);
   });
 
   it('does not swallow non-git failures raised while checking references', async () => {
@@ -717,6 +749,7 @@ describe('lore commit reference validation robustness', () => {
       ValidationError,
     );
     expect(formatter.formatError).not.toHaveBeenCalled();
+    expect(formatter.formatWarnings).not.toHaveBeenCalled();
     expect(deps.gitClient.commit).not.toHaveBeenCalled();
   });
 

@@ -156,7 +156,8 @@ export function registerCommitCommand(
       // committed on failure. --no-verify-refs skips the gate entirely.
       // The gate is best-effort: a GitError (e.g. a transient index build
       // failure) means "could not check", not "check failed" -- validation
-      // is skipped with a pinned stderr warning and the commit proceeds.
+      // is skipped with a pinned `reference-check-skipped` warning and the
+      // commit proceeds.
       if (options.verifyRefs) {
         try {
           const referencePairs = collectReferencePairs(input);
@@ -193,14 +194,16 @@ export function registerCommitCommand(
           if (!(error instanceof GitError)) {
             throw error;
           }
-          console.error(
-            formatter.formatError(0, [
-              {
-                severity: 'warning',
-                message: 'validation skipped: the Lore-id index could not be built',
-              },
-            ]),
-          );
+          // The skip is an advisory issue like any other warning: it flows
+          // through formatWarnings (stderr in text mode) and the JSON
+          // payload's warnings array, never as an error document.
+          referenceIssues = [
+            {
+              severity: 'warning',
+              rule: 'reference-check-skipped',
+              message: 'validation skipped: the Lore-id index could not be built',
+            },
+          ];
         }
       }
 

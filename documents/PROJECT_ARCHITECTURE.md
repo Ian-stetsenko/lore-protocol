@@ -385,6 +385,7 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/commands/commit.ts`
 - **Contains**: `registerCommitCommand()` function plus input-parsing and interactive-collection helpers.
 - **Single Responsibility**: Creates Lore-enriched commits. Supports four input modes: stdin JSON (default), file JSON, CLI flags, and interactive prompts.
+- **Warnings**: validation warnings never block the commit. Builder warnings (`intent-length`, `message-length`, non-strict `required-trailer`) and the `reference-check-skipped` warning (Lore-id index could not be built) go through `formatWarnings`: `warning:` lines on stderr in text mode. The JSON success document always carries a `warnings` array of `{ severity, rule, message }`, which is `[]` when there are none, including on `--amend --no-edit`.
 - **Dependencies**: `CommitBuilder`, `IGitClient`, `IOutputFormatter`, `IPrompt`, `errors.ts`, `constants.ts`.
 
 #### `src/commands/validate.ts`
@@ -972,6 +973,11 @@ Both `TextFormatter` and `JsonFormatter` implement `formatError(code, messages)`
 
 - **Text**: `error: <message>` in red, `warning: <message>` in yellow, dim `(exit code N)`.
 - **JSON**: `{ "lore_version": "1.0", "error": true, "code": N, "messages": [...] }`.
+
+Advisory warnings on a command that still succeeds use `formatWarnings(messages)` instead, never `formatError(0, ...)`:
+
+- **Text**: one `warning: <message>` line per entry (identical to `formatError(0, ...)`), which the command prints to stderr only when the string is non-empty.
+- **JSON**: returns `''`, so nothing is written to stderr; the warnings travel in the command's success payload (e.g. the `warnings` array of `lore commit`). This keeps a `{"error": true}` document off stderr on a successful run.
 
 ---
 

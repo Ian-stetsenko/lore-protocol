@@ -36,6 +36,13 @@ export const CONFIDENCE_VALUES = ['low', 'medium', 'high'] as const;
 export const SCOPE_RISK_VALUES = ['narrow', 'moderate', 'wide'] as const;
 export const REVERSIBILITY_VALUES = ['clean', 'migration-needed', 'irreversible'] as const;
 
+/** Allowed values for each enum trailer, in documented order. */
+export const ENUM_ALLOWED_VALUES: Readonly<Record<EnumTrailerKey, readonly string[]>> = {
+  Confidence: CONFIDENCE_VALUES,
+  'Scope-risk': SCOPE_RISK_VALUES,
+  Reversibility: REVERSIBILITY_VALUES,
+};
+
 export const LORE_ID_PATTERN = /^[0-9a-f]{8}$/;
 export const LORE_ID_LENGTH = 8;
 

@@ -4,20 +4,12 @@ import type { LoreConfig } from '../types/config.js';
 import type { RawCommit } from '../interfaces/git-client.js';
 import type { CommitValidationResult, ValidationIssue } from '../types/output.js';
 import {
-  CONFIDENCE_VALUES,
-  SCOPE_RISK_VALUES,
-  REVERSIBILITY_VALUES,
+  ENUM_ALLOWED_VALUES,
   LORE_ID_PATTERN,
   ARRAY_TRAILER_KEYS,
   REFERENCE_TRAILER_KEYS,
 } from '../util/constants.js';
-import type { LoreTrailers, LoreId, EnumTrailerKey } from '../types/domain.js';
-
-const ALLOWED_ENUM_VALUES: Readonly<Record<EnumTrailerKey, readonly string[]>> = {
-  Confidence: CONFIDENCE_VALUES,
-  'Scope-risk': SCOPE_RISK_VALUES,
-  Reversibility: REVERSIBILITY_VALUES,
-};
+import type { LoreTrailers, LoreId } from '../types/domain.js';
 
 export class Validator {
   private readonly trailerParser: TrailerParser;
@@ -142,7 +134,7 @@ export class Validator {
       issues.push({
         severity: 'error',
         rule: 'invalid-enum',
-        message: `Invalid ${key} value: "${value}". Expected one of: ${ALLOWED_ENUM_VALUES[key].join(', ')}`,
+        message: `Invalid ${key} value: "${value}". Expected one of: ${ENUM_ALLOWED_VALUES[key].join(', ')}`,
       });
     }
   }

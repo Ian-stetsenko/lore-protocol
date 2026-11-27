@@ -202,6 +202,189 @@ fn errors_are_json_when_requested() {
         .contains("Invalid Lore-id format"));
 }
 
+fn keys(value: &Value) -> Vec<&str> {
+    value
+        .as_object()
+        .unwrap_or_else(|| panic!("not an object: {value}"))
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
+/// Key order of every `--json` envelope, as captured from the TypeScript
+/// formatter on origin/main.
+#[test]
+fn json_output_preserves_key_order() {
+    let repo = Repo::new();
+    repo.commit_at(
+        "src/a.ts",
+        &atom_message(
+            "feat(auth): full atom",
+            &[
+                "Lore-id: aaaa1111",
+                "Ticket: T-1",
+                "Related: aaaa1111",
+                "Depends-on: aaaa1111",
+                "Supersedes: cccc0000",
+                "Not-tested: n",
+                "Tested: t",
+                "Directive: d",
+                "Reversibility: clean",
+                "Scope-risk: narrow",
+                "Confidence: low",
+                "Rejected: r | why",
+                "Constraint: c",
+            ],
+        ),
+        DATE_OLD,
+    );
+    repo.commit(
+        "src/a.ts",
+        &atom_message("fix(auth): b", &["Lore-id: bbbb2222", "Related: aaaa1111"]),
+    );
+    let run = |args: &[&str]| {
+        let output = repo.lore().args(args).output().expect("lore runs");
+        let stream = if output.stdout.is_empty() {
+            output.stderr
+        } else {
+            output.stdout
+        };
+        json(&stream)
+    };
+
+    // Query (log; the path queries share the shape).
+    let log = run(&["log", "--json"]);
+    assert_eq!(
+        keys(&log),
+        [
+            "lore_version",
+            "command",
+            "target",
+            "target_type",
+            "meta",
+            "results"
+        ]
+    );
+    assert_eq!(
+        keys(&log["meta"]),
+        ["total_atoms", "filtered_atoms", "oldest", "newest"]
+    );
+    assert_eq!(
+        keys(&log["results"][0]),
+        [
+            "lore_id",
+            "commit",
+            "date",
+            "author",
+            "intent",
+            "body",
+            "trailers",
+            "files_changed",
+            "superseded",
+            "superseded_by"
+        ]
+    );
+    assert_eq!(
+        keys(&log["results"][1]["trailers"]),
+        [
+            "lore_id",
+            "constraint",
+            "rejected",
+            "confidence",
+            "scope_risk",
+            "reversibility",
+            "directive",
+            "tested",
+            "not_tested",
+            "supersedes",
+            "depends_on",
+            "related",
+            "ticket"
+        ]
+    );
+    let context = run(&["context", "src/a.ts", "--json"]);
+    assert_eq!(keys(&context), keys(&log));
+
+    let trace = run(&["trace", "bbbb2222", "--json"]);
+    assert_eq!(keys(&trace), ["lore_version", "root", "edges"]);
+    assert_eq!(
+        keys(&trace["root"]),
+        ["lore_id", "commit", "date", "author", "intent"]
+    );
+    assert_eq!(
+        keys(&trace["edges"][0]),
+        ["from", "to", "relationship", "resolved", "target_atom"]
+    );
+
+    let validate = run(&["validate", "--last", "2", "--json"]);
+    assert_eq!(
+        keys(&validate),
+        ["lore_version", "valid", "summary", "results"]
+    );
+    assert_eq!(
+        keys(&validate["summary"]),
+        ["errors", "warnings", "commits_checked"]
+    );
+    assert_eq!(
+        keys(&validate["results"][0]),
+        ["commit", "lore_id", "valid", "issues"]
+    );
+
+    let doctor = run(&["doctor", "--json"]);
+    assert_eq!(keys(&doctor), ["lore_version", "checks", "summary"]);
+    assert_eq!(
+        keys(&doctor["checks"][0]),
+        ["name", "status", "message", "details"]
+    );
+    assert_eq!(keys(&doctor["summary"]), ["errors", "warnings", "info"]);
+
+    let stale = run(&["stale", "--json"]);
+    assert_eq!(keys(&stale), ["lore_version", "stale_atoms"]);
+    assert_eq!(
+        keys(&stale["stale_atoms"][0]),
+        ["lore_id", "commit", "date", "author", "intent", "reasons"]
+    );
+    assert_eq!(
+        keys(&stale["stale_atoms"][0]["reasons"][0]),
+        ["signal", "description"]
+    );
+
+    let error = run(&["trace", "not-an-id", "--json"]);
+    assert_eq!(keys(&error), ["lore_version", "error", "code", "messages"]);
+    assert_eq!(
+        keys(&error["messages"][0]),
+        ["severity", "field", "message"]
+    );
+
+    repo.write("src/c.ts", "c\n");
+    repo.git(&["add", "-A"]);
+    let success = run(&["commit", "--intent", "feat: c", "--json"]);
+    assert_eq!(
+        keys(&success),
+        ["lore_version", "success", "message", "hash", "loreId"]
+    );
+
+    // Raw stdout, independent of the JSON parser: keys appear in order.
+    let raw = repo
+        .lore()
+        .args(["log", "--json"])
+        .output()
+        .expect("lore runs");
+    let text = String::from_utf8_lossy(&raw.stdout);
+    let positions: Vec<usize> = [
+        "\"lore_version\"",
+        "\"command\"",
+        "\"target\"",
+        "\"target_type\"",
+        "\"meta\"",
+        "\"results\"",
+    ]
+    .iter()
+    .map(|key| text.find(key).unwrap_or_else(|| panic!("{key} missing")))
+    .collect();
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------

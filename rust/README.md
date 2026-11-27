@@ -75,7 +75,15 @@ Where the two implementations differ it is deliberate and listed here.
   `[cli] update_check = false`) but performs no network check until a release
   channel for binaries exists.
 - **Usage errors.** Unknown flags and missing arguments exit with code 1, as
-  Commander did. `--help` and `--version` exit 0.
+  Commander did, and `--help` and `--version` exit 0. The usage and help text
+  itself is clap's, not Commander's, so only the exit codes are identical.
+- **Config arrays.** Array options in `.lore/config.toml` (for example
+  `trailers.required`) keep only their string elements. The TypeScript loader
+  kept the array as-is, untyped, so a non-string element reached the code that
+  used it.
+- **Hook permissions.** `lore hooks install` marks the hook executable
+  (`0o755`) only on Unix (`cfg(unix)`). Node's `chmod` ran on every platform
+  and had no effect on Windows; the Windows result is the same.
 - **Formatter selection.** The TypeScript code deferred formatter creation
   because Commander parsed global options lazily. clap parses everything up
   front, so `main.rs` builds the formatter once and passes it down.
@@ -89,9 +97,13 @@ Where the two implementations differ it is deliberate and listed here.
   wrong-typed top-level keys) are byte-identical to the TypeScript CLI. Only the
   text after `Commit input is not valid JSON: ` differs, because it comes from
   the parser: serde reports e.g. `key must be a string at line 1 column 3`,
-  V8 reports e.g. `Expected property name or '}' in JSON at position 2`. Unknown
-  keys are listed in document order; V8's `Object.keys` would list
-  integer-like keys (`"1"`) first.
+  V8 reports e.g. `Expected property name or '}' in JSON at position 2`.
+- **Unknown-key order.** Unknown top-level keys in commit input are listed in
+  document order. V8's `Object.keys` lists integer-like keys (`"1"`) first, so
+  the two messages differ only when such a key is present.
+- **JSON key order.** Every `--json` envelope emits its keys in the same order
+  as the TypeScript formatter; `json_output_preserves_key_order` in
+  `tests/cli_e2e.rs` pins it.
 
 ## Status and migration plan
 

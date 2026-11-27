@@ -127,9 +127,9 @@ lore search --text "session" --confidence high
 | `lore log` | Lore-enriched git log |
 | `lore stale [target]` | Flag potentially outdated knowledge |
 | `lore trace <lore-id>` | Trace decision chain via references (Supersedes, Depends-on, Related) |
-| `lore validate [range]` | Validate commits for Lore protocol compliance |
+| `lore validate [range]` | Validate commits for Lore protocol compliance (`--from <ref>`, `--last`, `--strict`) |
 | `lore squash <range>` | Merge Lore atoms from a revision range for squash merges |
-| `lore doctor` | Health checks: config validity, ID uniqueness, reference integrity |
+| `lore doctor [--all]` | Health checks: config validity, ID uniqueness (every ref with `--all`), reference integrity |
 
 ### Global Options
 
@@ -140,7 +140,7 @@ lore search --text "session" --confidence high
 | `--no-color` | Disable colored output |
 | `--no-update-notifier` | Disable update notification |
 | `--limit <n>` | Limit number of results |
-| `--since <ref>` | Only consider commits since ref/date |
+| `--since <ref>` | Only consider commits since ref/date (not on `validate`: use `--from <ref>` there) |
 
 ## Trailer Vocabulary
 
@@ -157,7 +157,7 @@ Every Lore-enriched commit carries a `Lore-id` and any combination of these trai
 | `Directive` | 0..n | free text | Forward-looking instruction for future maintainers |
 | `Tested` | 0..n | free text | What was verified before committing |
 | `Not-tested` | 0..n | free text | What was explicitly *not* verified (known gaps) |
-| `Supersedes` | 0..n | Lore-id | This atom replaces a previous decision |
+| `Supersedes` | 0..n | Lore-id | This atom replaces a previous decision. A supersede carries the decision forward, including dependencies on it |
 | `Depends-on` | 0..n | Lore-id | This atom requires another atom to hold |
 | `Related` | 0..n | Lore-id | Informational link to another atom |
 

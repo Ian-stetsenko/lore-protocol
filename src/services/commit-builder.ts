@@ -140,7 +140,7 @@ export class CommitBuilder {
             issues.push({
               severity: 'error',
               rule: 'invalid-lore-id-ref',
-              message: `Invalid Lore-id reference in ${key}: "${value}". Must be 8-character hex.`,
+              message: `Invalid Lore-id reference in ${key}: "${value}". Must be 8-character hex.${this.referenceIdHint(value)}`,
             });
           }
         }
@@ -170,6 +170,23 @@ export class CommitBuilder {
     }
 
     return issues;
+  }
+
+  /**
+   * Pinned hint sentence appended to the invalid-reference message for
+   * shapes that look like recognizable mistakes. Exactly 8 hex characters
+   * (any case mix) can only fail the pattern on case, so it hints lowercase
+   * hex; pure hex of length 7 or 9 through 64 hints at a git commit hash.
+   * Every other failing shape gets no hint.
+   */
+  private referenceIdHint(value: string): string {
+    if (/^[0-9a-fA-F]{8}$/.test(value)) {
+      return ' Hint: Lore-ids are lowercase hex.';
+    }
+    if (/^[0-9a-fA-F]{7}$/.test(value) || /^[0-9a-fA-F]{9,64}$/.test(value)) {
+      return ' Hint: this looks like a git commit hash; Lore-ids are 8-character lowercase hex.';
+    }
+    return '';
   }
 
   private buildTrailers(loreId: LoreId, input: CommitInput): LoreTrailers {

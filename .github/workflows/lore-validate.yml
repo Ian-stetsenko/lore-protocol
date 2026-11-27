@@ -23,7 +23,7 @@ jobs:
 
       - name: Validate Lore commits in PR
         run: |
-          echo "Validating commits since origin/main..."
-          node ./bin/lore.js validate --since origin/main || true
+          echo "Validating commits in origin/main..HEAD..."
+          node ./bin/lore.js validate --from origin/main || true
           echo ""
           echo "Note: Lore validation is advisory. To enforce, remove continue-on-error from the workflow."

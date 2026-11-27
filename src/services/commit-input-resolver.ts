@@ -25,6 +25,8 @@ export enum InputMode {
 export interface CommitCommandOptions {
   readonly amend?: boolean;
   readonly edit?: boolean;
+  /** Always defined: Commander synthesizes true unless --no-verify-refs is passed. */
+  readonly verifyRefs: boolean;
   readonly file?: string;
   readonly interactive?: boolean;
   readonly intent?: string;

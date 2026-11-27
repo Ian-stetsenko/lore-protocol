@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Command } from 'commander';
 import { registerCommitCommand } from '../../../src/commands/commit.js';
-import type { CommitBuilder } from '../../../src/services/commit-builder.js';
+import type { CommitBuilder, CommitInput } from '../../../src/services/commit-builder.js';
 import type { IGitClient } from '../../../src/interfaces/git-client.js';
 import type { IOutputFormatter } from '../../../src/interfaces/output-formatter.js';
 import type { CommitInputResolver } from '../../../src/services/commit-input-resolver.js';
 import type { HeadLoreIdReader } from '../../../src/services/head-lore-id-reader.js';
+import type { AtomRepository } from '../../../src/services/atom-repository.js';
 
 function createMockGitClient(): IGitClient {
   return {
@@ -44,9 +45,9 @@ function createMockCommitBuilder(): CommitBuilder {
   } as unknown as CommitBuilder;
 }
 
-function createMockInputResolver(): CommitInputResolver {
+function createMockInputResolver(input: CommitInput): CommitInputResolver {
   return {
-    resolve: vi.fn().mockResolvedValue({ intent: 'test commit' }),
+    resolve: vi.fn().mockResolvedValue(input),
   } as unknown as CommitInputResolver;
 }
 
@@ -54,6 +55,15 @@ function createMockHeadLoreIdReader(loreId: string | null = null): HeadLoreIdRea
   return {
     read: vi.fn().mockResolvedValue(loreId),
   } as unknown as HeadLoreIdReader;
+}
+
+function createMockAtomRepository(): AtomRepository {
+  return {
+    findByLoreId: vi.fn(async () => null),
+    getLoreIdIndex: vi.fn(async () => new Map()),
+    resolveReferenceIds: vi.fn(async () => new Map()),
+    findNearMatchIds: vi.fn(async () => []),
+  } as unknown as AtomRepository;
 }
 
 async function runCommitCommand(args: string[], deps: ReturnType<typeof createDeps>): Promise<void> {
@@ -66,13 +76,18 @@ async function runCommitCommand(args: string[], deps: ReturnType<typeof createDe
 function createDeps(overrides?: {
   headLoreIdReader?: HeadLoreIdReader;
   gitClient?: IGitClient;
+  atomRepository?: AtomRepository;
+  resolvedInput?: CommitInput;
 }) {
   return {
     commitBuilder: createMockCommitBuilder(),
     gitClient: overrides?.gitClient ?? createMockGitClient(),
     getFormatter: () => createMockFormatter(),
-    commitInputResolver: createMockInputResolver(),
+    commitInputResolver: createMockInputResolver(
+      overrides?.resolvedInput ?? { intent: 'test commit' },
+    ),
     headLoreIdReader: overrides?.headLoreIdReader ?? createMockHeadLoreIdReader(),
+    atomRepository: overrides?.atomRepository ?? createMockAtomRepository(),
   };
 }
 
@@ -138,6 +153,23 @@ describe('lore commit --amend', () => {
     await runCommitCommand(['--amend', '--no-edit'], deps);
 
     expect(headLoreIdReader.read).toHaveBeenCalledOnce();
+  });
+
+  it('should accept --amend --no-edit --no-verify-refs as a no-op', async () => {
+    const deps = createDeps();
+
+    await runCommitCommand(['--amend', '--no-edit', '--no-verify-refs'], deps);
+
+    // verifyRefs is a non-input mode flag: its presence must not trip
+    // the --no-edit conflicting-input check.
+    expect(deps.commitInputResolver.resolve).not.toHaveBeenCalled();
+    expect(deps.commitBuilder.validate).not.toHaveBeenCalled();
+    expect(deps.commitBuilder.build).not.toHaveBeenCalled();
+    expect(deps.atomRepository.resolveReferenceIds).not.toHaveBeenCalled();
+    expect(deps.gitClient.commit).toHaveBeenCalledWith(
+      '',
+      { amend: true, noEdit: true },
+    );
   });
 
   it('should throw when --no-edit is combined with --file', async () => {
@@ -231,5 +263,75 @@ describe('lore commit --amend', () => {
     await runCommitCommand(['--intent', 'normal'], deps);
 
     expect(gitClient.hasStagedChanges).toHaveBeenCalledOnce();
+  });
+
+  it('should report the staged-changes guard before reference validation when both would fail', async () => {
+    const gitClient = createMockGitClient();
+    vi.mocked(gitClient.hasStagedChanges).mockResolvedValue(false);
+    const deps = createDeps({
+      gitClient,
+      resolvedInput: { intent: 'test commit', trailers: { Related: ['deadbeef'] } },
+    });
+
+    await expect(
+      runCommitCommand(['--related', 'deadbeef'], deps),
+    ).rejects.toThrow(
+      'No staged changes. Stage files with `git add` before running `lore commit`.',
+    );
+    // The staged guard wins: the reference gate never runs.
+    expect(deps.atomRepository.resolveReferenceIds).not.toHaveBeenCalled();
+    expect(deps.gitClient.commit).not.toHaveBeenCalled();
+  });
+
+  describe('reference gate escape (--no-verify-refs)', () => {
+    it('should commit despite unresolvable reference ids when --no-verify-refs is passed', async () => {
+      // Default mock repository resolves nothing: deadbeef is unresolvable.
+      const deps = createDeps({
+        resolvedInput: { intent: 'test commit', trailers: { Related: ['deadbeef'] } },
+      });
+
+      await runCommitCommand(['--related', 'deadbeef', '--no-verify-refs'], deps);
+
+      expect(deps.atomRepository.resolveReferenceIds).not.toHaveBeenCalled();
+      expect(deps.gitClient.commit).toHaveBeenCalledWith('built message', undefined);
+    });
+
+    it('should keep reference validation active when --no-verify-refs is omitted', async () => {
+      const deps = createDeps({
+        resolvedInput: { intent: 'test commit', trailers: { Related: ['deadbeef'] } },
+      });
+
+      await expect(
+        runCommitCommand(['--related', 'deadbeef'], deps),
+      ).rejects.toThrow('Commit input validation failed');
+      expect(deps.atomRepository.resolveReferenceIds).toHaveBeenCalledWith(['deadbeef']);
+      expect(deps.gitClient.commit).not.toHaveBeenCalled();
+    });
+
+    it('should validate new reference trailers on amend with reference input', async () => {
+      const deps = createDeps({
+        resolvedInput: { intent: 'amend test', trailers: { Supersedes: ['deadbeef'] } },
+      });
+
+      await expect(
+        runCommitCommand(['--amend', '--supersedes', 'deadbeef'], deps),
+      ).rejects.toThrow('Commit input validation failed');
+      expect(deps.atomRepository.resolveReferenceIds).toHaveBeenCalledWith(['deadbeef']);
+      expect(deps.gitClient.commit).not.toHaveBeenCalled();
+    });
+
+    it('should commit on amend despite unresolvable ids when --no-verify-refs is passed', async () => {
+      const deps = createDeps({
+        resolvedInput: { intent: 'amend test', trailers: { Supersedes: ['deadbeef'] } },
+      });
+
+      await runCommitCommand(
+        ['--amend', '--supersedes', 'deadbeef', '--no-verify-refs'],
+        deps,
+      );
+
+      expect(deps.atomRepository.resolveReferenceIds).not.toHaveBeenCalled();
+      expect(deps.gitClient.commit).toHaveBeenCalledWith('built message', { amend: true });
+    });
   });
 });

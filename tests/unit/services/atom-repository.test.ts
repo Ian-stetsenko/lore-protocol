@@ -256,6 +256,51 @@ describe('AtomRepository', () => {
       expect(result!.loreId).toBe('deadbeef');
     });
 
+    it('should prefer a HEAD-reachable atom and skip other refs on a hit (issue #57)', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'deadbeef' });
+      const poisonAtom = makeLoreCommit({
+        hash: 'poison',
+        loreId: 'deadbeef',
+        date: '2030-01-01T00:00:00Z',
+      });
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all') ? [poisonAtom] : [headAtom],
+      );
+
+      const result = await repo.findByLoreId('deadbeef');
+
+      expect(result!.commitHash).toBe('head');
+      // Found on HEAD: the --all fallback pass never runs.
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).not.toContain('--all');
+    });
+
+    it('should fall back to --all when the Lore-id exists only off the current branch', async () => {
+      const sideAtom = makeLoreCommit({ hash: 'side', loreId: 'deadbeef' });
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all') ? [sideAtom] : [],
+      );
+
+      const result = await repo.findByLoreId('deadbeef');
+
+      expect(result!.commitHash).toBe('side');
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toContain('--all');
+    });
+
+    it('should fall back to --all when the HEAD pass fails on an unborn branch', async () => {
+      const sideAtom = makeLoreCommit({ hash: 'side', loreId: 'deadbeef' });
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all')
+          ? [sideAtom]
+          : Promise.reject(new Error('fatal: unborn HEAD')),
+      );
+
+      const result = await repo.findByLoreId('deadbeef');
+
+      expect(result!.commitHash).toBe('side');
+    });
+
     it('should return null if no atom matches the Lore-id', async () => {
       const commit = makeLoreCommit({ loreId: 'a1b2c3d4' });
       vi.mocked(gitClient.log).mockResolvedValue([commit]);
@@ -338,6 +383,24 @@ describe('AtomRepository', () => {
       expect(logArgs).toContain('--max-count=10');
     });
 
+    it('should pass allRefs option to git log', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      await repo.findAll({ allRefs: true });
+
+      const logArgs = vi.mocked(gitClient.log).mock.calls[0][0];
+      expect(logArgs).toContain('--all');
+    });
+
+    it('should scan only the current branch by default', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      await repo.findAll();
+
+      const logArgs = vi.mocked(gitClient.log).mock.calls[0][0];
+      expect(logArgs).not.toContain('--all');
+    });
+
     it('should return empty array when no Lore commits exist', async () => {
       const nonLoreCommit: RawCommit = {
         hash: 'abc',
@@ -366,6 +429,12 @@ describe('AtomRepository', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].loreId).toBe('aaaa1111');
+      // Scope pushes to the git layer as a coarse "(scope)" grep; the exact
+      // conventional-commit filter above stays authoritative.
+      expect(gitClient.log).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ loreOnly: true, scope: 'auth' }),
+      );
     });
 
     it('should match scope case-insensitively', async () => {
@@ -591,19 +660,24 @@ describe('AtomRepository', () => {
   });
 
   describe('getLoreIdIndex', () => {
-    it('should index atoms by Lore-id from a single --all pass', async () => {
+    it('should index atoms by Lore-id from a HEAD pass followed by an --all pass', async () => {
       const commits = [
         makeLoreCommit({ hash: 'aaa', loreId: 'aaaa1111', trailerExtras: 'Related: bbbb2222' }),
         makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' }),
       ];
       vi.mocked(gitClient.log).mockResolvedValue(commits);
+      vi.mocked(gitClient.resolveRef).mockResolvedValue('aaa');
 
       const index = await repo.getLoreIdIndex();
 
       expect(index.size).toBe(2);
       expect(index.get('aaaa1111')?.commitHash).toBe('aaa');
-      expect(gitClient.log).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toContain('--all');
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+      // The first pass walks the pinned HEAD commit; the second walks only
+      // the delta (follow-up on PR #74). The hash, not the ref, keeps a
+      // concurrent branch move or landing commit consistent between passes.
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toEqual(['aaa']);
+      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toEqual(['--all', '--not', 'aaa']);
     });
 
     it('should keep the newest atom when a Lore-id appears twice', async () => {
@@ -619,18 +693,220 @@ describe('AtomRepository', () => {
       expect(index.get('aaaa1111')?.commitHash).toBe('newest');
     });
 
+    it('should keep the HEAD-reachable atom when a side branch shares the Lore-id (issue #57)', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'deadbeef' });
+      const poisonAtom = makeLoreCommit({
+        hash: 'poison',
+        loreId: 'deadbeef',
+        date: '2030-01-01T00:00:00Z',
+      });
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all') ? [poisonAtom] : [headAtom],
+      );
+
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.size).toBe(1);
+      expect(index.get('deadbeef')?.commitHash).toBe('head');
+    });
+
+    it('should still index a Lore-id that exists only off the current branch', async () => {
+      const sideAtom = makeLoreCommit({ hash: 'side', loreId: 'bbbb2222' });
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all') ? [sideAtom] : [],
+      );
+
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.get('bbbb2222')?.commitHash).toBe('side');
+    });
+
+    it('should build from --all alone when HEAD cannot be resolved (unborn branch)', async () => {
+      const atom = makeLoreCommit({ hash: 'side', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.resolveRef).mockRejectedValue(new Error('fatal: unborn HEAD'));
+      vi.mocked(gitClient.log).mockResolvedValue([atom]);
+
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.get('aaaa1111')?.commitHash).toBe('side');
+      // Unborn HEAD: a single plain --all walk, no exclusion.
+      expect(gitClient.log).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toEqual(['--all']);
+    });
+
+    it('should fall back to plain --all when the pinned-hash walk fails after resolution', async () => {
+      const atom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.resolveRef).mockResolvedValue('aaa');
+      vi.mocked(gitClient.log).mockImplementation(async (args) =>
+        args.includes('--all') ? [atom] : Promise.reject(new Error('git log failed')),
+      );
+
+      const index = await repo.getLoreIdIndex();
+
+      // The --all pass is the authority; the exclusion is given up so HEAD
+      // history is covered by it.
+      expect(index.get('aaaa1111')?.commitHash).toBe('head');
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toEqual(['aaa']);
+      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toEqual(['--all']);
+    });
+
     it('should build the index once per repository instance', async () => {
       vi.mocked(gitClient.log).mockResolvedValue([makeLoreCommit({ loreId: 'aaaa1111' })]);
 
       await repo.getLoreIdIndex();
       await repo.getLoreIdIndex();
 
-      expect(gitClient.log).toHaveBeenCalledTimes(1);
+      // One build = two git passes (HEAD, then --all).
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+    });
+
+    it('should rebuild after a failed build instead of memoizing the rejection', async () => {
+      const atom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      let call = 0;
+      vi.mocked(gitClient.log).mockImplementation(async () => {
+        call += 1;
+        if (call === 2) {
+          throw new Error('transient git failure');
+        }
+        return call < 4 ? [] : [atom];
+      });
+
+      // First build: the authoritative --all pass fails; the rejection
+      // reaches the caller. The slot clears, so the second call rebuilds
+      // instead of returning the memoized rejection.
+      await expect(repo.getLoreIdIndex()).rejects.toThrow('transient git failure');
+      const index = await repo.getLoreIdIndex();
+
+      expect(index.get('aaaa1111')?.commitHash).toBe('head');
+      expect(gitClient.log).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  describe('reference resolution', () => {
+    it('resolveReferenceIds resolves an id present on the HEAD pass', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const resolved = await repo.resolveReferenceIds(['aaaa1111']);
+
+      expect(resolved.get('aaaa1111')?.commitHash).toBe('head');
+    });
+
+    it('resolveReferenceIds resolves an id that exists only on a non-HEAD ref', async () => {
+      const sideAtom = makeLoreCommit({ hash: 'side', loreId: 'bbbb2222' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [sideAtom] : [],
+      );
+
+      const resolved = await repo.resolveReferenceIds(['bbbb2222']);
+
+      expect(resolved.get('bbbb2222')?.commitHash).toBe('side');
+    });
+
+    it('resolveReferenceIds maps an id resolving on no ref to null', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const resolved = await repo.resolveReferenceIds(['aaaa1111', 'deadbeef']);
+
+      expect(resolved.get('aaaa1111')?.commitHash).toBe('head');
+      expect(resolved.get('deadbeef')).toBeNull();
+    });
+
+    it('resolveReferenceIds over an empty index reports every id unresolvable without crashing', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      const resolved = await repo.resolveReferenceIds(['aaaa1111', 'bbbb2222']);
+
+      expect(resolved.get('aaaa1111')).toBeNull();
+      expect(resolved.get('bbbb2222')).toBeNull();
+      // The index was still built: one HEAD pass plus one --all pass.
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+    });
+
+    it('resolveReferenceIds never builds the index when handed zero ids', async () => {
+      const resolved = await repo.resolveReferenceIds([]);
+
+      expect(resolved.size).toBe(0);
+      expect(gitClient.log).not.toHaveBeenCalled();
+      expect(gitClient.resolveRef).not.toHaveBeenCalled();
+    });
+
+    it('findNearMatchIds over an empty index returns no candidates without crashing', async () => {
+      vi.mocked(gitClient.log).mockResolvedValue([]);
+
+      const candidates = await repo.findNearMatchIds('deadbeef');
+
+      expect(candidates).toEqual([]);
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+    });
+
+    it('findNearMatchIds returns an indexed id at Hamming distance exactly 2', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaaaa11' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaabb');
+
+      expect(matches).toEqual(['aaaaaa11']);
+    });
+
+    it('findNearMatchIds returns nothing at Hamming distance 4', async () => {
+      const headAtom = makeLoreCommit({ hash: 'head', loreId: 'aaaa1111' });
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : [headAtom],
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaabb');
+
+      expect(matches).toEqual([]);
+    });
+
+    it('findNearMatchIds caps candidates at three, ties broken by index order', async () => {
+      const commits = [
+        makeLoreCommit({ hash: 'c1', loreId: 'aaaaaa01' }),
+        makeLoreCommit({ hash: 'c2', loreId: 'aaaaaa02' }),
+        makeLoreCommit({ hash: 'c3', loreId: 'aaaaaa03' }),
+        makeLoreCommit({ hash: 'c4', loreId: 'aaaaaa04' }),
+      ];
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : commits,
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaaaa');
+
+      // All four sit at distance 2 (a genuine tie), so the first three in
+      // index iteration order win the cap.
+      expect(matches).toEqual(['aaaaaa01', 'aaaaaa02', 'aaaaaa03']);
+    });
+
+    it('findNearMatchIds orders nearer ids first within the cap', async () => {
+      const commits = [
+        makeLoreCommit({ hash: 'c1', loreId: 'aaaaaa01' }), // distance 2
+        makeLoreCommit({ hash: 'c2', loreId: 'aaaaaaa2' }), // distance 1
+        makeLoreCommit({ hash: 'c3', loreId: 'aaaaaa03' }), // distance 2
+        makeLoreCommit({ hash: 'c4', loreId: 'aaaaaa04' }), // distance 2
+      ];
+      vi.mocked(gitClient.log).mockImplementation(async (args: readonly string[]) =>
+        args.includes('--all') ? [] : commits,
+      );
+
+      const matches = await repo.findNearMatchIds('aaaaaaaa');
+
+      // The distance-1 id leads; the remaining distance-2 ties keep index
+      // order and the fourth is cut by the cap.
+      expect(matches).toEqual(['aaaaaaa2', 'aaaaaa01', 'aaaaaa03']);
     });
   });
 
   describe('resolveFollowLinks index usage', () => {
-    it('should resolve referenced ids with a single --all pass', async () => {
+    it('should resolve referenced ids via the HEAD-then-all index passes', async () => {
       const commitB = makeLoreCommit({ hash: 'bbb', loreId: 'bbbb2222' });
       vi.mocked(gitClient.log).mockResolvedValue([commitB]);
 
@@ -662,8 +938,9 @@ describe('AtomRepository', () => {
       const result = await repo.resolveFollowLinks([atomA], 3);
 
       expect(result).toHaveLength(2);
-      expect(gitClient.log).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(gitClient.log).mock.calls[0][0]).toContain('--all');
+      expect(gitClient.log).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(gitClient.log).mock.calls[0][0]).not.toContain('--all');
+      expect(vi.mocked(gitClient.log).mock.calls[1][0]).toContain('--all');
     });
   });
 
@@ -741,9 +1018,12 @@ describe('AtomRepository lore-only discovery (git-level pre-filter)', () => {
     await repo.getLoreIdIndex();
 
     const calls = vi.mocked(gitClient.log).mock.calls;
-    expect(calls).toHaveLength(4);
+    // getLoreIdIndex runs two passes: HEAD first, then --all.
+    expect(calls).toHaveLength(5);
     for (const call of calls) {
-      expect(call[1]).toEqual({ loreOnly: true });
+      // findByScope additionally carries its coarse scope grep (see its own
+      // describe block); every discovery query is Lore-only either way.
+      expect(call[1]).toMatchObject({ loreOnly: true });
     }
   });
 
@@ -759,11 +1039,16 @@ describe('AtomRepository lore-only discovery (git-level pre-filter)', () => {
   it('findByLoreId greps a trailer line and tolerates missing or extra whitespace after the colon', async () => {
     await repo.findByLoreId('deadbeef');
 
-    const [args, options] = vi.mocked(gitClient.log).mock.calls[0];
-    expect(args).toContain('--all');
-    expect(args).toContain('--extended-regexp');
-    expect(args).toContain('--grep=^Lore-id:[[:space:]]*deadbeef');
-    // Its own grep must not be OR-ed with the generic Lore-id grep
-    expect(options).toBeUndefined();
+    // HEAD pass first; the miss falls back to --all.
+    const calls = vi.mocked(gitClient.log).mock.calls;
+    expect(calls).toHaveLength(2);
+    for (const [args, options] of calls) {
+      expect(args).toContain('--extended-regexp');
+      expect(args).toContain('--grep=^Lore-id:[[:space:]]*deadbeef');
+      // Its own grep must not be OR-ed with the generic Lore-id grep
+      expect(options).toBeUndefined();
+    }
+    expect(calls[0][0]).not.toContain('--all');
+    expect(calls[1][0]).toContain('--all');
   });
 });

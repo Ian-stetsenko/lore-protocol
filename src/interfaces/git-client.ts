@@ -32,6 +32,21 @@ export interface LogOptions {
    * usable); the trailer parser remains the authority on what is an atom.
    */
   readonly loreOnly?: boolean;
+  /**
+   * Push a conventional-commit scope pre-filter to the git layer as a
+   * case-insensitive `--grep=\\(<scope>\\)` ANDed with the Lore-id pre-filter
+   * via --all-match. Coarse by design (substring over the whole message);
+   * the parser-level scope filter stays authoritative. It cannot drop an
+   * atom with an ASCII single-line subject; wrapped multi-line subjects and
+   * non-ASCII case folding are the documented residuals. Callers must not pass
+   * their own --grep in args alongside this (git would AND it under
+   * --all-match, silently narrowing their query); author patterns in args
+   * also become case-insensitive while this is set, which matches the
+   * parser-level author refinement; and the Lore-id pre-filter itself
+   * case-folds while this is set (over-match only; the trailer parser stays
+   * authoritative).
+   */
+  readonly scope?: string;
 }
 
 export interface IGitClient {

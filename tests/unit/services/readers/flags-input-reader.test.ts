@@ -18,6 +18,7 @@ describe('FlagsInputReader', () => {
       supersedes: ['abcd1234'],
       dependsOn: ['dead0000'],
       related: ['beef1234'],
+      verifyRefs: true,
     };
 
     const reader = new FlagsInputReader(options);
@@ -39,7 +40,7 @@ describe('FlagsInputReader', () => {
   });
 
   it('should default intent to empty string when undefined', async () => {
-    const options: CommitCommandOptions = {};
+    const options: CommitCommandOptions = { verifyRefs: true };
 
     const reader = new FlagsInputReader(options);
     const result = await reader.read();
@@ -50,6 +51,7 @@ describe('FlagsInputReader', () => {
   it('should leave body undefined when not provided', async () => {
     const options: CommitCommandOptions = {
       intent: 'test intent',
+      verifyRefs: true,
     };
 
     const reader = new FlagsInputReader(options);
@@ -61,6 +63,7 @@ describe('FlagsInputReader', () => {
   it('should leave array trailers undefined when not provided', async () => {
     const options: CommitCommandOptions = {
       intent: 'test intent',
+      verifyRefs: true,
     };
 
     const reader = new FlagsInputReader(options);
@@ -79,6 +82,7 @@ describe('FlagsInputReader', () => {
   it('should leave enum trailers undefined when not provided', async () => {
     const options: CommitCommandOptions = {
       intent: 'test intent',
+      verifyRefs: true,
     };
 
     const reader = new FlagsInputReader(options);
@@ -93,6 +97,7 @@ describe('FlagsInputReader', () => {
     const options: CommitCommandOptions = {
       intent: 'quick fix',
       confidence: 'low',
+      verifyRefs: true,
     };
 
     const reader = new FlagsInputReader(options);

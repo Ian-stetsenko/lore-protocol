@@ -4,10 +4,11 @@ import type { IGitClient, RawCommit } from '../interfaces/git-client.js';
 import type { IOutputFormatter } from '../interfaces/output-formatter.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
 import type { CommitValidationResult, FormattableValidationResult, ValidationIssue } from '../types/output.js';
+import { LoreError } from '../util/errors.js';
 import { readFile } from 'node:fs/promises';
 
 interface ValidateCommandOptions {
-  readonly since?: string;
+  readonly from?: string;
   readonly last?: number;
   readonly strict?: boolean;
   readonly commitMsgFile?: string;
@@ -17,7 +18,8 @@ interface ValidateCommandOptions {
  * Register the `lore validate [range]` command.
  * Validates commits for Lore protocol compliance.
  * Default: last commit (HEAD~1..HEAD).
- * Accepts git revision range as argument.
+ * Accepts a git revision range as argument, or `--from <ref>` for `<ref>..HEAD`.
+ * (`--since <ref>`, a deprecated alias of `--from` since 0.7.0, was removed in 0.8.0.)
  */
 export function registerValidateCommand(
   program: Command,
@@ -31,7 +33,7 @@ export function registerValidateCommand(
   program
     .command('validate [range]')
     .description('Validate commits for Lore protocol compliance')
-    .option('--since <ref>', 'Validate all commits since ref (e.g., main)')
+    .option('--from <ref>', 'Validate all commits in the range <ref>..HEAD (e.g., --from main)')
     .option('--last <n>', 'Validate the last N commits', parseInt)
     .option('--strict', 'Treat warnings as errors')
     .option('--commit-msg-file <path>', 'Validate a commit message file (used by git hooks)')
@@ -56,12 +58,20 @@ export function registerValidateCommand(
         }];
       } else {
         // Normal mode: validate commits from git history
+        if (range !== undefined && options.from !== undefined) {
+          throw new LoreError(
+            `Conflicting range specifiers: positional range "${range}" and --from ${options.from}. Pass one or the other.`,
+            1,
+          );
+        }
+
+        const ref = options.from;
         let logArgs: string[];
 
         if (range) {
           logArgs = [range];
-        } else if (options.since) {
-          logArgs = [`${options.since}..HEAD`];
+        } else if (ref) {
+          logArgs = [`${ref}..HEAD`];
         } else if (options.last !== undefined && options.last > 0) {
           logArgs = [`-${options.last}`];
         } else {

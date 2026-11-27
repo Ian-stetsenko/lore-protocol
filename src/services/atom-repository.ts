@@ -18,7 +18,10 @@ export class AtomRepository {
     private readonly customTrailerKeys: readonly string[] = [],
   ) {}
 
-  /** Lazily built Lore-id -> atom index over the whole history (--all). */
+  /**
+   * Lazily built Lore-id -> atom index: HEAD-reachable atoms first, then an
+   * --all pass that fills ids living only off the current branch.
+   */
   private loreIndex: Promise<ReadonlyMap<LoreId, LoreAtom>> | null = null;
 
   /**
@@ -38,6 +41,10 @@ export class AtomRepository {
    * Find an atom by its Lore-id.
    * Uses git log --grep to efficiently search for the specific trailer value
    * instead of fetching entire history.
+   *
+   * The HEAD-reachable history is searched first and --all is consulted only
+   * on a miss, so a future-dated commit on a side branch can never shadow
+   * the current branch's atom (issue #57).
    */
   async findByLoreId(loreId: LoreId): Promise<LoreAtom | null> {
     if (!LORE_ID_PATTERN.test(loreId)) {
@@ -48,36 +55,153 @@ export class AtomRepository {
     // because git accepts and normalises `Lore-id:<id>`. loreId is validated
     // hex above, so no regex escaping is needed. Not combined with loreOnly:
     // git ORs multiple --grep patterns, which would widen this to a full scan.
-    const logArgs = ['--all', '--extended-regexp', `--grep=^Lore-id:[[:space:]]*${loreId}`];
-    const rawCommits = await this.gitClient.log(logArgs);
-    const atoms = await this.parseRawCommits(rawCommits);
+    const grepArgs = ['--extended-regexp', `--grep=^Lore-id:[[:space:]]*${loreId}`];
 
-    return atoms.find((atom) => atom.loreId === loreId) ?? null;
+    // Pass 1: commits reachable from HEAD (no --all). An unborn HEAD (fresh
+    // `git init`) makes this pass fail while --all succeeds and returns
+    // nothing; treat that as a miss so fresh-repo behavior is unchanged.
+    let headMatch: LoreAtom | undefined;
+    try {
+      const headCommits = await this.gitClient.log(grepArgs);
+      headMatch = (await this.parseRawCommits(headCommits)).find(
+        (atom) => atom.loreId === loreId,
+      );
+    } catch {
+      // Fall through to the --all pass, which surfaces real git failures.
+    }
+    if (headMatch) {
+      return headMatch;
+    }
+
+    // Pass 2 (miss): every ref, for Lore-ids that only exist off the branch.
+    const allCommits = await this.gitClient.log(['--all', ...grepArgs]);
+    const allAtoms = await this.parseRawCommits(allCommits);
+    return allAtoms.find((atom) => atom.loreId === loreId) ?? null;
   }
 
   /**
    * Build (once per instance) an index of every atom by Lore-id from a
-   * single `git log --all` pass. Reference-heavy traversals (trace BFS,
-   * follow-link resolution, reference validation) look up ids against this
-   * index instead of running one full-history `git log --grep` per id,
-   * which is minutes on large corpora (hundreds of greps per traversal).
-   * Newest-first insertion with first-wins keeps the same atom a grep-based
-   * findByLoreId returns.
+   * `git log` pass over the pinned HEAD commit followed by a
+   * `git log --all --not <head-hash>` delta pass (plain `--all` when HEAD
+   * cannot be resolved or the first pass fails).
+   * Reference-heavy traversals (trace BFS, follow-link resolution, reference
+   * validation) look up ids against this index instead of running one
+   * full-history `git log --grep` per id, which is minutes on large corpora
+   * (hundreds of greps per traversal).
+   *
+   * HEAD-reachable atoms are inserted first and the --all pass only fills
+   * ids that are still missing, so lookups stay consistent with
+   * findByLoreId: a side branch can never shadow the current branch
+   * (issue #57). Within each pass, newest-first insertion with first-wins
+   * keeps the same atom a grep-based findByLoreId returns.
    */
   async getLoreIdIndex(): Promise<ReadonlyMap<LoreId, LoreAtom>> {
-    this.loreIndex ??= this.gitClient
-      .log(['--all'], { loreOnly: true })
-      .then((rawCommits) => this.parseRawCommits(rawCommits))
-      .then((atoms) => {
-        const index = new Map<LoreId, LoreAtom>();
-        for (const atom of atoms) {
-          if (!index.has(atom.loreId)) {
-            index.set(atom.loreId, atom);
-          }
+    this.loreIndex ??= (async () => {
+      // HEAD pass seeds every id reachable from the current branch. On an
+      // unborn HEAD it fails while --all succeeds; skip it then, so the
+      // index over a fresh repository stays empty as before.
+      // Resolve HEAD once, then walk exactly that commit: the pin always
+      // equals what the first pass walked, so under concurrent branch
+      // movement or landing commits the exclusion boundary stays
+      // self-consistent - no walked history is dropped from the delta pass
+      // and no new history is hidden from it. (Which duplicate of a
+      // mid-build-landing Lore-id wins first-wins still depends on timing,
+      // as it did before under a different window.)
+      let pin: string | null = null;
+      try {
+        pin = await this.gitClient.resolveRef('HEAD');
+      } catch {
+        // Unborn HEAD on a fresh repository: nothing to walk or exclude;
+        // the --all pass below is the authority (and throws on real git
+        // failures).
+      }
+      let headCommits: readonly RawCommit[] = [];
+      if (pin !== null) {
+        try {
+          headCommits = await this.gitClient.log([pin], { loreOnly: true });
+        } catch {
+          // Walk failed: give the exclusion up and let --all cover HEAD.
+          pin = null;
         }
-        return index;
-      });
+      }
+      // --all pass contributes only ids the HEAD pass missed. When HEAD
+      // walked, its pinned commit is excluded from the pass so its history
+      // is not walked and parsed a second time before first-wins dedupes
+      // them; without a pin the pass stays plain --all.
+      const allArgs = pin !== null ? ['--all', '--not', pin] : ['--all'];
+      const allCommits = await this.gitClient.log(allArgs, { loreOnly: true });
+      const atoms = await this.parseRawCommits([...headCommits, ...allCommits]);
+      const index = new Map<LoreId, LoreAtom>();
+      for (const atom of atoms) {
+        if (!index.has(atom.loreId)) {
+          index.set(atom.loreId, atom);
+        }
+      }
+      return index;
+    })();
+    // A failed build must not poison the cache for the instance lifetime:
+    // clear the slot on rejection so a later call rebuilds (transient git
+    // failures stay retryable). The rejection still propagates to every
+    // current awaiter; the derived promise here is intentionally discarded.
+    this.loreIndex.catch(() => {
+      this.loreIndex = null;
+    });
     return this.loreIndex;
+  }
+
+  /**
+   * Resolve a batch of reference Lore-ids against the shared all-refs index
+   * (see getLoreIdIndex): one entry per requested id, mapped to its atom or
+   * to null when the id resolves on no ref. Semantics match trace lookups -
+   * an id that exists only on a non-HEAD ref resolves through the delta pass.
+   *
+   * Pattern-invalid ids are excluded from the returned map (they can
+   * never match an indexed atom). An empty id list returns an empty map
+   * and never builds the index, so commits without references pay no git
+   * cost.
+   */
+  async resolveReferenceIds(
+    ids: readonly LoreId[],
+  ): Promise<ReadonlyMap<LoreId, LoreAtom | null>> {
+    const resolved = new Map<LoreId, LoreAtom | null>();
+    const validIds = ids.filter((id) => LORE_ID_PATTERN.test(id));
+    if (validIds.length === 0) {
+      return resolved;
+    }
+
+    const index = await this.getLoreIdIndex();
+    for (const id of validIds) {
+      resolved.set(id, index.get(id) ?? null);
+    }
+    return resolved;
+  }
+
+  /**
+   * Near-match candidates for an unresolvable Lore-id: indexed ids at
+   * Hamming distance at most 2 from the input id, ties broken by index
+   * iteration order, capped at three candidates.
+   *
+   * Returns an empty list when the input is not a pattern-valid id or when
+   * the index holds no atoms.
+   */
+  async findNearMatchIds(id: LoreId): Promise<readonly LoreId[]> {
+    if (!LORE_ID_PATTERN.test(id)) {
+      return [];
+    }
+
+    const index = await this.getLoreIdIndex();
+    const candidates: Array<{ id: LoreId; distance: number }> = [];
+    for (const candidateId of index.keys()) {
+      const distance = this.hammingDistance(id, candidateId);
+      if (distance <= 2) {
+        candidates.push({ id: candidateId, distance });
+      }
+    }
+
+    // Stable sort: equal distances keep index iteration order (HEAD atoms
+    // were inserted first), so tie-breaking is deterministic.
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates.slice(0, 3).map((candidate) => candidate.id);
   }
 
   /**
@@ -102,9 +226,16 @@ export class AtomRepository {
 
   /**
    * Find all Lore atoms, optionally filtered by date range and limit.
+   * allRefs widens the scan from the current branch to every ref (--all);
+   * used by doctor for opt-in cross-ref duplicate detection.
    */
-  async findAll(options: { since?: string; until?: string; maxCommits?: number } = {}): Promise<LoreAtom[]> {
+  async findAll(
+    options: { since?: string; until?: string; maxCommits?: number; allRefs?: boolean } = {},
+  ): Promise<LoreAtom[]> {
     const args = this.buildBaseLogArgs();
+    if (options.allRefs) {
+      args.push('--all');
+    }
 
     if (options.since) {
       args.push(`--since=${options.since}`);
@@ -126,7 +257,9 @@ export class AtomRepository {
    */
   async findByScope(scope: string, options: PathQueryOptions): Promise<LoreAtom[]> {
     const logArgs = this.buildLogArgs(options);
-    const rawCommits = await this.gitClient.log(logArgs, { loreOnly: true });
+    // Git-level scope pushdown (coarse "(scope)" substring grep); the exact
+    // conventional-commit scope filter below stays authoritative.
+    const rawCommits = await this.gitClient.log(logArgs, { loreOnly: true, scope });
     const atoms = await this.parseRawCommits(rawCommits);
 
     const scopeFiltered = atoms.filter((atom) => {
@@ -323,6 +456,21 @@ export class AtomRepository {
   private extractScope(subject: string): string | null {
     const match = subject.match(/^[a-zA-Z]+\(([^)]+)\)/);
     return match ? match[1] : null;
+  }
+
+  /**
+   * Character-level Hamming distance between two same-length ids.
+   * Both inputs are Lore-id pattern-validated (8 lowercase hex chars),
+   * so lengths always match.
+   */
+  private hammingDistance(a: string, b: string): number {
+    let distance = 0;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) {
+        distance += 1;
+      }
+    }
+    return distance;
   }
 
   /**

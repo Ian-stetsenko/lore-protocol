@@ -181,6 +181,7 @@ async function main(): Promise<void> {
     getFormatter,
     commitInputResolver,
     headLoreIdReader,
+    atomRepository,
   });
 
   registerValidateCommand(program, {
@@ -200,6 +201,7 @@ async function main(): Promise<void> {
     atomRepository,
     configLoader,
     getFormatter,
+    supersessionResolver,
   });
 
   const hookScriptGenerator = new HookScriptGenerator();

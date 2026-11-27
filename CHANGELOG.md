@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-11-27
+
+Six bugs found while auditing the docs for 0.8.0, plus small fixes. Behaviour changes worth checking before you upgrade are under **Migration notes**.
+
+### Fixed
+
+- **Hook mode treats warnings as advisory**: `lore validate --commit-msg-file` (the commit-msg hook) now exits 0 on warnings and 1 only on errors, so `[hooks] enforce = false` no longer blocks commits that have warnings. Range validation is unchanged (exit 2 on warnings, `--strict` turns them into failures), and `enforce = true` still adds `--strict`. The fix is in `validate`, so installed hooks pick it up without reinstalling. ([#84](https://github.com/Ian-stetsenko/lore-protocol/pull/84))
+- **Invalid enum values are reported**: `lore validate` now flags `Confidence`, `Scope-risk` and `Reversibility` values outside the allowed set. They used to be dropped while parsing, before validation could see them. Query output is unchanged. ([#85](https://github.com/Ian-stetsenko/lore-protocol/pull/85))
+- **Full "(pending)" label**: `lore validate --commit-msg-file` prints the complete `(pending)` label for a not-yet-committed message instead of the truncated `(pending`. ([#86](https://github.com/Ian-stetsenko/lore-protocol/pull/86))
+- **`lore commit` shows its warnings**: validation warnings are printed as `warning: ...` lines on stderr in text mode, and JSON output always includes a `warnings` array. They were computed and then discarded. ([#87](https://github.com/Ian-stetsenko/lore-protocol/pull/87))
+- **Config discovery stops at the repository root**: `.lore/config.toml` lookup no longer walks above the nearest `.git` file or directory, so a config in a parent folder or your home directory can't leak into an unrelated repo. ([#88](https://github.com/Ian-stetsenko/lore-protocol/pull/88))
+- **Commit hash in `lore commit` output**: the hash is read with `git rev-parse`, fixing the empty hash after root commits, on a detached HEAD and on branch names containing dots. ([#89](https://github.com/Ian-stetsenko/lore-protocol/pull/89))
+- **`lore trace --max-depth` bounds edge depth**: `--max-depth N` lists edges whose source is fewer than N hops from the start, so it no longer shows one level too many. `--max-depth 0` lists none. Non-integer values exit 1. ([#90](https://github.com/Ian-stetsenko/lore-protocol/pull/90))
+- **Git refs passed to `--since` / `--until` are rejected**: git only accepts dates there, so `--since v1.2` used to be silently ignored. A value that resolves to a git ref now exits 1 with a hint to pass a date such as `2026-01-31` or `"2 weeks ago"`. Dates and digit-only values are passed through. Help text says `<date>`. ([#91](https://github.com/Ian-stetsenko/lore-protocol/pull/91))
+- **`lore stale --older-than` / `--drift` take effect**: the flags override `[stale] older_than` and `drift_threshold` for that run instead of being ignored. Invalid values (`--older-than` must look like `30d`, `2w`, `6m` or `1y`) exit 1. ([#92](https://github.com/Ian-stetsenko/lore-protocol/pull/92))
+- **`--scope` without a target**: `context`, `constraints`, `rejected`, `directives` and `tested`/`coverage` accept `--scope <name>` with no path. Passing neither exits 1 with `Missing target: pass a <target> path or --scope <name>.` ([#93](https://github.com/Ian-stetsenko/lore-protocol/pull/93))
+
+### Changed
+
+- **Agent instruction files (`skills/`)**: commit examples use a quoted heredoc instead of `echo '...'`, which broke on apostrophes, and mention `--file` for PowerShell. They now say that extra trailers such as `Co-Authored-By` go inside `trailers`, and they document the strict commit-input errors, `validate --from` / `--last`, `lore init` and `lore hooks install`. README install paths work for a global install. A unit test keeps every file in step with the trailer list. ([#94](https://github.com/Ian-stetsenko/lore-protocol/pull/94))
+
+### Migration notes
+
+- **Hooks no longer block on warnings** unless `[hooks] enforce = true` (which adds `--strict`). If you relied on warnings blocking commits, set `enforce = true`.
+- **CI ranges can now fail on old commits** that contain invalid enum values (for example `Confidence: very`). Fix or exclude those commits, or validate from a later ref with `--from`.
+- **`--since` / `--until` with a git ref exit 1.** Pass a date, or use `lore validate --from <ref>` for revision ranges.
+- **Config files above the repository root are no longer merged.** Move any shared settings into the repo's own `.lore/config.toml`.
+- **`lore trace` shows one level fewer** for the same `--max-depth`. Add 1 to keep the old output.
+- **`lore commit` writes warnings to stderr** in text mode. Scripts that require an empty stderr should check the exit code instead.
+
 ## [0.8.0] - 2026-11-09
 
 ### Added

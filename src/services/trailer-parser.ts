@@ -4,6 +4,7 @@ import type {
   TrailerKey,
   ArrayTrailerKey,
   EnumTrailerKey,
+  InvalidEnumValue,
   ConfidenceLevel,
   ScopeRiskLevel,
   ReversibilityLevel,
@@ -104,6 +105,24 @@ export class TrailerParser {
       Related: arrays['Related'],
       custom: new CustomTrailerCollection(custom),
     };
+  }
+
+  /**
+   * Find every enum trailer line (Confidence, Scope-risk, Reversibility) in a
+   * raw trailer block whose trimmed value is not an allowed value, in
+   * document order. Matching is case-sensitive; an empty value is reported
+   * as `""`.
+   *
+   * `parse()` silently drops such values (they become null), so validation
+   * must inspect the raw block to see them.
+   */
+  findInvalidEnumValues(rawTrailers: string): readonly InvalidEnumValue[] {
+    const enumTrailerKeySet = new Set<string>(ENUM_TRAILER_KEYS);
+
+    return this.parseLinesToEntries(rawTrailers.split('\n'))
+      .filter(({ key }) => enumTrailerKeySet.has(key))
+      .map(({ key, value }): InvalidEnumValue => ({ key: key as EnumTrailerKey, value: value.trim() }))
+      .filter(({ key, value }) => !this.isValidEnumValue(key, value));
   }
 
   /**

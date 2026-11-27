@@ -32,6 +32,13 @@ export type ArrayTrailerKey =
 /** Trailers that accept a single enum value. */
 export type EnumTrailerKey = 'Confidence' | 'Scope-risk' | 'Reversibility';
 
+/** An enum trailer line whose value is not one of the allowed values. */
+export interface InvalidEnumValue {
+  readonly key: EnumTrailerKey;
+  /** The trimmed raw value; `""` when the trailer has no value. */
+  readonly value: string;
+}
+
 export type ConfidenceLevel = 'low' | 'medium' | 'high';
 export type ScopeRiskLevel = 'narrow' | 'moderate' | 'wide';
 export type ReversibilityLevel = 'clean' | 'migration-needed' | 'irreversible';

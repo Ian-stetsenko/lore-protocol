@@ -11,7 +11,13 @@ import {
   ARRAY_TRAILER_KEYS,
   REFERENCE_TRAILER_KEYS,
 } from '../util/constants.js';
-import type { LoreTrailers, LoreId } from '../types/domain.js';
+import type { LoreTrailers, LoreId, EnumTrailerKey } from '../types/domain.js';
+
+const ALLOWED_ENUM_VALUES: Readonly<Record<EnumTrailerKey, readonly string[]>> = {
+  Confidence: CONFIDENCE_VALUES,
+  'Scope-risk': SCOPE_RISK_VALUES,
+  Reversibility: REVERSIBILITY_VALUES,
+};
 
 export class Validator {
   private readonly trailerParser: TrailerParser;
@@ -74,9 +80,9 @@ export class Validator {
       });
     }
 
-    // Rule 4: Valid enum values
+    // Rule 4: Valid enum values (read from the raw block; parse() drops invalid ones)
     if (trailers) {
-      this.validateEnumValues(trailers, issues);
+      this.validateEnumValues(commit.trailers, issues);
     }
 
     // Rule 5: Intent length
@@ -129,41 +135,14 @@ export class Validator {
   }
 
   private validateEnumValues(
-    trailers: LoreTrailers,
+    rawTrailers: string,
     issues: ValidationIssue[],
   ): void {
-    if (
-      trailers.Confidence !== null &&
-      !(CONFIDENCE_VALUES as readonly string[]).includes(trailers.Confidence)
-    ) {
+    for (const { key, value } of this.trailerParser.findInvalidEnumValues(rawTrailers)) {
       issues.push({
         severity: 'error',
         rule: 'invalid-enum',
-        message: `Invalid Confidence value: "${trailers.Confidence}". Expected one of: ${CONFIDENCE_VALUES.join(', ')}`,
-      });
-    }
-
-    if (
-      trailers['Scope-risk'] !== null &&
-      !(SCOPE_RISK_VALUES as readonly string[]).includes(trailers['Scope-risk'])
-    ) {
-      issues.push({
-        severity: 'error',
-        rule: 'invalid-enum',
-        message: `Invalid Scope-risk value: "${trailers['Scope-risk']}". Expected one of: ${SCOPE_RISK_VALUES.join(', ')}`,
-      });
-    }
-
-    if (
-      trailers.Reversibility !== null &&
-      !(REVERSIBILITY_VALUES as readonly string[]).includes(
-        trailers.Reversibility,
-      )
-    ) {
-      issues.push({
-        severity: 'error',
-        rule: 'invalid-enum',
-        message: `Invalid Reversibility value: "${trailers.Reversibility}". Expected one of: ${REVERSIBILITY_VALUES.join(', ')}`,
+        message: `Invalid ${key} value: "${value}". Expected one of: ${ALLOWED_ENUM_VALUES[key].join(', ')}`,
       });
     }
   }

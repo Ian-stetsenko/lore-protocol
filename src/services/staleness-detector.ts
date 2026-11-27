@@ -3,6 +3,12 @@ import type { LoreConfig } from '../types/config.js';
 import type { LoreAtom, SupersessionStatus } from '../types/domain.js';
 import type { StaleAtomReport, StaleReason } from '../types/output.js';
 import { LORE_ID_PATTERN, STALE_SIGNAL } from '../util/constants.js';
+import { parseDurationMs } from '../util/duration.js';
+
+type StaleThresholds = LoreConfig['stale'];
+
+/** Used when the effective olderThan is not a valid duration (config only; CLI input is validated). */
+const FALLBACK_MAX_AGE_MS = parseDurationMs('6m')!;
 
 /**
  * Multi-signal staleness detection for Lore atoms.
@@ -26,23 +32,27 @@ export class StalenessDetector {
   /**
    * Analyze atoms for staleness. Returns reports only for atoms
    * that have at least one staleness signal.
+   *
+   * `overrides` replaces individual config thresholds (e.g. from CLI flags);
+   * omitted or undefined fields fall back to `config.stale`.
    */
   async analyze(
     atoms: readonly LoreAtom[],
     supersessionMap: Map<string, SupersessionStatus>,
+    overrides: Partial<StaleThresholds> = {},
   ): Promise<StaleAtomReport[]> {
     const reports: StaleAtomReport[] = [];
     const now = new Date();
-    const maxAge = this.parseDuration(this.config.stale.olderThan);
+    const thresholds = this.resolveThresholds(overrides);
 
     for (const atom of atoms) {
       const reasons: StaleReason[] = [];
 
       // Signal 1: Age
-      this.checkAge(atom, now, maxAge, reasons);
+      this.checkAge(atom, now, thresholds.olderThan, reasons);
 
       // Signal 2: Drift
-      await this.checkDrift(atom, reasons);
+      await this.checkDrift(atom, thresholds.driftThreshold, reasons);
 
       // Signal 3: Low confidence
       this.checkLowConfidence(atom, reasons);
@@ -62,30 +72,44 @@ export class StalenessDetector {
   }
 
   /**
-   * Check if an atom is older than the configured age threshold.
+   * Merge per-call overrides over the configured thresholds.
+   * `??` rather than spread so an explicitly undefined override keeps the config value.
+   */
+  private resolveThresholds(overrides: Partial<StaleThresholds>): StaleThresholds {
+    return {
+      olderThan: overrides.olderThan ?? this.config.stale.olderThan,
+      driftThreshold: overrides.driftThreshold ?? this.config.stale.driftThreshold,
+    };
+  }
+
+  /**
+   * Check if an atom is older than the effective age threshold.
+   * An unparseable threshold (possible only from config) falls back to 6 months.
    */
   private checkAge(
     atom: LoreAtom,
     now: Date,
-    maxAgeMs: number,
+    olderThan: string,
     reasons: StaleReason[],
   ): void {
+    const maxAgeMs = parseDurationMs(olderThan) ?? FALLBACK_MAX_AGE_MS;
     const ageMs = now.getTime() - atom.date.getTime();
     if (ageMs > maxAgeMs) {
       const ageDescription = this.formatAge(ageMs);
       reasons.push({
         signal: STALE_SIGNAL.AGE,
-        description: `Atom is ${ageDescription} old (threshold: ${this.config.stale.olderThan})`,
+        description: `Atom is ${ageDescription} old (threshold: ${olderThan})`,
       });
     }
   }
 
   /**
-   * Check if files touched by the atom have drifted beyond the configured threshold.
+   * Check if files touched by the atom have drifted beyond the effective threshold.
    * Drift is measured as the number of commits to a file since the atom's commit.
    */
   private async checkDrift(
     atom: LoreAtom,
+    driftThreshold: number,
     reasons: StaleReason[],
   ): Promise<void> {
     for (const filePath of atom.filesChanged) {
@@ -94,10 +118,10 @@ export class StalenessDetector {
           filePath,
           atom.commitHash,
         );
-        if (commitsSince > this.config.stale.driftThreshold) {
+        if (commitsSince > driftThreshold) {
           reasons.push({
             signal: STALE_SIGNAL.DRIFT,
-            description: `${filePath} has ${commitsSince} commits since this atom (threshold: ${this.config.stale.driftThreshold})`,
+            description: `${filePath} has ${commitsSince} commits since this atom (threshold: ${driftThreshold})`,
           });
         }
       } catch {
@@ -168,35 +192,6 @@ export class StalenessDetector {
           description: `Depends on ${depId} which is superseded by ${depStatus.supersededBy}`,
         });
       }
-    }
-  }
-
-  /**
-   * Parse a duration string like "6m", "1y", "30d" into milliseconds.
-   * Supports: d (days), w (weeks), m (months), y (years).
-   */
-  private parseDuration(duration: string): number {
-    const match = duration.match(/^(\d+)(d|w|m|y)$/);
-    if (!match) {
-      // Default to 6 months if unparseable
-      return 6 * 30 * 24 * 60 * 60 * 1000;
-    }
-
-    const value = parseInt(match[1], 10);
-    const unit = match[2];
-    const msPerDay = 24 * 60 * 60 * 1000;
-
-    switch (unit) {
-      case 'd':
-        return value * msPerDay;
-      case 'w':
-        return value * 7 * msPerDay;
-      case 'm':
-        return value * 30 * msPerDay;
-      case 'y':
-        return value * 365 * msPerDay;
-      default:
-        return 6 * 30 * msPerDay;
     }
   }
 

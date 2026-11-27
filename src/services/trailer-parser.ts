@@ -4,6 +4,7 @@ import type {
   TrailerKey,
   ArrayTrailerKey,
   EnumTrailerKey,
+  InvalidEnumValue,
   ConfidenceLevel,
   ScopeRiskLevel,
   ReversibilityLevel,
@@ -13,9 +14,7 @@ import {
   LORE_TRAILER_KEYS,
   ARRAY_TRAILER_KEYS,
   ENUM_TRAILER_KEYS,
-  CONFIDENCE_VALUES,
-  SCOPE_RISK_VALUES,
-  REVERSIBILITY_VALUES,
+  ENUM_ALLOWED_VALUES,
 } from '../util/constants.js';
 
 const TRAILER_LINE_PATTERN = /^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$/;
@@ -24,10 +23,13 @@ const CONTINUATION_LINE_PATTERN = /^[ \t]+(.*)$/;
 /**
  * Parses raw trailer text into structured LoreTrailers and serializes back.
  *
- * GRASP: Information Expert -- knows trailer format rules.
- * SRP: Only parsing/serialization logic. No git interaction, no validation.
+ * GRASP: Information Expert -- knows trailer-format and vocabulary rules;
+ * does not build validation issues.
+ * SRP: Only parsing/serialization logic. No git interaction.
  */
 export class TrailerParser {
+  private static readonly ENUM_TRAILER_KEY_SET: ReadonlySet<string> = new Set<string>(ENUM_TRAILER_KEYS);
+
   /**
    * Parse a raw trailer block (multi-line string) into LoreTrailers.
    * Lines in `Key: Value` format are parsed as trailers.
@@ -46,7 +48,6 @@ export class TrailerParser {
     const entries = this.parseLinesToEntries(lines);
 
     const arrayTrailerKeySet = new Set<string>(ARRAY_TRAILER_KEYS);
-    const enumTrailerKeySet = new Set<string>(ENUM_TRAILER_KEYS);
     const loreKeySet = new Set<string>(LORE_TRAILER_KEYS);
     const customKeySet = new Set<string>(customKeys);
 
@@ -72,7 +73,7 @@ export class TrailerParser {
         continue;
       }
 
-      if (enumTrailerKeySet.has(key)) {
+      if (TrailerParser.ENUM_TRAILER_KEY_SET.has(key)) {
         const trimmed = value.trim();
         if (this.isValidEnumValue(key as EnumTrailerKey, trimmed)) {
           enums[key] = trimmed;
@@ -104,6 +105,22 @@ export class TrailerParser {
       Related: arrays['Related'],
       custom: new CustomTrailerCollection(custom),
     };
+  }
+
+  /**
+   * Find every enum trailer line (Confidence, Scope-risk, Reversibility) in a
+   * raw trailer block whose trimmed value is not an allowed value, in
+   * document order. Matching is case-sensitive; an empty value is reported
+   * as `""`.
+   *
+   * `parse()` silently drops such values (they become null), so validation
+   * must inspect the raw block to see them.
+   */
+  findInvalidEnumValues(rawTrailers: string): readonly InvalidEnumValue[] {
+    return this.parseLinesToEntries(rawTrailers.split('\n'))
+      .filter(({ key }) => TrailerParser.ENUM_TRAILER_KEY_SET.has(key))
+      .map(({ key, value }): InvalidEnumValue => ({ key: key as EnumTrailerKey, value: value.trim() }))
+      .filter(({ key, value }) => !this.isValidEnumValue(key, value));
   }
 
   /**
@@ -236,14 +253,7 @@ export class TrailerParser {
     return entries;
   }
 
-  private static readonly ENUM_VALUE_LOOKUP: Record<EnumTrailerKey, ReadonlySet<string>> = {
-    'Confidence': new Set<string>(CONFIDENCE_VALUES),
-    'Scope-risk': new Set<string>(SCOPE_RISK_VALUES),
-    'Reversibility': new Set<string>(REVERSIBILITY_VALUES),
-  };
-
   private isValidEnumValue(key: EnumTrailerKey, value: string): boolean {
-    const validValues = TrailerParser.ENUM_VALUE_LOOKUP[key];
-    return validValues !== undefined && validValues.has(value);
+    return ENUM_ALLOWED_VALUES[key].includes(value);
   }
 }

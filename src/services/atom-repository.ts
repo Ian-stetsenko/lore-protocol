@@ -3,6 +3,24 @@ import type { PathQueryOptions } from '../types/query.js';
 import type { LoreAtom, LoreId, LoreTrailers } from '../types/domain.js';
 import type { TrailerParser } from '../services/trailer-parser.js';
 import { LORE_ID_PATTERN, REFERENCE_TRAILER_KEYS } from '../util/constants.js';
+import { GitError, LoreError } from '../util/errors.js';
+
+/** Date-bound values carried by query options (`--since` / `--until`). */
+interface DateBounds {
+  readonly since?: string | null;
+  readonly until?: string | null;
+}
+
+/**
+ * Values treated as dates without a ref lookup: ISO-dated (2026-01-31...),
+ * digit-only (a year, a Unix timestamp or 20260131 -- git reads these as
+ * dates, but rev-parse would match them as an abbreviated commit hash),
+ * containing whitespace ("2 weeks ago"), or starting with "-" (never a ref,
+ * and must not reach rev-parse as an option).
+ */
+const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
+const DIGITS_ONLY = /^\d+$/;
+const WHITESPACE = /\s/;
 
 /**
  * Retrieves LoreAtoms from git history.
@@ -30,6 +48,7 @@ export class AtomRepository {
    * path resolution is the caller's responsibility (DIP).
    */
   async findByTarget(gitLogArgs: readonly string[], options: PathQueryOptions): Promise<LoreAtom[]> {
+    await this.assertDateBounds(options);
     const logArgs = this.buildLogArgs(options);
     const allArgs = [...logArgs, ...gitLogArgs];
     const rawCommits = await this.gitClient.log(allArgs, { loreOnly: true });
@@ -232,6 +251,7 @@ export class AtomRepository {
   async findAll(
     options: { since?: string; until?: string; maxCommits?: number; allRefs?: boolean } = {},
   ): Promise<LoreAtom[]> {
+    await this.assertDateBounds(options);
     const args = this.buildBaseLogArgs();
     if (options.allRefs) {
       args.push('--all');
@@ -256,6 +276,7 @@ export class AtomRepository {
    * Parses the subject line to extract scope from `type(scope): description`.
    */
   async findByScope(scope: string, options: PathQueryOptions): Promise<LoreAtom[]> {
+    await this.assertDateBounds(options);
     const logArgs = this.buildLogArgs(options);
     // Git-level scope pushdown (coarse "(scope)" substring grep); the exact
     // conventional-commit scope filter below stays authoritative.
@@ -421,6 +442,39 @@ export class AtomRepository {
     }
 
     return body;
+  }
+
+  /**
+   * Reject git refs passed as --since / --until. git log's --since only
+   * understands dates and silently ignores a ref like "v1.2", returning the
+   * whole history; failing loudly points the user at a real date instead.
+   */
+  private async assertDateBounds(bounds: DateBounds): Promise<void> {
+    await this.assertDateNotRef('--since', bounds.since);
+    await this.assertDateNotRef('--until', bounds.until);
+  }
+
+  private async assertDateNotRef(flag: string, value: string | null | undefined): Promise<void> {
+    if (!value || this.isUnambiguousDate(value)) {
+      return;
+    }
+    try {
+      await this.gitClient.resolveRef(`${value}^{commit}`);
+    } catch (error) {
+      if (error instanceof GitError) {
+        return; // not a ref: let git interpret it as a date
+      }
+      throw error;
+    }
+    throw new LoreError(
+      `${flag} takes a date, but "${value}" is a git ref. Pass a date such as 2026-01-31 or "2 weeks ago".`,
+      1,
+    );
+  }
+
+  private isUnambiguousDate(value: string): boolean {
+    return [ISO_DATE_PREFIX, DIGITS_ONLY, WHITESPACE].some((shape) => shape.test(value))
+      || value.startsWith('-');
   }
 
   /**

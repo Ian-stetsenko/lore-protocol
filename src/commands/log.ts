@@ -33,7 +33,7 @@ export function registerLogCommand(
     .description('Lore-enriched git log')
     .option('--limit <n>', 'Maximum number of results to display', parsePositiveInt)
     .option('--max-commits <n>', 'Maximum git commits to scan (supersession may be incomplete)', parsePositiveInt)
-    .option('--since <ref>', 'Only consider commits since ref/date')
+    .option('--since <date>', 'Only consider commits after this date')
     .action(async (paths: string[], _options: LogCommandOptions, command: Command) => {
       const options = mergeOptions<LogCommandOptions>(command);
       const { atomRepository, supersessionResolver, getFormatter } = deps;

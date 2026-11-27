@@ -201,9 +201,11 @@ No command or service instantiates its own dependencies. All wiring is centraliz
 #### `src/services/atom-repository.ts`
 - **Contains**: `AtomRepository` class.
 - **Single Responsibility**: Central query engine. Retrieves `LoreAtom` objects from git history by target path, Lore-id, revision range, scope, or globally. Handles follow-link BFS traversal. Lore-id lookups prefer HEAD-reachable matches and consult other refs only on a miss.
-- **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`.
+- **Dependencies**: `IGitClient`, `TrailerParser`, `domain.ts`, `query.ts`, `constants.ts`, `errors.ts`.
 - **Dependents**: Commands (`context`, `constraints`, `rejected`, `directives`, `tested`, `search`, `log`, `stale`, `trace`, `squash`, `doctor`), `Validator`, `main.ts`.
 - **Key methods**: `findByTarget()`, `findByLoreId()`, `findByRange()`, `findAll()`, `findByScope()`, `resolveFollowLinks()`.
+- **Date bounds (`assertDateBounds`)**: `findAll()`, `findByTarget()` and `findByScope()` first check `since` / `until`, because git log's `--since` silently ignores a ref. A value shaped like a date skips the lookup: ISO-prefixed (`^\d{4}-\d{2}-\d{2}`), digit-only (a year, Unix timestamp or `20260131`, which would otherwise match an abbreviated commit hash), containing whitespace (`"2 weeks ago"`), or starting with `-`. Anything else is resolved with `resolveRef("<v>^{commit}")`. A hit throws `LoreError` (exit 1) with a "takes a date" hint; a `GitError` means the value is passed to git as a date.
+- **Directive**: Every new query method that accepts `since` / `until` must call `assertDateBounds()` before building git log arguments.
 
 #### `src/services/supersession-resolver.ts`
 - **Contains**: `SupersessionResolver` class.

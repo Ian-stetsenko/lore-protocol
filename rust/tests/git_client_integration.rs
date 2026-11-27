@@ -172,6 +172,85 @@ fn applies_the_pre_filter_to_the_bulk_file_pass_so_files_changed_stays_populated
     });
 }
 
+// ---- GitClient.log scope pushdown (LogOptions.scope) ----------------------
+
+/// Runs `body` with the base fixture plus scoped commits on top. The base
+/// commits carry no conventional-commit scope, so they never match.
+fn with_scope_fixture(body: impl FnOnce(&Fixture)) {
+    with_fixture(|f| {
+        f.commit(
+            "src/a.ts",
+            "feat(api): scoped atom\n\nLore-id: dddd4444\nConfidence: high",
+        );
+        f.commit(
+            "src/b.ts",
+            "fix(API): mixed-case scope\n\nLore-id: eeee5555",
+        );
+        f.commit(
+            "src/c.ts",
+            "feat(other): different scope\n\nLore-id: ffff6666",
+        );
+        f.commit("src/d.ts", "chore(api): no trailers here");
+        f.commit("src/e.ts", "feat(a.b): dotted scope\n\nLore-id: abab1212");
+        f.commit("src/f.ts", "feat(axb): dot lookalike\n\nLore-id: cdc12121");
+        body(f);
+    });
+}
+
+fn scoped_subjects(f: &Fixture, args: &[String], scope: &str) -> Vec<String> {
+    f.client()
+        .log(args, LogOptions::lore_only_in_scope(scope))
+        .expect("log")
+        .into_iter()
+        .map(|c| c.subject)
+        .collect()
+}
+
+#[test]
+fn ands_a_coarse_case_insensitive_scope_grep_with_the_lore_id_pre_filter() {
+    with_scope_fixture(|f| {
+        let subjects = scoped_subjects(f, &[], "api");
+
+        assert!(subjects.contains(&"feat(api): scoped atom".to_owned()));
+        assert!(subjects.contains(&"fix(API): mixed-case scope".to_owned()));
+        assert!(!subjects.contains(&"feat(other): different scope".to_owned()));
+        assert!(!subjects.contains(&"chore(api): no trailers here".to_owned()));
+
+        // The bulk --name-only pass runs with the same pre-filter args.
+        let commits = f
+            .client()
+            .log(&[], LogOptions::lore_only_in_scope("api"))
+            .expect("log");
+        let scoped = commits
+            .iter()
+            .find(|c| c.subject == "feat(api): scoped atom")
+            .expect("scoped atom");
+        assert_eq!(scoped.files_changed, vec!["src/a.ts"]);
+    });
+}
+
+#[test]
+fn escapes_regex_metacharacters_in_the_scope_so_a_dot_stays_a_dot() {
+    with_scope_fixture(|f| {
+        let subjects = scoped_subjects(f, &[], "a.b");
+
+        assert!(subjects.contains(&"feat(a.b): dotted scope".to_owned()));
+        assert!(!subjects.contains(&"feat(axb): dot lookalike".to_owned()));
+    });
+}
+
+#[test]
+fn keeps_author_patterns_working_alongside_the_scope_grep_case_insensitively() {
+    with_scope_fixture(|f| {
+        // --regexp-ignore-case is global: it also case-folds author patterns
+        // while scope is set, matching the parser-level author refinement.
+        let subjects = scoped_subjects(f, &["--author=LORE TEST".to_owned()], "api");
+
+        assert!(subjects.contains(&"feat(api): scoped atom".to_owned()));
+        assert!(subjects.contains(&"fix(API): mixed-case scope".to_owned()));
+    });
+}
+
 #[test]
 fn counts_commits_touching_a_repository_relative_path_even_when_cwd_is_nested() {
     with_fixture(|f| {

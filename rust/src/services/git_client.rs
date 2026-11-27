@@ -33,11 +33,28 @@ const LOG_FORMAT: &str = "%H%x1F%aI%x1F%ae%x1F%s%x1F%b%x1F%(trailers:only,unfold
 /// line. Whitespace after the colon is optional because git accepts and
 /// normalises `Lore-id:abcd1234`; the parser stays authoritative and still
 /// rejects commits where the line sits in the body rather than the trailer
-/// block. Must not be combined with other `--grep` patterns (git ORs them).
+/// block. Combining with another `--grep` requires `--all-match` (git ORs
+/// patterns by default); [`LogOptions::scope`] composes exactly that way.
 const LORE_ONLY_ARGS: [&str; 2] = [
     "--extended-regexp",
     "--grep=^Lore-id:[[:space:]]*[0-9a-f]{8}",
 ];
+
+/// Flags that AND the scope grep with the Lore-id pre-filter, case-insensitively.
+const SCOPE_GREP_FLAGS: [&str; 3] = ["--all-match", "--extended-regexp", "--regexp-ignore-case"];
+
+/// Escape regex metacharacters for a POSIX ERE `--grep` pattern. Escaping
+/// any other character is undefined behaviour in POSIX, so only these are.
+pub fn escape_ere(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ".^$*+?()[]{}|\\".contains(ch) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
 
 /// Blame porcelain header: a 40-hex commit hash at the start of a block.
 static BLAME_HASH_PATTERN: LazyLock<Regex> =
@@ -99,6 +116,26 @@ impl ProcessGitClient {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// The `git log` arguments after the [`LogOptions`] pre-filters: the
+    /// scope grep (when set), then the Lore-id grep (when `lore_only`), then
+    /// the caller's args. The bulk `--name-only` pass reuses them verbatim.
+    fn effective_log_args(args: &[String], options: &LogOptions) -> Vec<String> {
+        let mut effective_args: Vec<String> = Vec::with_capacity(args.len() + 6);
+
+        // Conventional-commit scope pushdown: git skips commits whose message
+        // never mentions "(scope)" at all. Coarse by design; `--all-match`
+        // ANDs it with the Lore-id pre-filter instead of git's default OR.
+        if let Some(scope) = options.scope.as_deref().filter(|s| !s.is_empty()) {
+            effective_args.extend(SCOPE_GREP_FLAGS.map(str::to_owned));
+            effective_args.push(format!("--grep=\\({}\\)", escape_ere(scope)));
+        }
+        if options.lore_only {
+            effective_args.extend(LORE_ONLY_ARGS.map(str::to_owned));
+        }
+        effective_args.extend_from_slice(args);
+        effective_args
     }
 
     /// Attach each commit's changed files in bulk.
@@ -327,11 +364,8 @@ impl ProcessGitClient {
 
 impl GitClient for ProcessGitClient {
     fn log(&self, args: &[String], options: LogOptions) -> Result<Vec<RawCommit>> {
-        let mut effective_args: Vec<&str> = Vec::with_capacity(args.len() + 2);
-        if options.lore_only {
-            effective_args.extend(LORE_ONLY_ARGS);
-        }
-        effective_args.extend(args.iter().map(String::as_str));
+        let owned_args = Self::effective_log_args(args, &options);
+        let effective_args: Vec<&str> = owned_args.iter().map(String::as_str).collect();
 
         let has_l_flag = effective_args.iter().any(|a| a.starts_with("-L"));
 

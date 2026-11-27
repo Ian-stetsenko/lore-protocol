@@ -246,7 +246,9 @@ impl<'a> AtomRepository<'a> {
     /// (`type(scope): description`) equal to `scope`, case-insensitively.
     pub fn find_by_scope(&self, scope: &str, options: &PathQueryOptions) -> Result<Vec<LoreAtom>> {
         let args = self.build_log_args(options);
-        let raw = self.git.log(&args, LogOptions::LORE_ONLY)?;
+        // Git-level scope pushdown (coarse "(scope)" substring grep); the
+        // exact conventional-commit scope filter below stays authoritative.
+        let raw = self.git.log(&args, LogOptions::lore_only_in_scope(scope))?;
         let atoms = self.parse_raw_commits(&raw);
 
         let wanted = scope.to_lowercase();

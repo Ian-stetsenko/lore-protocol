@@ -329,4 +329,54 @@ mod log_args {
         assert!(LOG_FORMAT.ends_with("%x1E"));
         assert_eq!(LOG_FORMAT.matches("%x1F").count(), 5);
     }
+
+    fn owned(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| v.to_string()).collect()
+    }
+
+    #[test]
+    fn scope_prepends_an_all_match_case_insensitive_grep_before_the_lore_id_grep_and_args() {
+        let args = ProcessGitClient::effective_log_args(
+            &owned(&["--author=dev", "--max-count=5"]),
+            &LogOptions::lore_only_in_scope("a.b"),
+        );
+
+        assert_eq!(
+            args,
+            owned(&[
+                "--all-match",
+                "--extended-regexp",
+                "--regexp-ignore-case",
+                "--grep=\\(a\\.b\\)",
+                "--extended-regexp",
+                "--grep=^Lore-id:[[:space:]]*[0-9a-f]{8}",
+                "--author=dev",
+                "--max-count=5",
+            ])
+        );
+    }
+
+    #[test]
+    fn without_scope_the_args_are_unchanged() {
+        let args = ProcessGitClient::effective_log_args(&owned(&["-1"]), &LogOptions::default());
+        assert_eq!(args, owned(&["-1"]));
+
+        let empty_scope = LogOptions {
+            lore_only: false,
+            scope: Some(String::new()),
+        };
+        assert_eq!(
+            ProcessGitClient::effective_log_args(&owned(&["-1"]), &empty_scope),
+            owned(&["-1"])
+        );
+    }
+
+    #[test]
+    fn escape_ere_escapes_exactly_the_posix_ere_metacharacters() {
+        assert_eq!(
+            escape_ere(".^$*+?()[]{}|\\"),
+            "\\.\\^\\$\\*\\+\\?\\(\\)\\[\\]\\{\\}\\|\\\\"
+        );
+        assert_eq!(escape_ere("api-v2_core/x"), "api-v2_core/x");
+    }
 }

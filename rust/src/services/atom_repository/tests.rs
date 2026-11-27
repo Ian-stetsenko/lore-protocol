@@ -607,6 +607,10 @@ mod find_by_scope {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].lore_id, "aaaa1111");
+        // Scope pushes to the git layer as a coarse "(scope)" grep; the exact
+        // conventional-commit filter above stays authoritative.
+        let (_, options) = &git.log_calls()[0];
+        assert_eq!(*options, LogOptions::lore_only_in_scope("auth"));
     }
 
     #[test]
@@ -1092,8 +1096,10 @@ mod lore_only_discovery {
         let calls = git.log_calls();
         // lore_id_index runs two passes: HEAD first, then --all.
         assert_eq!(calls.len(), 5);
+        // find_by_scope additionally carries its coarse scope grep (see its
+        // own tests); every discovery query is Lore-only either way.
         for (_, options) in calls {
-            assert_eq!(options, LogOptions { lore_only: true });
+            assert!(options.lore_only);
         }
     }
 

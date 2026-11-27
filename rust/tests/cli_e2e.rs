@@ -641,6 +641,36 @@ fn scope_filter_matches_conventional_commit_scope() {
 }
 
 #[test]
+fn scope_query_max_commits_counts_only_commits_in_scope() {
+    // The newest Lore commit is in another scope. With the scope pushed down
+    // to git, --max-commits 1 counts only in-scope commits, so the newest
+    // auth atom is still returned instead of an empty result.
+    let repo = seeded_repo();
+    repo.commit(
+        "src/billing.ts",
+        &atom_message("feat(billing): add invoices", &["Lore-id: cccc3333"]),
+    );
+
+    let assert = repo
+        .lore()
+        .args([
+            "context",
+            "ignored",
+            "--scope",
+            "auth",
+            "--max-commits",
+            "1",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let out = json(&assert.get_output().stdout);
+    let results = out["results"].as_array().expect("results");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["lore_id"], "bbbb2222");
+}
+
+#[test]
 fn superseded_atoms_are_hidden_unless_all() {
     let repo = Repo::new();
     repo.commit("README.md", "chore: initial");

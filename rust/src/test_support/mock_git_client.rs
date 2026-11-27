@@ -177,7 +177,7 @@ impl MockGitClient {
             .borrow()
             .iter()
             .filter_map(|c| match c {
-                GitCall::Log { args, options } => Some((args.clone(), *options)),
+                GitCall::Log { args, options } => Some((args.clone(), options.clone())),
                 _ => None,
             })
             .collect()
@@ -222,7 +222,7 @@ impl GitClient for MockGitClient {
     fn log(&self, args: &[String], options: LogOptions) -> Result<Vec<RawCommit>> {
         self.record(GitCall::Log {
             args: args.to_vec(),
-            options,
+            options: options.clone(),
         });
         (self.log_fn.borrow())(args, options)
     }

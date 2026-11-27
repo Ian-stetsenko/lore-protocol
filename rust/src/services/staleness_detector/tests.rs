@@ -911,3 +911,21 @@ mod threshold_overrides {
         );
     }
 }
+
+#[test]
+fn non_ascii_digit_config_durations_fall_back_to_six_months() {
+    let git = MockGitClient::new();
+    let config = older_than("\u{663}d");
+    let detector = StalenessDetector::new(&git, &config);
+    let now = date("2025-06-01T00:00:00Z");
+    let stale = make_atom().at(now - Duration::days(181)).build();
+
+    let result = detector.analyze_at(
+        &[stale],
+        &no_supersession(),
+        &StaleOverrides::default(),
+        now,
+    );
+
+    assert_eq!(result.len(), 1);
+}

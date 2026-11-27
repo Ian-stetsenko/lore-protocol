@@ -345,6 +345,13 @@ fn nested_repository(repo: &Repo) {
     ]);
 }
 
+/// A tag whose name is non-ASCII digits: JS `\d` is ASCII-only, so it is a
+/// ref, not a digit-only date.
+fn non_ascii_digit_tag(repo: &Repo) {
+    linear_seeded(repo);
+    repo.git(&["tag", "\u{663}\u{663}"]);
+}
+
 /// A repository with one staged file, ready for `lore commit`.
 fn staged(repo: &Repo) {
     linear_seeded(repo);
@@ -1114,4 +1121,16 @@ fn parity_for_scope_without_a_target() {
     cases.push(case(&["context", "src", "--scope", "auth"]));
     cases.push(case(&["context", "--scope", ""]));
     assert_parity(linear_seeded, both_formats(cases));
+}
+
+#[test]
+fn parity_for_non_ascii_digits() {
+    assert_parity(
+        non_ascii_digit_tag,
+        both_formats(vec![
+            case(&["log", "--since", "\u{663}\u{663}"]),
+            case(&["stale", "--older-than", "\u{663}d"]),
+            case(&["context", "src/auth.ts:\u{663}"]),
+        ]),
+    );
 }

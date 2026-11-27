@@ -1560,4 +1560,22 @@ mod date_bounds {
             assert!(ref_lookups(&git).is_empty(), "{value:?} was looked up");
         }
     }
+
+    #[test]
+    fn non_ascii_digit_values_are_looked_up_as_refs() {
+        for value in ["\u{663}\u{663}", "\u{662}\u{660}\u{662}\u{666}-01-31"] {
+            let git = MockGitClient::new();
+            let repo = AtomRepository::new(&git, &PARSER, vec![]);
+
+            let err = repo
+                .find_by_target(&[], &since(value))
+                .expect_err("resolves as a ref");
+
+            assert!(
+                err.to_string().starts_with("--since takes a date"),
+                "{value:?}"
+            );
+            assert_eq!(ref_lookups(&git), vec![format!("{value}^{{commit}}")]);
+        }
+    }
 }

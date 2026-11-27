@@ -21,12 +21,13 @@ use crate::types::output::{StaleAtomReport, StaleReason, StaleSignal};
 use crate::util::constants::is_valid_lore_id;
 use crate::util::duration::{parse_duration_ms, MS_PER_DAY};
 
-static UNTIL_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[until:(\d{4}-\d{2}(?:-\d{2})?)\]").expect("valid regex"));
+static UNTIL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[until:([0-9]{4}-[0-9]{2}(?:-[0-9]{2})?)\]").expect("valid regex")
+});
 static MONTH_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{4})-(\d{2})$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^([0-9]{4})-([0-9]{2})$").expect("valid regex"));
 static DAY_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d{4})-(\d{2})-(\d{2})$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})$").expect("valid regex"));
 
 /// Six 30-day months; used when the effective `older_than` is not a valid
 /// duration (config only: CLI input is validated).

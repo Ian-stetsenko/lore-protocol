@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn duration_option_rejects_anything_else() {
-        for bad in ["30", "x", "6M", "-1d", ""] {
+        for bad in ["30", "x", "6M", "-1d", "", "\u{663}d"] {
             assert_eq!(
                 parse_duration_option(bad).unwrap_err().to_string(),
                 format!("Expected a duration like 30d, 2w, 6m or 1y, got \"{bad}\""),

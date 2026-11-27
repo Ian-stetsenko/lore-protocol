@@ -287,3 +287,10 @@ fn should_return_file_with_line_start_1_and_line_end_none_for_glob_targets() {
         }
     );
 }
+
+#[test]
+fn non_ascii_digits_are_not_a_line_number() {
+    let result = resolver().parse_target("src/utils.ts:\u{663}");
+    assert_eq!(result.target_type, TargetType::File);
+    assert_eq!(result.line_start, None);
+}

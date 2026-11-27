@@ -27,10 +27,11 @@ use super::trailer_parser::TrailerParser;
 /// Values containing whitespace ("2 weeks ago") or starting with "-" (never
 /// a ref, and must not reach rev-parse as an option) count too; see
 /// [`is_unambiguous_date`].
+/// ASCII digits only, like the JS `\d` they mirror (Rust `\d` is Unicode).
 static DATE_SHAPES: LazyLock<[Regex; 2]> = LazyLock::new(|| {
     [
-        Regex::new(r"^\d{4}-\d{2}-\d{2}").expect("valid regex"),
-        Regex::new(r"^\d+$").expect("valid regex"),
+        Regex::new(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}").expect("valid regex"),
+        Regex::new(r"^[0-9]+$").expect("valid regex"),
     ]
 });
 

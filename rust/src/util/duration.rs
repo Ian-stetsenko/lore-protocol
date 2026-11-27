@@ -8,8 +8,9 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+/// ASCII digits only, like the JS `\d` it mirrors (Rust `\d` is Unicode).
 static DURATION_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d+)(d|w|m|y)$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^([0-9]+)(d|w|m|y)$").expect("valid regex"));
 
 pub const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 
@@ -53,7 +54,10 @@ mod tests {
 
     #[test]
     fn rejects_anything_else() {
-        for bad in ["", "30", "x", "6M", "-1d", "1.5d", " 1d", "1d ", "1 d", "d"] {
+        // "٣d": JS `\d` is ASCII-only, so non-ASCII digits are not a duration.
+        for bad in [
+            "", "30", "x", "6M", "-1d", "1.5d", " 1d", "1d ", "1 d", "d", "\u{663}d",
+        ] {
             assert_eq!(parse_duration_ms(bad), None, "{bad:?}");
         }
     }

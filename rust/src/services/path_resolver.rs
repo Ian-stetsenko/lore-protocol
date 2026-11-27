@@ -11,9 +11,9 @@ use regex::Regex;
 use crate::types::query::{QueryTarget, TargetType};
 
 static LINE_RANGE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(.+):(\d+)-(\d+)$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^(.+):([0-9]+)-([0-9]+)$").expect("valid regex"));
 static SINGLE_LINE_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(.+):(\d+)$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^(.+):([0-9]+)$").expect("valid regex"));
 
 /// Arguments for `git blame -L line_start,line_end file`.
 ///

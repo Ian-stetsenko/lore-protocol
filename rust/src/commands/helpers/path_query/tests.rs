@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::formatters::json_formatter::JsonFormatter;
-use crate::interfaces::git_client::RawCommit;
+use crate::interfaces::git_client::{LogOptions, RawCommit};
 use crate::services::trailer_parser::TrailerParser;
 use crate::test_support::{raw_commit, MockGitClient};
 use serde_json::Value;
@@ -20,6 +20,11 @@ fn commit(id: &str, supersedes: &[&str]) -> RawCommit {
 }
 
 fn execute(git: &MockGitClient, args: PathQueryArgs) -> Value {
+    serde_json::from_str(&try_execute(git, args).expect("query runs")).expect("json output")
+}
+
+/// Runs the pipeline and returns its stdout.
+fn try_execute(git: &MockGitClient, args: PathQueryArgs) -> Result<String> {
     let parser = TrailerParser::new();
     let repo = AtomRepository::new(git, &parser, Vec::new());
     let resolver = SupersessionResolver::new();
@@ -36,15 +41,14 @@ fn execute(git: &MockGitClient, args: PathQueryArgs) -> Value {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let mut io = Io::new(&mut out, &mut err);
-    let code = execute_path_query(&args, &deps, "context", VisibleTrailers::All, &mut io)
-        .expect("query runs");
+    let code = execute_path_query(&args, &deps, "context", VisibleTrailers::All, &mut io)?;
     assert_eq!(code, 0);
-    serde_json::from_slice(&out).expect("json output")
+    Ok(String::from_utf8(out).expect("utf-8 output"))
 }
 
 fn args(target: &str) -> PathQueryArgs {
     PathQueryArgs {
-        target: target.to_owned(),
+        target: Some(target.to_owned()),
         ..PathQueryArgs::default()
     }
 }
@@ -180,4 +184,63 @@ fn all_flag_keeps_superseded_atoms_and_scope_switches_target() {
         !log_args.contains(&"--".to_owned()),
         "scope queries carry no pathspec"
     );
+}
+
+// ---- --scope without a target (TS v0.8.1) ----------------------------------
+
+fn scope_only(scope: &str) -> PathQueryArgs {
+    PathQueryArgs {
+        scope: Some(scope.to_owned()),
+        ..PathQueryArgs::default()
+    }
+}
+
+#[test]
+fn scope_alone_queries_by_scope() {
+    let git = MockGitClient::new();
+
+    let out = execute(&git, scope_only("auth"));
+
+    assert_eq!(out["target"], "scope:auth");
+    assert_eq!(out["target_type"], "global");
+    let (_, options) = git.log_calls().remove(0);
+    assert_eq!(options, LogOptions::lore_only_in_scope("auth"));
+}
+
+#[test]
+fn scope_wins_over_a_target() {
+    let git = MockGitClient::new();
+
+    let out = execute(
+        &git,
+        PathQueryArgs {
+            target: Some("src/".to_owned()),
+            ..scope_only("auth")
+        },
+    );
+
+    assert_eq!(out["target"], "scope:auth");
+}
+
+#[test]
+fn neither_target_nor_scope_fails_before_any_git_call() {
+    for args in [
+        PathQueryArgs::default(),
+        PathQueryArgs {
+            target: Some(String::new()),
+            scope: Some(String::new()),
+            ..PathQueryArgs::default()
+        },
+    ] {
+        let git = MockGitClient::new();
+
+        let err = try_execute(&git, args).expect_err("missing target");
+
+        assert_eq!(
+            err.to_string(),
+            "Missing target: pass a <target> path or --scope <name>."
+        );
+        assert_eq!(err.exit_code(), 1);
+        assert!(git.calls().is_empty(), "{:?}", git.calls());
+    }
 }

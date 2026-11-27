@@ -108,8 +108,8 @@ pub enum Command {
 /// (`context`, `constraints`, `rejected`, `directives`, `tested`).
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct PathQueryArgs {
-    /// File, directory/, glob, or file:line[-line]
-    pub target: String,
+    /// File, directory/, glob, or file:line[-line]; optional with --scope
+    pub target: Option<String>,
 
     /// Filter by conventional commit scope instead of path
     #[arg(long, value_name = "name")]
@@ -466,7 +466,7 @@ mod tests {
         ]);
         match cli.command {
             Command::Constraints(a) => {
-                assert_eq!(a.target, "src/auth.ts:10-20");
+                assert_eq!(a.target.as_deref(), Some("src/auth.ts:10-20"));
                 assert!(a.follow && a.all);
                 assert_eq!(a.author.as_deref(), Some("alice"));
                 assert_eq!(a.limit, Some(5));
@@ -478,9 +478,33 @@ mod tests {
     }
 
     #[test]
+    fn path_commands_accept_scope_without_a_target() {
+        for name in [
+            "context",
+            "constraints",
+            "rejected",
+            "directives",
+            "tested",
+            "coverage",
+        ] {
+            let cli = parse(&[name, "--scope", "auth"]);
+            let args = match cli.command {
+                Command::Context(a)
+                | Command::Constraints(a)
+                | Command::Rejected(a)
+                | Command::Directives(a)
+                | Command::Tested(a) => a,
+                other => panic!("unexpected {other:?}"),
+            };
+            assert_eq!(args.target, None, "{name}");
+            assert_eq!(args.scope.as_deref(), Some("auth"), "{name}");
+        }
+    }
+
+    #[test]
     fn coverage_is_an_alias_for_tested() {
         let cli = parse(&["coverage", "src/"]);
-        assert!(matches!(cli.command, Command::Tested(a) if a.target == "src/"));
+        assert!(matches!(cli.command, Command::Tested(a) if a.target.as_deref() == Some("src/")));
     }
 
     #[test]

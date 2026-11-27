@@ -1,4 +1,5 @@
-//! `lore context|constraints|rejected|directives|tested <target>`.
+//! `lore context|constraints|rejected|directives|tested [target]` (the target is
+//! optional with `--scope`).
 //!
 //! All five share the pipeline in `helpers::path_query`; they differ only in
 //! name and visible trailers. `coverage` is an alias of `tested`.

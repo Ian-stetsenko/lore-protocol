@@ -915,6 +915,36 @@ fn scope_filter_matches_conventional_commit_scope() {
 }
 
 #[test]
+fn path_commands_accept_scope_without_a_target() {
+    let repo = seeded_repo();
+    for name in [
+        "context",
+        "constraints",
+        "rejected",
+        "directives",
+        "tested",
+        "coverage",
+    ] {
+        let assert = repo
+            .lore()
+            .args([name, "--scope", "auth", "--json"])
+            .assert()
+            .success();
+        assert_eq!(
+            json(&assert.get_output().stdout)["target"],
+            "scope:auth",
+            "{name}"
+        );
+    }
+
+    repo.lore()
+        .arg("constraints")
+        .assert()
+        .code(1)
+        .stderr("error: Missing target: pass a <target> path or --scope <name>.\n(exit code 1)\n");
+}
+
+#[test]
 fn scope_query_max_commits_counts_only_commits_in_scope() {
     // The newest Lore commit is in another scope. With the scope pushed down
     // to git, --max-commits 1 counts only in-scope commits, so the newest

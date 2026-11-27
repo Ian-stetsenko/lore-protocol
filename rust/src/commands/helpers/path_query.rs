@@ -15,7 +15,7 @@ use crate::services::supersession_resolver::SupersessionResolver;
 use crate::types::config::LoreConfig;
 use crate::types::output::{FormattableQueryResult, VisibleTrailers};
 use crate::types::query::{PathQueryOptions, QueryResult, ResultTargetType};
-use crate::util::Result;
+use crate::util::{LoreError, Result};
 
 pub struct PathQueryDeps<'a> {
     pub atom_repository: &'a AtomRepository<'a>,
@@ -47,21 +47,29 @@ pub fn execute_path_query(
 ) -> Result<i32> {
     let options = to_query_options(args);
 
-    // Step 1: resolve the target or use --scope
-    let (mut atoms, target_type, target_display) = match &options.scope {
-        Some(scope) => (
+    // Step 1: resolve the target or use --scope (--scope wins when both are
+    // given; an empty value counts as absent, JS truthiness)
+    let scope = options.scope.as_deref().filter(|s| !s.is_empty());
+    let target = args.target.as_deref().filter(|t| !t.is_empty());
+    let (mut atoms, target_type, target_display) = match (scope, target) {
+        (Some(scope), _) => (
             deps.atom_repository.find_by_scope(scope, &options)?,
             ResultTargetType::Global,
             format!("scope:{scope}"),
         ),
-        None => {
-            let parsed = deps.path_resolver.parse_target(&args.target);
+        (None, None) => {
+            return Err(LoreError::new(
+                "Missing target: pass a <target> path or --scope <name>.",
+            ))
+        }
+        (None, Some(target)) => {
+            let parsed = deps.path_resolver.parse_target(target);
             let git_log_args = deps.path_resolver.to_git_log_args(&parsed);
             (
                 deps.atom_repository
                     .find_by_target(&git_log_args, &options)?,
                 ResultTargetType::Target(parsed.target_type),
-                args.target.clone(),
+                target.to_owned(),
             )
         }
     };

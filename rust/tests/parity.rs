@@ -1094,3 +1094,23 @@ fn parity_for_stale_threshold_overrides() {
     ));
     assert_parity(linear_seeded, cases);
 }
+
+#[test]
+fn parity_for_scope_without_a_target() {
+    let commands = [
+        "context",
+        "constraints",
+        "rejected",
+        "directives",
+        "tested",
+        "coverage",
+    ];
+    let mut cases: Vec<Case> = commands
+        .iter()
+        .map(|name| case(&[name, "--scope", "auth"]))
+        .collect();
+    cases.extend(commands.iter().map(|name| case(&[name])));
+    cases.push(case(&["context", "src", "--scope", "auth"]));
+    cases.push(case(&["context", "--scope", ""]));
+    assert_parity(linear_seeded, both_formats(cases));
+}

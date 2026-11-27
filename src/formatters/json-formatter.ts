@@ -177,6 +177,15 @@ export class JsonFormatter implements IOutputFormatter {
     );
   }
 
+  /**
+   * Structured formatters carry warnings in the result payload (e.g. the
+   * `warnings` array of a success result), never as a separate stderr
+   * document, so there is nothing to print here.
+   */
+  formatWarnings(_messages: readonly ErrorMessage[]): string {
+    return '';
+  }
+
   private serializeTrailers(
     trailers: LoreTrailers,
     visibleTrailers: readonly string[] | 'all',

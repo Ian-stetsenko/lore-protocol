@@ -4,6 +4,7 @@ import { registerCommitCommand } from '../../../src/commands/commit.js';
 import { ValidationError, GitError } from '../../../src/util/errors.js';
 import { CommitBuilder } from '../../../src/services/commit-builder.js';
 import { JsonFormatter } from '../../../src/formatters/json-formatter.js';
+import { TextFormatter } from '../../../src/formatters/text-formatter.js';
 import { AtomRepository } from '../../../src/services/atom-repository.js';
 import { TrailerParser } from '../../../src/services/trailer-parser.js';
 import { CommitInputResolver } from '../../../src/services/commit-input-resolver.js';
@@ -45,6 +46,7 @@ function createMockFormatter(): IOutputFormatter {
     formatMetricsResult: vi.fn().mockReturnValue(''),
     formatSuccess: vi.fn().mockReturnValue(''),
     formatError: vi.fn().mockReturnValue(''),
+    formatWarnings: vi.fn().mockReturnValue(''),
   };
 }
 
@@ -795,5 +797,104 @@ describe('lore commit reference validation robustness', () => {
 
     expect(deps.gitClient.commit).toHaveBeenCalledTimes(1);
     expect(resolveSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('lore commit warning surfacing', () => {
+  const INTENT_WARNING = {
+    severity: 'warning',
+    rule: 'intent-length',
+    message: 'Intent exceeds 72 characters (got 80)',
+  } as const;
+  const TRAILER_WARNING = {
+    severity: 'warning',
+    rule: 'required-trailer',
+    message: 'Required trailer "Constraint" is missing',
+  } as const;
+
+  let consoleLog: ReturnType<typeof vi.spyOn>;
+  let consoleError: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function lastJsonPayload(): Record<string, unknown> {
+    const calls = consoleLog.mock.calls;
+    return JSON.parse(String(calls[calls.length - 1][0])) as Record<string, unknown>;
+  }
+
+  it('prints each validation warning on stderr in text mode and still commits', async () => {
+    const deps = createDeps({ formatter: new TextFormatter({ color: false }) });
+    vi.mocked(deps.commitBuilder.validate).mockReturnValue([INTENT_WARNING, TRAILER_WARNING]);
+
+    await runCommitCommand(['--intent', 'plain commit'], deps);
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError.mock.calls[0][0]).toBe(
+      [
+        'warning: Intent exceeds 72 characters (got 80)',
+        'warning: Required trailer "Constraint" is missing',
+      ].join('\n'),
+    );
+    expect(deps.gitClient.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('prints warnings before running git commit', async () => {
+    const deps = createDeps({ formatter: new TextFormatter({ color: false }) });
+    vi.mocked(deps.commitBuilder.validate).mockReturnValue([INTENT_WARNING]);
+
+    await runCommitCommand(['--intent', 'plain commit'], deps);
+
+    const [warnOrder] = consoleError.mock.invocationCallOrder;
+    const [commitOrder] = vi.mocked(deps.gitClient.commit).mock.invocationCallOrder;
+    expect(warnOrder).toBeLessThan(commitOrder);
+  });
+
+  it('prints nothing on stderr in text mode when there are no warnings', async () => {
+    const deps = createDeps({ formatter: new TextFormatter({ color: false }) });
+
+    await runCommitCommand(['--intent', 'plain commit'], deps);
+
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it('carries warnings in the JSON success payload and writes nothing to stderr', async () => {
+    const deps = createDeps({ formatter: new JsonFormatter() });
+    vi.mocked(deps.commitBuilder.validate).mockReturnValue([INTENT_WARNING]);
+
+    await runCommitCommand(['--intent', 'plain commit'], deps);
+
+    expect(consoleError).not.toHaveBeenCalled();
+    const payload = lastJsonPayload();
+    expect(payload.success).toBe(true);
+    expect(payload.warnings).toEqual([INTENT_WARNING]);
+  });
+
+  it('always includes an empty warnings array in JSON when there are no warnings', async () => {
+    const deps = createDeps({ formatter: new JsonFormatter() });
+
+    await runCommitCommand(['--intent', 'plain commit'], deps);
+
+    expect(lastJsonPayload().warnings).toEqual([]);
+  });
+
+  it('surfaces warnings produced by the real CommitBuilder rules', async () => {
+    const deps = createDeps({
+      formatter: new JsonFormatter(),
+      commitBuilder: createRealValidatingBuilder(),
+      resolvedInput: { intent: `feat: ${'x'.repeat(80)}` },
+    });
+    vi.spyOn(deps.commitBuilder, 'build').mockReturnValue({ message: 'built', loreId: 'a1b2c3d4' });
+
+    await runCommitCommand(['--intent', 'long'], deps);
+
+    const warnings = lastJsonPayload().warnings as Array<{ rule: string; severity: string }>;
+    expect(warnings.some((w) => w.rule === 'intent-length' && w.severity === 'warning')).toBe(true);
   });
 });

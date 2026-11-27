@@ -58,6 +58,7 @@ function buildHarness(commits: readonly RawCommit[] = []): Harness {
       (_code: number, messages: readonly { severity: string; message: string }[]) =>
         messages.map((m) => `${m.severity}: ${m.message}`).join('\n'),
     ),
+    formatWarnings: vi.fn(() => ''),
   } as IOutputFormatter;
 
   const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

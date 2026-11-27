@@ -215,6 +215,11 @@ export class TextFormatter implements IOutputFormatter {
     return lines.join('\n');
   }
 
+  /** One `warning: <message>` line per entry, identical to formatError(0, ...). */
+  formatWarnings(messages: readonly ErrorMessage[]): string {
+    return this.formatError(0, messages);
+  }
+
   private formatAtomHeader(atom: LoreAtom, superseded: boolean): string {
     const dateStr = this.formatDate(atom.date);
     const header = `\u2500\u2500 ${atom.loreId} (${dateStr}, ${atom.author}) `;

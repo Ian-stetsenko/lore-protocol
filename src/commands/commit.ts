@@ -125,7 +125,7 @@ export function registerCommitCommand(
         const message = loreId
           ? `Commit amended: ${result.hash} | Lore-id: ${loreId}`
           : `Commit amended: ${result.hash}`;
-        console.log(formatter.formatSuccess(message, { hash: result.hash, loreId }));
+        console.log(formatter.formatSuccess(message, { hash: result.hash, loreId, warnings: [] }));
         return;
       }
 
@@ -209,6 +209,15 @@ export function registerCommitCommand(
         throw new ValidationError('Commit input validation failed', allIssues);
       }
 
+      // Warnings never block the commit, but they must reach the user:
+      // text mode prints them on stderr, structured formats carry them in
+      // the success payload below.
+      const warnings = allIssues.filter((issue) => issue.severity === 'warning');
+      const warningOutput = formatter.formatWarnings(warnings);
+      if (warningOutput) {
+        console.error(warningOutput);
+      }
+
       // Build the commit message (reuse existing Lore-id on amend)
       const { message: commitMessage, loreId } = commitBuilder.build(input, existingLoreId ?? undefined);
 
@@ -220,7 +229,7 @@ export function registerCommitCommand(
       console.log(
         formatter.formatSuccess(
           `Commit ${verb}: ${result.hash} | Lore-id: ${loreId}`,
-          { hash: result.hash, loreId },
+          { hash: result.hash, loreId, warnings },
         ),
       );
     });

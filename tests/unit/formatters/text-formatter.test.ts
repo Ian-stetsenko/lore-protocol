@@ -399,6 +399,29 @@ describe('TextFormatter', () => {
     });
   });
 
+  describe('formatWarnings', () => {
+    it('should render one warning line per message', () => {
+      const output = formatter.formatWarnings([
+        { severity: 'warning', message: 'Intent exceeds 72 characters (got 80)' },
+        { severity: 'warning', message: 'Required trailer "Constraint" is missing' },
+      ]);
+
+      expect(output).toBe(
+        'warning: Intent exceeds 72 characters (got 80)\nwarning: Required trailer "Constraint" is missing',
+      );
+    });
+
+    it('should match formatError with exit code 0', () => {
+      const messages = [{ severity: 'warning' as const, message: 'Minor issue' }];
+
+      expect(formatter.formatWarnings(messages)).toBe(formatter.formatError(0, messages));
+    });
+
+    it('should return an empty string when there are no warnings', () => {
+      expect(formatter.formatWarnings([])).toBe('');
+    });
+  });
+
   describe('color support', () => {
     it('should produce output with color disabled', () => {
       const noColor = new TextFormatter({ color: false });

@@ -607,6 +607,20 @@ mod format_error {
 }
 
 // ---------------------------------------------------------------------------
+// formatWarnings
+// ---------------------------------------------------------------------------
+mod format_warnings {
+    use super::*;
+
+    #[test]
+    fn should_return_an_empty_string_because_warnings_live_in_the_payload() {
+        let output = formatter().format_warnings(&[ErrorMessage::warning("Intent too long")]);
+
+        assert_eq!(output, "");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // JSON format validity
 // ---------------------------------------------------------------------------
 mod json_format_validity {

@@ -311,7 +311,14 @@ fn json_output_preserves_key_order() {
     let success = run(&["commit", "--intent", "feat: c", "--json"]);
     assert_eq!(
         keys(&success),
-        ["lore_version", "success", "message", "hash", "loreId"]
+        [
+            "lore_version",
+            "success",
+            "message",
+            "hash",
+            "loreId",
+            "warnings"
+        ]
     );
 
     // Raw stdout, independent of the JSON parser: keys appear in order.
@@ -437,6 +444,43 @@ fn commit_with_flags_writes_trailers() {
     assert!(message.contains("Tested: unit"));
     assert!(message.contains("Confidence: high"));
     assert!(message.contains("Scope-risk: wide"));
+}
+
+#[test]
+fn commit_surfaces_warnings_without_blocking() {
+    let repo = Repo::new();
+    repo.commit("README.md", "chore: initial");
+    let intent = format!("feat: {}", "x".repeat(80));
+
+    repo.write("a.ts", "a\n");
+    repo.git(&["add", "-A"]);
+    repo.lore()
+        .args(["commit", "--intent", &intent])
+        .assert()
+        .success()
+        .stderr("warning: Intent exceeds 72 characters (got 86)\n");
+
+    repo.write("b.ts", "b\n");
+    repo.git(&["add", "-A"]);
+    let assert = repo
+        .lore()
+        .args(["commit", "--intent", &intent, "--json"])
+        .assert()
+        .success()
+        .stderr("");
+    let out = json(&assert.get_output().stdout);
+    assert_eq!(
+        keys(&out),
+        [
+            "lore_version",
+            "success",
+            "message",
+            "hash",
+            "loreId",
+            "warnings"
+        ]
+    );
+    assert_eq!(out["warnings"][0]["rule"], "intent-length");
 }
 
 #[test]

@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexSet;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::cli::CommitArgs;
 use crate::commands::{Io, EXIT_OK};
@@ -65,7 +65,7 @@ pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<
         };
         io.print(&deps.formatter.format_success(
             &message,
-            Some(&success_data(&result.hash, lore_id.as_deref())),
+            Some(&success_data(&result.hash, lore_id.as_deref(), &[])),
         ))?;
         return Ok(EXIT_OK);
     }
@@ -87,13 +87,29 @@ pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<
     let input = deps.commit_input_resolver.resolve(&options)?;
     let mut issues = deps.commit_builder.validate(&input);
     if !options.no_verify_refs {
-        issues.extend(check_references(&input, deps, io)?);
+        issues.extend(check_references(&input, deps)?);
     }
     if issues.iter().any(|i| i.severity == Severity::Error) {
         return Err(LoreError::validation(
             "Commit input validation failed",
             issues,
         ));
+    }
+
+    // Warnings never block the commit, but they must reach the user: text
+    // mode prints them on stderr, structured formats carry them in the
+    // success payload below.
+    let warnings: Vec<ValidationIssue> = issues
+        .into_iter()
+        .filter(|issue| issue.severity == Severity::Warning)
+        .collect();
+    let warning_messages: Vec<ErrorMessage> = warnings
+        .iter()
+        .map(|issue| ErrorMessage::warning(issue.message.clone()))
+        .collect();
+    let warning_output = deps.formatter.format_warnings(&warning_messages);
+    if !warning_output.is_empty() {
+        io.eprint(&warning_output)?;
     }
 
     // Build the message (reusing the Lore-id on amend) and commit
@@ -115,7 +131,7 @@ pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<
     );
     io.print(&deps.formatter.format_success(
         &message,
-        Some(&success_data(&result.hash, Some(&built.lore_id))),
+        Some(&success_data(&result.hash, Some(&built.lore_id), &warnings)),
     ))?;
     Ok(EXIT_OK)
 }
@@ -123,19 +139,14 @@ pub fn run(args: &CommitArgs, deps: &CommitDeps<'_>, io: &mut Io<'_>) -> Result<
 /// `reference-resolves` issues for reference ids that resolve on no ref.
 ///
 /// Best-effort: a git failure building the index means "could not check",
-/// not "check failed", so it prints a warning and yields no issues. Every
-/// other error propagates.
-fn check_references(
-    input: &CommitInput,
-    deps: &CommitDeps<'_>,
-    io: &mut Io<'_>,
-) -> Result<Vec<ValidationIssue>> {
+/// not "check failed", so it yields one `reference-check-skipped` warning,
+/// an advisory issue like any other. Every other error propagates.
+fn check_references(input: &CommitInput, deps: &CommitDeps<'_>) -> Result<Vec<ValidationIssue>> {
     match unresolved_reference_issues(input, deps.atom_repository) {
-        Err(LoreError::Git(_)) => {
-            let warning = ErrorMessage::warning(REFERENCE_CHECK_SKIPPED);
-            io.eprint(&deps.formatter.format_error(0, &[warning]))?;
-            Ok(Vec::new())
-        }
+        Err(LoreError::Git(_)) => Ok(vec![ValidationIssue::warning(
+            "reference-check-skipped",
+            REFERENCE_CHECK_SKIPPED,
+        )]),
         result => result,
     }
 }
@@ -205,7 +216,12 @@ fn collect_reference_pairs(input: &CommitInput) -> Vec<(TrailerKey, LoreId)> {
         .collect()
 }
 
-fn success_data(hash: &str, lore_id: Option<&str>) -> Map<String, Value> {
+/// The success payload: `warnings` is always present, `[]` when empty.
+fn success_data(
+    hash: &str,
+    lore_id: Option<&str>,
+    warnings: &[ValidationIssue],
+) -> Map<String, Value> {
     let mut data = Map::new();
     data.insert("hash".to_owned(), Value::String(hash.to_owned()));
     data.insert(
@@ -214,6 +230,17 @@ fn success_data(hash: &str, lore_id: Option<&str>) -> Map<String, Value> {
             .map(|id| Value::String(id.to_owned()))
             .unwrap_or(Value::Null),
     );
+    let warnings: Vec<Value> = warnings
+        .iter()
+        .map(|issue| {
+            json!({
+                "severity": issue.severity.as_str(),
+                "rule": issue.rule,
+                "message": issue.message,
+            })
+        })
+        .collect();
+    data.insert("warnings".to_owned(), Value::Array(warnings));
     data
 }
 

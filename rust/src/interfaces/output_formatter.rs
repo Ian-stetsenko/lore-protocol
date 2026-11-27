@@ -43,4 +43,7 @@ pub trait OutputFormatter {
         data: Option<&serde_json::Map<String, serde_json::Value>>,
     ) -> String;
     fn format_error(&self, code: i32, messages: &[ErrorMessage]) -> String;
+    /// Advisory warnings for a command that still succeeds. Empty when there
+    /// is nothing to print on stderr; callers print only a non-empty result.
+    fn format_warnings(&self, messages: &[ErrorMessage]) -> String;
 }

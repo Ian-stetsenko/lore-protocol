@@ -460,6 +460,11 @@ impl OutputFormatter for TextFormatter {
 
         lines.join("\n")
     }
+
+    /// One `warning: <message>` line per entry, identical to `format_error(0, ..)`.
+    fn format_warnings(&self, messages: &[ErrorMessage]) -> String {
+        self.format_error(0, messages)
+    }
 }
 
 /// A git hash (`^[0-9a-f]{8,}$`) abbreviated to its first 8 characters; any

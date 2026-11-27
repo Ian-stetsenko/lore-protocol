@@ -681,6 +681,34 @@ mod format_error {
 }
 
 // ---------------------------------------------------------------------------
+// formatWarnings
+// ---------------------------------------------------------------------------
+mod format_warnings {
+    use super::*;
+
+    #[test]
+    fn should_render_one_warning_line_per_entry_like_format_error_0() {
+        let messages = [
+            ErrorMessage::warning("Intent exceeds 72 characters (got 80)"),
+            ErrorMessage::warning("Required trailer \"Ticket\" is missing"),
+        ];
+
+        let output = formatter().format_warnings(&messages);
+
+        assert_eq!(output, formatter().format_error(0, &messages));
+        assert_eq!(
+            output,
+            "warning: Intent exceeds 72 characters (got 80)\nwarning: Required trailer \"Ticket\" is missing"
+        );
+    }
+
+    #[test]
+    fn should_return_an_empty_string_for_no_warnings() {
+        assert_eq!(formatter().format_warnings(&[]), "");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // color support
 // ---------------------------------------------------------------------------
 mod color_support {

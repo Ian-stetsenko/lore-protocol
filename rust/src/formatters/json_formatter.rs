@@ -290,6 +290,13 @@ impl OutputFormatter for JsonFormatter {
             "messages": messages,
         }))
     }
+
+    /// Structured output carries warnings in the result payload (the
+    /// `warnings` array of a success result), never as a separate stderr
+    /// document, so there is nothing to print.
+    fn format_warnings(&self, _messages: &[ErrorMessage]) -> String {
+        String::new()
+    }
 }
 
 #[cfg(test)]

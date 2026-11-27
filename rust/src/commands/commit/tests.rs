@@ -351,3 +351,49 @@ fn should_commit_on_amend_despite_unresolvable_ids_when_no_verify_refs_is_passed
         }
     );
 }
+
+// ---- warnings (TS v0.8.1: commit surfaces validation warnings) -------------
+
+fn stdout_json(h: &Harness) -> serde_json::Value {
+    serde_json::from_str(&h.stdout()).expect("json stdout")
+}
+
+#[test]
+fn json_success_carries_an_empty_warnings_array_when_there_are_none() {
+    let mut h = Harness::new("");
+    h.run(&["--intent", "feat: short"]).expect("ok");
+    assert_eq!(stdout_json(&h)["warnings"], serde_json::json!([]));
+    assert!(h.err.is_empty());
+}
+
+#[test]
+fn json_success_carries_the_warnings_and_writes_nothing_to_stderr() {
+    let mut h = Harness::new("");
+    let intent = format!("feat: {}", "x".repeat(80));
+    h.run(&["--intent", &intent]).expect("warnings never block");
+    assert_eq!(
+        stdout_json(&h)["warnings"],
+        serde_json::json!([{
+            "severity": "warning",
+            "rule": "intent-length",
+            "message": "Intent exceeds 72 characters (got 86)",
+        }])
+    );
+    assert!(h.err.is_empty());
+    assert_eq!(h.git.commit_calls().len(), 1);
+}
+
+#[test]
+fn amend_no_edit_json_success_has_an_empty_warnings_array() {
+    let mut h = Harness::new(LORE_HEAD);
+    h.run(&["--amend", "--no-edit"]).expect("ok");
+    assert_eq!(stdout_json(&h)["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn amend_with_input_carries_warnings() {
+    let mut h = Harness::new(LORE_HEAD);
+    let intent = format!("feat: {}", "y".repeat(80));
+    h.run(&["--amend", "--intent", &intent]).expect("ok");
+    assert_eq!(stdout_json(&h)["warnings"][0]["rule"], "intent-length");
+}

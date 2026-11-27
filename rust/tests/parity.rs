@@ -882,6 +882,12 @@ fn parity_for_commit() {
             case(&["commit"]).stdin(
                 r#"{"intent": "feat: json", "trailers": {"Tested": ["t"], "Ticket": "T-9"}}"#,
             ),
+            // Warnings: stderr lines in text mode, the payload array in JSON.
+            case(&[
+                "commit",
+                "--intent",
+                "feat: an intent that is far too long to fit within the seventy-two limit",
+            ]),
         ])
         .into_iter()
         .map(|c| c.compare(Compare::GeneratedIds)),

@@ -10,7 +10,9 @@
 use std::cell::{Cell, RefCell};
 
 use super::*;
+use crate::formatters::text_formatter::TextFormatter;
 use crate::interfaces::git_client::RawCommit;
+use crate::interfaces::output_formatter::OutputFormatter;
 use crate::interfaces::prompt::{Prompt, TextPromptOptions};
 use crate::test_support::raw_commit;
 use crate::types::output::ValidationIssue;
@@ -51,6 +53,7 @@ fn unborn_head_git() -> MockGitClient {
 
 struct Outcome {
     result: Result<i32>,
+    stdout: String,
     stderr: String,
 }
 
@@ -68,6 +71,15 @@ impl Outcome {
 }
 
 fn run_commit_with(git: &MockGitClient, prompt: &dyn Prompt, args: &[&str]) -> Outcome {
+    run_commit_formatted(git, prompt, &JsonFormatter::new(), args)
+}
+
+fn run_commit_formatted(
+    git: &MockGitClient,
+    prompt: &dyn Prompt,
+    formatter: &dyn OutputFormatter,
+    args: &[&str],
+) -> Outcome {
     let parser = TrailerParser::new();
     let generator = FixedLoreIdGenerator::single("a1b2c3d4");
     let config = LoreConfig::default();
@@ -75,11 +87,10 @@ fn run_commit_with(git: &MockGitClient, prompt: &dyn Prompt, args: &[&str]) -> O
     let resolver = CommitInputResolver::new(prompt);
     let reader = HeadLoreIdReader::new(git, &parser);
     let repository = AtomRepository::new(git, &parser, Vec::new());
-    let formatter = JsonFormatter::new();
     let deps = CommitDeps {
         commit_builder: &builder,
         git_client: git,
-        formatter: &formatter,
+        formatter,
         commit_input_resolver: &resolver,
         head_lore_id_reader: &reader,
         atom_repository: &repository,
@@ -90,6 +101,7 @@ fn run_commit_with(git: &MockGitClient, prompt: &dyn Prompt, args: &[&str]) -> O
     let result = run(&parse(args), &deps, &mut io);
     Outcome {
         result,
+        stdout: String::from_utf8_lossy(&out).into_owned(),
         stderr: String::from_utf8_lossy(&err).into_owned(),
     }
 }
@@ -466,17 +478,42 @@ fn skips_validation_with_a_pinned_warning_and_commits_when_the_lore_id_index_can
     let git = MockGitClient::new();
     git.set_log_error("git log failed: transient index build failure");
 
-    let outcome = run_commit(&git, &with_intent(&["--supersedes", "deadbeef"]));
+    let outcome = run_commit_formatted(
+        &git,
+        &MockPrompt::new(),
+        &TextFormatter::new(false),
+        &with_intent(&["--supersedes", "deadbeef"]),
+    );
 
     assert_eq!(outcome.result.expect("commits"), 0);
-    // "Could not check" is distinct from "check failed": one pinned warning
-    // through the formatter to stderr, then the commit proceeds.
-    let expected = JsonFormatter::new().format_error(0, &[ErrorMessage::warning(SKIPPED_WARNING)]);
-    assert_eq!(outcome.stderr, format!("{expected}\n"));
+    // "Could not check" is distinct from "check failed": one pinned
+    // reference-check-skipped warning through format_warnings, then the
+    // commit proceeds.
+    assert_eq!(outcome.stderr, format!("warning: {SKIPPED_WARNING}\n"));
     assert_eq!(git.commit_calls().len(), 1);
     // The near-match pass never runs after the index build failed: the
     // failed build is the only history read (resolve, HEAD walk, delta).
     assert_eq!(git.log_call_count(), 2);
+}
+
+#[test]
+fn carries_the_skipped_warning_in_the_json_payload_and_keeps_stderr_empty() {
+    let git = MockGitClient::new();
+    git.set_log_error("git log failed: transient index build failure");
+
+    let outcome = run_commit(&git, &with_intent(&["--supersedes", "deadbeef"]));
+
+    assert_eq!(outcome.result.expect("commits"), 0);
+    assert!(outcome.stderr.is_empty(), "{}", outcome.stderr);
+    let payload: serde_json::Value = serde_json::from_str(&outcome.stdout).expect("json");
+    assert_eq!(
+        payload["warnings"],
+        serde_json::json!([{
+            "severity": "warning",
+            "rule": "reference-check-skipped",
+            "message": SKIPPED_WARNING,
+        }])
+    );
 }
 
 #[test]

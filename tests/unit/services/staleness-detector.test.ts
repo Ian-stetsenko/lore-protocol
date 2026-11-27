@@ -234,6 +234,81 @@ describe('StalenessDetector', () => {
       });
     });
 
+    describe('threshold overrides', () => {
+      function daysAgo(days: number): Date {
+        const date = new Date();
+        date.setDate(date.getDate() - days);
+        return date;
+      }
+
+      it('should let an olderThan override flag atoms the config threshold would not', async () => {
+        // Atom is 60 days old: under the 6m config default, over a 30d override
+        const atom = makeAtom({ date: daysAgo(60) });
+
+        const result = await detector.analyze([atom], makeSupersessionMap([]), { olderThan: '30d' });
+
+        expect(result).toHaveLength(1);
+        const ageReason = result[0].reasons.find((r) => r.signal === 'age');
+        expect(ageReason?.description).toContain('(threshold: 30d)');
+      });
+
+      it('should let an olderThan override suppress atoms the config threshold would flag', async () => {
+        // Atom is 1 year-ish old: over the 6m default, under a 2y override
+        const atom = makeAtom({ date: daysAgo(400) });
+
+        const result = await detector.analyze([atom], makeSupersessionMap([]), { olderThan: '2y' });
+
+        expect(result).toHaveLength(0);
+      });
+
+      it('should let a driftThreshold override replace the config threshold', async () => {
+        vi.mocked(gitClient.countCommitsSince).mockResolvedValue(10);
+        const atom = makeAtom({ date: new Date(), filesChanged: ['src/auth.ts'] });
+
+        const result = await detector.analyze([atom], makeSupersessionMap([]), { driftThreshold: 3 });
+
+        expect(result).toHaveLength(1);
+        const driftReason = result[0].reasons.find((r) => r.signal === 'drift');
+        expect(driftReason?.description).toContain('(threshold: 3)');
+      });
+
+      it('should accept a driftThreshold override of 0', async () => {
+        vi.mocked(gitClient.countCommitsSince).mockResolvedValue(1);
+        const atom = makeAtom({ date: new Date(), filesChanged: ['src/auth.ts'] });
+
+        const result = await detector.analyze([atom], makeSupersessionMap([]), { driftThreshold: 0 });
+
+        expect(result[0].reasons.some((r) => r.signal === 'drift' && r.description.includes('(threshold: 0)'))).toBe(true);
+      });
+
+      it('should keep config values for fields that are omitted or undefined', async () => {
+        config = createDefaultConfig({ olderThan: '30d', driftThreshold: 5 });
+        detector = new StalenessDetector(gitClient, config);
+        vi.mocked(gitClient.countCommitsSince).mockResolvedValue(10);
+        const atom = makeAtom({ date: daysAgo(60), filesChanged: ['src/auth.ts'] });
+
+        const result = await detector.analyze([atom], makeSupersessionMap([]), {
+          olderThan: undefined,
+          driftThreshold: undefined,
+        });
+
+        const descriptions = result[0].reasons.map((r) => r.description);
+        expect(descriptions.some((d) => d.includes('(threshold: 30d)'))).toBe(true);
+        expect(descriptions.some((d) => d.includes('(threshold: 5)'))).toBe(true);
+      });
+
+      it('should fall back to 6 months for an invalid config olderThan', async () => {
+        config = createDefaultConfig({ olderThan: 'soon' });
+        detector = new StalenessDetector(gitClient, config);
+
+        const recent = await detector.analyze([makeAtom({ date: daysAgo(150) })], makeSupersessionMap([]));
+        const old = await detector.analyze([makeAtom({ date: daysAgo(200) })], makeSupersessionMap([]));
+
+        expect(recent).toHaveLength(0);
+        expect(old).toHaveLength(1);
+      });
+    });
+
     describe('low confidence signal', () => {
       it('should detect atoms with Confidence: low', async () => {
         const atom = makeAtom({

@@ -9,6 +9,7 @@ import type { PathQueryOptions } from '../types/query.js';
 import type { FormattableStalenessResult, StaleAtomReport } from '../types/output.js';
 import { STALE_SIGNAL } from '../util/constants.js';
 import { mergeOptions } from './helpers/merge-options.js';
+import { parseDurationOption, parseNonNegativeInt } from './helpers/option-parsers.js';
 
 interface StaleCommandOptions {
   readonly olderThan?: string;
@@ -34,8 +35,16 @@ export function registerStaleCommand(
   program
     .command('stale [target]')
     .description('Flag potentially outdated knowledge')
-    .option('--older-than <duration>', 'Time-based staleness threshold (e.g., 6m, 1y)')
-    .option('--drift <n>', 'File drift threshold (commits since atom)', parseInt)
+    .option(
+      '--older-than <duration>',
+      'Flag atoms older than this; overrides [stale] older_than (e.g., 30d, 2w, 6m, 1y)',
+      parseDurationOption,
+    )
+    .option(
+      '--drift <n>',
+      'Flag files with more than n commits since the atom; overrides [stale] drift_threshold',
+      parseNonNegativeInt,
+    )
     .option('--low-confidence', 'Flag low-confidence atoms')
     .action(async (target: string | undefined, _options: StaleCommandOptions, command: Command) => {
       const options = mergeOptions<StaleCommandOptions>(command);
@@ -66,13 +75,14 @@ export function registerStaleCommand(
       // Filter to active atoms only (stale check on superseded atoms is not useful)
       const activeAtoms = supersessionResolver.filterActive(atoms, supersessionMap);
 
-      // Run staleness analysis
+      // Run staleness analysis; flag values override the config thresholds
       let reports: StaleAtomReport[] = await stalenessDetector.analyze(
         activeAtoms,
         supersessionMap,
+        { olderThan: options.olderThan, driftThreshold: options.drift },
       );
 
-      // Apply additional CLI-level filters: keep reports that match ANY active signal
+      // The same flags also select signals: keep reports that match ANY active signal
       const activeSignals: string[] = [];
       if (options.olderThan) activeSignals.push(STALE_SIGNAL.AGE);
       if (options.drift !== undefined) activeSignals.push(STALE_SIGNAL.DRIFT);

@@ -1,3 +1,5 @@
+import { parseDurationMs } from '../../util/duration.js';
+
 /**
  * Commander option coercers shared by commands.
  *
@@ -23,4 +25,12 @@ export function parseNonNegativeInt(value: string): number {
     throw new Error(`Expected a non-negative integer, got "${value}"`);
   }
   return Number(value);
+}
+
+/** Validate a CLI duration such as 30d, 2w, 6m or 1y; returns the value unchanged. */
+export function parseDurationOption(value: string): string {
+  if (parseDurationMs(value) === null) {
+    throw new Error(`Expected a duration like 30d, 2w, 6m or 1y, got "${value}"`);
+  }
+  return value;
 }

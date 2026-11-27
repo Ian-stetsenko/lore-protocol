@@ -246,14 +246,16 @@ Pre-built instruction files ship with the package in `skills/`. Copy one file in
 
 | Agent | Command |
 |-------|---------|
-| **Claude Code** | `cat node_modules/lore-protocol/skills/adapters/claude-code.md >> CLAUDE.md` |
-| **Cursor** | `cp node_modules/lore-protocol/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
-| **GitHub Copilot** | `cat node_modules/lore-protocol/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
-| **Windsurf** | `cat node_modules/lore-protocol/skills/adapters/windsurf.md >> .windsurfrules` |
+| **Claude Code** | `cat "$(npm root -g)"/lore-protocol/skills/adapters/claude-code.md >> CLAUDE.md` |
+| **Cursor** | `cp "$(npm root -g)"/lore-protocol/skills/adapters/cursor.mdc .cursor/rules/lore.mdc` |
+| **GitHub Copilot** | `cat "$(npm root -g)"/lore-protocol/skills/adapters/github-copilot.md >> .github/copilot-instructions.md` |
+| **Windsurf** | `cat "$(npm root -g)"/lore-protocol/skills/adapters/windsurf.md >> .windsurfrules` |
 | **Aider** | See `skills/adapters/aider.md` |
 | **Other** | Paste `skills/adapters/generic.md` into your agent's system prompt |
 
-Each adapter teaches the agent to: query `lore constraints`/`rejected`/`directives` before modifying code, respect what it finds, and write Lore-enriched commits via JSON stdin. See `skills/README.md` for details.
+Each adapter teaches the agent to: query `lore constraints`/`rejected`/`directives` before modifying code, respect what it finds, and write Lore-enriched commits from JSON input. See `skills/README.md` for details.
+
+The paths above assume a global install (`npm install -g lore-protocol`). For a project-local install, use `node_modules/lore-protocol/skills/...` instead.
 
 ## Paper
 
